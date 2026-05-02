@@ -1,6 +1,6 @@
 {
   "name": "evermore",
-  "description": "An Electron application with React and TypeScript",
+  "description": "A simple terminal workspace for developers.",
   "version": "0.0.1",
   "author": "ytakahashi",
   "dependencies": {

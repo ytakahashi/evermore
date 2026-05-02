@@ -1,4 +1,4 @@
-import { app, shell, BrowserWindow, ipcMain } from 'electron';
+import { app, shell, BrowserWindow } from 'electron';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { electronApp, optimizer, is } from '@electron-toolkit/utils';
@@ -10,13 +10,17 @@ const _dirname = dirname(_filename);
 function createWindow(): void {
   // Create the browser window.
   const mainWindow = new BrowserWindow({
-    width: 900,
-    height: 670,
+    width: 1024,
+    height: 768,
     show: false,
     autoHideMenuBar: true,
+    titleBarStyle: 'hidden',
+    trafficLightPosition: { x: 12, y: 12 },
     ...(process.platform === 'linux' ? { icon } : {}),
     webPreferences: {
       preload: join(_dirname, '../preload/index.mjs'),
+      contextIsolation: true,
+      nodeIntegration: false,
       sandbox: false,
     },
   });
@@ -44,7 +48,7 @@ function createWindow(): void {
 // Some APIs can only be used after this event occurs.
 app.whenReady().then(() => {
   // Set app user model id for windows
-  electronApp.setAppUserModelId('com.electron');
+  electronApp.setAppUserModelId('net.ytakahashi.evermore');
 
   // Default open or close DevTools by F12 in development
   // and ignore CommandOrControl + R in production.
@@ -52,9 +56,6 @@ app.whenReady().then(() => {
   app.on('browser-window-created', (_, window) => {
     optimizer.watchWindowShortcuts(window);
   });
-
-  // IPC test
-  ipcMain.on('ping', () => console.log('pong'));
 
   createWindow();
 
