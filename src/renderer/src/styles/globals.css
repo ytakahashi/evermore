@@ -1,0 +1,52 @@
+@import 'tailwindcss';
+
+@theme {
+  /* ── App surfaces ── */
+  --color-background: #020408; /* body → bg-background */
+  --color-surface: #060b1a; /* app base color → bg-surface */
+  --color-panel: #0a1224; /* sidebar, panel, tab bar → bg-panel */
+  --color-raised: #0f1830; /* hover, modal, popover → bg-raised */
+  --color-terminal: #03060e; /* xterm.js background → bg-terminal */
+
+  /* ── Foreground ── */
+  --color-foreground: #eceff8; /* main text → text-foreground */
+  --color-muted: #9aa5ba; /* sub text → text-muted */
+  --color-subtle: #5c6680; /* hint, label → text-subtle */
+  --color-disabled: #3a4258; /* disabled text → text-disabled */
+
+  /* ── Brand ── */
+  --color-brand: #ff6ea0; /* primary action / active → bg-brand, text-brand */
+  --color-brand-hover: #ff85b0;
+  --color-brand-active: #e85788;
+  --color-on-brand: #1a0a12;
+  --color-accent: #4d7bc9;
+
+  /* ── Border ── */
+  --color-border: rgb(255 255 255 / 0.1);
+  --color-border-subtle: rgb(255 255 255 / 0.06);
+  --color-border-strong: rgb(255 255 255 / 0.16);
+  --color-ring: #ff6ea0; /* focus ring */
+
+  /* ── Status ── */
+  --color-success: #4ade80; /* running */
+  --color-neutral: #6b7280; /* stopped */
+  --color-danger: #f87171; /* error */
+  --color-warning: #fbbf24;
+
+  /* ── Fonts ── */
+  --font-sans: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Helvetica Neue', sans-serif;
+  --font-mono: 'SF Mono', 'JetBrains Mono', Menlo, Consolas, monospace;
+}
+
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+  body {
+    background: var(--color-background);
+    color: var(--color-foreground);
+    font-family: var(--font-sans);
+  }
+}
