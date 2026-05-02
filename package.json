@@ -58,7 +58,7 @@
   "scripts": {
     "build": "pnpm run typecheck && electron-vite build",
     "build:mac": "electron-vite build && electron-builder --mac",
-    "build:mac:app": "electron-vite build && electron-builder --mac --dir",
+    "build:mac:dev": "electron-vite build && electron-builder --mac --dir -c electron-builder.dev.yml",
     "build:unpack": "pnpm run build && electron-builder --dir",
     "dev": "electron-vite dev",
     "format": "prettier --check .",
