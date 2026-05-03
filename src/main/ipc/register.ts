@@ -1,5 +1,6 @@
 import type { BrowserWindow } from 'electron';
 import { registerPtyHandlers } from './handlers/pty';
+import { registerWorkspaceHandlers } from './handlers/workspace';
 
 interface RegisterIpcHandlersOptions {
   getWindow: () => BrowserWindow | null;
@@ -13,8 +14,10 @@ interface RegisterIpcHandlersOptions {
  */
 export function registerIpcHandlers(options: RegisterIpcHandlersOptions): () => void {
   const disposePtyHandlers = registerPtyHandlers({ getWindow: options.getWindow });
+  const disposeWorkspaceHandlers = registerWorkspaceHandlers();
 
   return () => {
     disposePtyHandlers();
+    disposeWorkspaceHandlers();
   };
 }

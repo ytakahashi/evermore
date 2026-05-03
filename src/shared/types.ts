@@ -3,6 +3,7 @@ export interface Workspace {
   name: string;
   rootPath: string; // workspace root directory (absolute path)
   tabs: Tab[];
+  panes: Pane[];
   activeTabId: string | null;
   createdAt: number; // unix ms
   updatedAt: number;
