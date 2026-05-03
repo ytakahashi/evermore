@@ -1,11 +1,12 @@
 import { TabBar } from './TabBar';
+import { TerminalView } from '../terminal/TerminalView';
 
 export function MainTerminalArea(): React.JSX.Element {
   return (
-    <main className="flex flex-1 flex-col bg-terminal">
+    <main className="flex min-w-0 flex-1 flex-col bg-terminal">
       <TabBar />
-      <div className="flex flex-1 items-center justify-center text-subtle">
-        <div className="text-lg font-medium">Terminal Area</div>
+      <div className="min-h-0 flex-1">
+        <TerminalView />
       </div>
     </main>
   );

@@ -23,6 +23,8 @@
     "@electron-toolkit/eslint-config-ts": "3.1.0",
     "@electron-toolkit/tsconfig": "2.0.0",
     "@tailwindcss/vite": "4.2.4",
+    "@testing-library/jest-dom": "6.9.1",
+    "@testing-library/react": "16.3.2",
     "@types/node": "25.6.0",
     "@types/react": "19.2.14",
     "@types/react-dom": "19.2.3",
@@ -34,12 +36,14 @@
     "eslint-plugin-react": "7.37.5",
     "eslint-plugin-react-hooks": "7.1.1",
     "eslint-plugin-react-refresh": "0.5.2",
+    "jsdom": "29.1.1",
     "prettier": "3.8.3",
     "react": "19.2.5",
     "react-dom": "19.2.5",
     "tailwindcss": "4.2.4",
     "typescript": "6.0.3",
-    "vite": "8.0.10"
+    "vite": "8.0.10",
+    "vitest": "4.1.5"
   },
   "homepage": "https://github.com/ytakahashi/evermore",
   "license": "MIT",
@@ -67,6 +71,8 @@
     "lint:fix": "eslint . --fix",
     "postinstall": "electron-builder install-app-deps",
     "start": "electron-vite preview",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "typecheck": "pnpm run typecheck:node && pnpm run typecheck:web",
     "typecheck:node": "tsc --noEmit -p tsconfig.node.json --composite false",
     "typecheck:web": "tsc --noEmit -p tsconfig.web.json --composite false"

@@ -3,13 +3,16 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { electronApp, optimizer, is } from '@electron-toolkit/utils';
 import icon from '../../resources/icon.png?asset';
+import { registerIpcHandlers } from './ipc/register';
 
 const _filename = fileURLToPath(import.meta.url);
 const _dirname = dirname(_filename);
+let mainWindow: BrowserWindow | null = null;
+let disposeIpcHandlers: (() => void) | null = null;
 
 function createWindow(): void {
   // Create the browser window.
-  const mainWindow = new BrowserWindow({
+  const window = new BrowserWindow({
     width: 1024,
     height: 768,
     show: false,
@@ -24,12 +27,17 @@ function createWindow(): void {
       sandbox: false,
     },
   });
+  mainWindow = window;
 
-  mainWindow.on('ready-to-show', () => {
-    mainWindow.show();
+  window.on('ready-to-show', () => {
+    window.show();
   });
 
-  mainWindow.webContents.setWindowOpenHandler((details) => {
+  window.on('closed', () => {
+    mainWindow = null;
+  });
+
+  window.webContents.setWindowOpenHandler((details) => {
     shell.openExternal(details.url);
     return { action: 'deny' };
   });
@@ -37,9 +45,9 @@ function createWindow(): void {
   // HMR for renderer base on electron-vite cli.
   // Load the remote URL for development or the local html file for production.
   if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
-    mainWindow.loadURL(process.env['ELECTRON_RENDERER_URL']);
+    window.loadURL(process.env['ELECTRON_RENDERER_URL']);
   } else {
-    mainWindow.loadFile(join(_dirname, '../renderer/index.html'));
+    window.loadFile(join(_dirname, '../renderer/index.html'));
   }
 }
 
@@ -57,6 +65,10 @@ app.whenReady().then(() => {
     optimizer.watchWindowShortcuts(window);
   });
 
+  disposeIpcHandlers = registerIpcHandlers({
+    getWindow: () => mainWindow,
+  });
+
   createWindow();
 
   app.on('activate', function () {
@@ -64,6 +76,11 @@ app.whenReady().then(() => {
     // dock icon is clicked and there are no other windows open.
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
+});
+
+app.on('before-quit', () => {
+  disposeIpcHandlers?.();
+  disposeIpcHandlers = null;
 });
 
 // Quit when all windows are closed, except on macOS. There, it's common
