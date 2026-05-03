@@ -1,11 +1,7 @@
 import { useEffect } from 'react';
-import {
-  findFirstPaneId,
-  selectActiveWorkspace,
-  useWorkspaceStore,
-} from '../../stores/workspaceStore';
+import { selectActiveWorkspace, useWorkspaceStore } from '../../stores/workspaceStore';
+import { PaneLayout } from './PaneLayout';
 import { TabBar } from './TabBar';
-import { TerminalView } from '../terminal/TerminalView';
 
 export function MainTerminalArea(): React.JSX.Element {
   const activeWorkspace = useWorkspaceStore(selectActiveWorkspace);
@@ -26,13 +22,7 @@ export function MainTerminalArea(): React.JSX.Element {
     content = (
       <div className="relative h-full min-h-0 w-full">
         {activeWorkspace.tabs.map((tab) => {
-          const paneId = tab.activePaneId ?? findFirstPaneId(tab.layout);
-          const pane = activeWorkspace.panes.find((currentPane) => currentPane.id === paneId);
           const isActive = tab.id === activeWorkspace.activeTabId;
-
-          if (!pane) {
-            return null;
-          }
 
           return (
             <div
@@ -42,7 +32,7 @@ export function MainTerminalArea(): React.JSX.Element {
                 isActive ? 'z-10 opacity-100' : 'pointer-events-none z-0 opacity-0'
               }`}
             >
-              <TerminalView key={pane.id} cwd={pane.cwd} />
+              <PaneLayout layout={tab.layout} panes={activeWorkspace.panes} tab={tab} />
             </div>
           );
         })}

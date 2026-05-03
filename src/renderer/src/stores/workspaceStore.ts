@@ -2,8 +2,12 @@ import { create, type StoreApi, type UseBoundStore } from 'zustand';
 import type { Pane, PaneLayout, Tab, Workspace } from '../../../shared/types';
 
 const DEFAULT_SAVE_DEBOUNCE_MS = 300;
+const DEFAULT_SPLIT_RATIO = 0.5;
+const MAX_SPLIT_RATIO = 0.85;
+const MIN_SPLIT_RATIO = 0.15;
 
 type WorkspaceApi = Window['api']['workspace'];
+type SplitDirection = Extract<PaneLayout, { type: 'split' }>['direction'];
 
 interface CreateWorkspaceStoreOptions {
   createId?: () => string;
@@ -22,6 +26,10 @@ export interface WorkspaceStoreState {
   addTab: () => void;
   selectTab: (tabId: string) => void;
   closeTab: (tabId: string) => void;
+  setActivePane: (paneId: string) => void;
+  splitPane: (paneId: string, direction: SplitDirection) => void;
+  closePane: (paneId: string) => void;
+  resizeSplit: (path: number[], ratio: number) => void;
   updateWorkspace: (workspace: Workspace) => void;
 }
 
@@ -64,6 +72,104 @@ function collectPaneIds(layout: PaneLayout): string[] {
   }
 
   return [...collectPaneIds(layout.children[0]), ...collectPaneIds(layout.children[1])];
+}
+
+function clampSplitRatio(ratio: number): number {
+  return Math.min(MAX_SPLIT_RATIO, Math.max(MIN_SPLIT_RATIO, ratio));
+}
+
+function replaceTab(workspace: Workspace, tab: Tab): Workspace {
+  return {
+    ...workspace,
+    tabs: workspace.tabs.map((currentTab) => (currentTab.id === tab.id ? tab : currentTab)),
+  };
+}
+
+function replacePaneLayout(
+  layout: PaneLayout,
+  paneId: string,
+  replacement: PaneLayout,
+): PaneLayout {
+  if (layout.type === 'leaf') {
+    return layout.paneId === paneId ? replacement : layout;
+  }
+
+  return {
+    ...layout,
+    children: [
+      replacePaneLayout(layout.children[0], paneId, replacement),
+      replacePaneLayout(layout.children[1], paneId, replacement),
+    ],
+  };
+}
+
+function removePaneLayout(
+  layout: PaneLayout,
+  paneId: string,
+): { layout: PaneLayout | null; removed: boolean } {
+  if (layout.type === 'leaf') {
+    return layout.paneId === paneId ? { layout: null, removed: true } : { layout, removed: false };
+  }
+
+  const firstChild = removePaneLayout(layout.children[0], paneId);
+  if (firstChild.removed) {
+    // Collapse this split only when the direct child was removed. If deletion happened deeper in
+    // that child subtree, keep this split node and replace just the changed child so sibling panes
+    // outside the removed subtree stay visible.
+    return {
+      layout:
+        firstChild.layout === null
+          ? layout.children[1]
+          : {
+              ...layout,
+              children: [firstChild.layout, layout.children[1]],
+            },
+      removed: true,
+    };
+  }
+
+  const secondChild = removePaneLayout(layout.children[1], paneId);
+  if (secondChild.removed) {
+    // Same rule as above for the second child: direct child removal promotes the sibling, while a
+    // nested removal preserves the current split and swaps in the updated child subtree.
+    return {
+      layout:
+        secondChild.layout === null
+          ? layout.children[0]
+          : {
+              ...layout,
+              children: [layout.children[0], secondChild.layout],
+            },
+      removed: true,
+    };
+  }
+
+  return { layout, removed: false };
+}
+
+function updateSplitRatio(layout: PaneLayout, path: number[], ratio: number): PaneLayout {
+  if (layout.type === 'leaf') {
+    return layout;
+  }
+
+  if (path.length === 0) {
+    return {
+      ...layout,
+      ratio: clampSplitRatio(ratio),
+    };
+  }
+
+  const [childIndex, ...remainingPath] = path;
+  if (childIndex !== 0 && childIndex !== 1) {
+    return layout;
+  }
+
+  return {
+    ...layout,
+    children: layout.children.map((child, index) =>
+      index === childIndex ? updateSplitRatio(child, remainingPath, ratio) : child,
+    ) as [PaneLayout, PaneLayout],
+  };
 }
 
 function findActiveTabIndex(workspace: Workspace, tabId: string): number {
@@ -253,6 +359,109 @@ export function createWorkspaceStore(
         };
 
         get().updateWorkspace(updatedWorkspace);
+      },
+      setActivePane: (paneId: string): void => {
+        const workspace = selectActiveWorkspace(get());
+        const tab = selectActiveTab(get());
+        if (!workspace || !tab || tab.activePaneId === paneId) {
+          return;
+        }
+
+        if (!collectPaneIds(tab.layout).includes(paneId)) {
+          return;
+        }
+
+        get().updateWorkspace(
+          replaceTab(workspace, {
+            ...tab,
+            activePaneId: paneId,
+          }),
+        );
+      },
+      splitPane: (paneId: string, direction: SplitDirection): void => {
+        const workspace = selectActiveWorkspace(get());
+        const tab = selectActiveTab(get());
+        if (!workspace || !tab || !collectPaneIds(tab.layout).includes(paneId)) {
+          return;
+        }
+
+        const sourcePane = workspace.panes.find((pane) => pane.id === paneId);
+        if (!sourcePane) {
+          return;
+        }
+
+        const newPaneId = createStoreId();
+        const newPane: Pane = {
+          id: newPaneId,
+          cwd: sourcePane.cwd,
+          title: sourcePane.title,
+        };
+        const updatedTab: Tab = {
+          ...tab,
+          layout: replacePaneLayout(tab.layout, paneId, {
+            type: 'split',
+            direction,
+            ratio: DEFAULT_SPLIT_RATIO,
+            children: [
+              {
+                type: 'leaf',
+                paneId,
+              },
+              {
+                type: 'leaf',
+                paneId: newPaneId,
+              },
+            ],
+          }),
+          activePaneId: newPaneId,
+        };
+
+        get().updateWorkspace({
+          ...replaceTab(workspace, updatedTab),
+          panes: [...workspace.panes, newPane],
+        });
+      },
+      closePane: (paneId: string): void => {
+        const workspace = selectActiveWorkspace(get());
+        const tab = selectActiveTab(get());
+        if (!workspace || !tab) {
+          return;
+        }
+
+        const removedLayout = removePaneLayout(tab.layout, paneId);
+        if (!removedLayout.removed || !removedLayout.layout) {
+          return;
+        }
+
+        const remainingPaneIds = new Set(collectPaneIds(removedLayout.layout));
+        const activePaneId =
+          tab.activePaneId && remainingPaneIds.has(tab.activePaneId)
+            ? tab.activePaneId
+            : findFirstPaneId(removedLayout.layout);
+        const updatedTab: Tab = {
+          ...tab,
+          layout: removedLayout.layout,
+          activePaneId,
+        };
+
+        get().updateWorkspace({
+          ...replaceTab(workspace, updatedTab),
+          panes: workspace.panes.filter((pane) => pane.id !== paneId),
+        });
+      },
+      resizeSplit: (path: number[], ratio: number): void => {
+        const workspace = selectActiveWorkspace(get());
+        const tab = selectActiveTab(get());
+        if (!workspace || !tab) {
+          return;
+        }
+
+        get().updateWorkspace(
+          replaceTab(workspace, {
+            ...tab,
+            layout: updateSplitRatio(tab.layout, path, ratio),
+          }),
+        );
       },
       updateWorkspace: (workspace: Workspace): void => {
         const updatedWorkspace = {
