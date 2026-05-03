@@ -1,8 +1,8 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import { IPC } from '../shared/ipc-channels';
 import type { Workspace, AppSettings, SSHHost, Tunnel } from '../shared/types';
+import type { Api } from '../shared/api-types';
 
-// Define the API exposed to the renderer
 const api = {
   pty: {
     create: (opts: { cwd: string; shell?: string }): Promise<string> =>
@@ -81,9 +81,8 @@ const api = {
     update: (settings: Partial<AppSettings>): Promise<void> =>
       ipcRenderer.invoke(IPC.SETTINGS_UPDATE, { settings }),
   },
-};
+} satisfies Api;
 
-// Expose the API to the renderer process
 if (process.contextIsolated) {
   try {
     contextBridge.exposeInMainWorld('api', api);
@@ -91,8 +90,6 @@ if (process.contextIsolated) {
     console.error(error);
   }
 } else {
-  // @ts-ignore (defined in dts)
+  // @ts-expect-error window.api is declared in index.d.ts (web tsconfig only)
   window.api = api;
 }
-
-export type Api = typeof api;
