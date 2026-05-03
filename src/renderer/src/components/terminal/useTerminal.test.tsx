@@ -14,7 +14,18 @@ const xtermMock = vi.hoisted(() => {
     public readonly writeln = vi.fn();
     public readonly dispose = vi.fn();
     public readonly inputDisposable = { dispose: vi.fn() };
+    public readonly osc7Disposable = { dispose: vi.fn() };
+    public readonly parser = {
+      registerOscHandler: vi.fn((ident: number, listener: (data: string) => boolean) => {
+        if (ident === 7) {
+          this.osc7Listener = listener;
+        }
+
+        return this.osc7Disposable;
+      }),
+    };
     private inputListener: ((data: string) => void) | null = null;
+    private osc7Listener: ((data: string) => boolean) | null = null;
 
     public constructor() {
       terminalInstances.push(this);
@@ -27,6 +38,10 @@ const xtermMock = vi.hoisted(() => {
 
     public emitInput(data: string): void {
       this.inputListener?.(data);
+    }
+
+    public emitOsc7(data: string): boolean | null {
+      return this.osc7Listener?.(data) ?? null;
     }
   }
 
@@ -71,10 +86,14 @@ interface PtyApiMock {
 
 interface TestTerminalProps {
   cwd?: string;
+  onCwdChange?: (cwd: string) => void;
 }
 
-function TestTerminal({ cwd = '/Users/tester/project' }: TestTerminalProps): React.JSX.Element {
-  const { containerRef } = useTerminal({ cwd, shell: '/bin/zsh' });
+function TestTerminal({
+  cwd = '/Users/tester/project',
+  onCwdChange,
+}: TestTerminalProps): React.JSX.Element {
+  const { containerRef } = useTerminal({ cwd, onCwdChange, shell: '/bin/zsh' });
 
   return <div ref={containerRef} />;
 }
@@ -160,6 +179,7 @@ describe('useTerminal', () => {
     // Then: the backing process, xterm input, and preload listeners are all disposed.
     expect(ptyApi.dispose).toHaveBeenCalledWith('pty-1');
     expect(xtermMock.terminalInstances[0]?.inputDisposable.dispose).toHaveBeenCalledOnce();
+    expect(xtermMock.terminalInstances[0]?.osc7Disposable.dispose).toHaveBeenCalledOnce();
     expect(dataCleanup).toHaveBeenCalledOnce();
     expect(exitCleanup).toHaveBeenCalledOnce();
     expect(xtermMock.terminalInstances[0]?.dispose).toHaveBeenCalledOnce();
@@ -212,5 +232,26 @@ describe('useTerminal', () => {
     // Then: the running shell is kept alive instead of being replaced by a new PTY.
     expect(ptyApi.create).toHaveBeenCalledOnce();
     expect(ptyApi.dispose).not.toHaveBeenCalled();
+  });
+
+  it('reports OSC 7 cwd changes without recreating the PTY', async () => {
+    // Given: a mounted terminal with an OSC 7 handler.
+    const onCwdChange = vi.fn<(cwd: string) => void>();
+    render(<TestTerminal onCwdChange={onCwdChange} />);
+    await waitFor(() => {
+      expect(ptyApi.create).toHaveBeenCalled();
+    });
+
+    // When: xterm parses valid and invalid OSC 7 payloads.
+    const handled = xtermMock.terminalInstances[0]?.emitOsc7(
+      'file://hostname/Users/tester/My%20Project',
+    );
+    xtermMock.terminalInstances[0]?.emitOsc7('https://example.com/ignored');
+
+    // Then: only the valid file URL updates cwd state and no process is recreated.
+    expect(handled).toBe(true);
+    expect(onCwdChange).toHaveBeenCalledOnce();
+    expect(onCwdChange).toHaveBeenCalledWith('/Users/tester/My Project');
+    expect(ptyApi.create).toHaveBeenCalledOnce();
   });
 });

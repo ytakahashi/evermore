@@ -2,6 +2,7 @@ import { create, type StoreApi, type UseBoundStore } from 'zustand';
 import type { Pane, PaneLayout, Tab, Workspace } from '../../../shared/types';
 
 const DEFAULT_SAVE_DEBOUNCE_MS = 300;
+const DEFAULT_CWD_SAVE_DEBOUNCE_MS = 1000;
 const DEFAULT_SPLIT_RATIO = 0.5;
 const MAX_SPLIT_RATIO = 0.85;
 const MIN_SPLIT_RATIO = 0.15;
@@ -11,6 +12,7 @@ type SplitDirection = Extract<PaneLayout, { type: 'split' }>['direction'];
 
 interface CreateWorkspaceStoreOptions {
   createId?: () => string;
+  cwdDebounceMs?: number;
   debounceMs?: number;
   now?: () => number;
   workspaceApi?: WorkspaceApi;
@@ -30,6 +32,7 @@ export interface WorkspaceStoreState {
   splitPane: (paneId: string, direction: SplitDirection) => void;
   closePane: (paneId: string) => void;
   resizeSplit: (path: number[], ratio: number) => void;
+  updatePaneCwd: (paneId: string, cwd: string) => void;
   updateWorkspace: (workspace: Workspace) => void;
 }
 
@@ -234,6 +237,7 @@ export function createWorkspaceStore(
   options: CreateWorkspaceStoreOptions = {},
 ): UseBoundStore<StoreApi<WorkspaceStoreState>> {
   const createStoreId = options.createId ?? createId;
+  const cwdDebounceMs = options.cwdDebounceMs ?? DEFAULT_CWD_SAVE_DEBOUNCE_MS;
   const debounceMs = options.debounceMs ?? DEFAULT_SAVE_DEBOUNCE_MS;
   const now = options.now ?? Date.now;
   let persistTimer: ReturnType<typeof globalThis.setTimeout> | null = null;
@@ -241,7 +245,9 @@ export function createWorkspaceStore(
   const getWorkspaceApi = (): WorkspaceApi => options.workspaceApi ?? window.api.workspace;
 
   return create<WorkspaceStoreState>((set, get) => {
-    const persistWorkspaceDebounced = (workspace: Workspace): void => {
+    const persistWorkspaceDebounced = (workspace: Workspace, delayMs = debounceMs): void => {
+      // `updatePaneCwd` and `updateWorkspace` share this timer intentionally: any workspace mutation
+      // such as tab close or split is a natural flush point that carries the latest cwd snapshot.
       if (persistTimer) {
         globalThis.clearTimeout(persistTimer);
       }
@@ -253,7 +259,21 @@ export function createWorkspaceStore(
           .catch((error: unknown) => {
             set({ error: getErrorMessage(error) });
           });
-      }, debounceMs);
+      }, delayMs);
+    };
+
+    const updateWorkspaceState = (workspace: Workspace): Workspace => {
+      const updatedWorkspace = {
+        ...workspace,
+        updatedAt: now(),
+      };
+
+      set((state) => ({
+        workspaces: replaceWorkspace(state.workspaces, updatedWorkspace),
+        activeWorkspaceId: state.activeWorkspaceId ?? updatedWorkspace.id,
+      }));
+
+      return updatedWorkspace;
     };
 
     return {
@@ -463,16 +483,27 @@ export function createWorkspaceStore(
           }),
         );
       },
-      updateWorkspace: (workspace: Workspace): void => {
-        const updatedWorkspace = {
-          ...workspace,
-          updatedAt: now(),
-        };
+      updatePaneCwd: (paneId: string, cwd: string): void => {
+        const workspace = selectActiveWorkspace(get());
+        if (!workspace) {
+          return;
+        }
 
-        set((state) => ({
-          workspaces: replaceWorkspace(state.workspaces, updatedWorkspace),
-          activeWorkspaceId: state.activeWorkspaceId ?? updatedWorkspace.id,
-        }));
+        const pane = workspace.panes.find((currentPane) => currentPane.id === paneId);
+        if (!pane || pane.cwd === cwd) {
+          return;
+        }
+
+        const updatedWorkspace = updateWorkspaceState({
+          ...workspace,
+          panes: workspace.panes.map((currentPane) =>
+            currentPane.id === paneId ? { ...currentPane, cwd } : currentPane,
+          ),
+        });
+        persistWorkspaceDebounced(updatedWorkspace, cwdDebounceMs);
+      },
+      updateWorkspace: (workspace: Workspace): void => {
+        const updatedWorkspace = updateWorkspaceState(workspace);
         persistWorkspaceDebounced(updatedWorkspace);
       },
     };

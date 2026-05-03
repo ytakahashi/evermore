@@ -104,6 +104,58 @@ describe('workspaceStore', () => {
     vi.useRealTimers();
   });
 
+  it('updates pane cwd immediately and persists it after the cwd debounce interval', async () => {
+    // Given: a loaded workspace store using the longer cwd debounce window.
+    vi.useFakeTimers();
+    const useStore = createWorkspaceStore({
+      workspaceApi,
+      cwdDebounceMs: 100,
+      debounceMs: 50,
+      now: () => now,
+    });
+    await useStore.getState().loadWorkspaces();
+
+    // When: OSC 7 reports a new cwd for a pane.
+    useStore.getState().updatePaneCwd('workspace-1-pane-1', '/Users/tester/project');
+
+    // Then: local state updates immediately, while persistence waits for the cwd debounce timer.
+    expect(selectActivePane(useStore.getState())?.cwd).toBe('/Users/tester/project');
+    expect(selectActiveWorkspace(useStore.getState())?.updatedAt).toBe(now);
+    await vi.advanceTimersByTimeAsync(99);
+    expect(workspaceApi.update).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(1);
+
+    expect(workspaceApi.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        panes: [
+          {
+            id: 'workspace-1-pane-1',
+            cwd: '/Users/tester/project',
+            title: 'zsh',
+          },
+        ],
+        updatedAt: now,
+      }),
+    );
+  });
+
+  it('ignores pane cwd updates when the pane is unknown or cwd is unchanged', async () => {
+    // Given: a loaded workspace store.
+    vi.useFakeTimers();
+    const useStore = createWorkspaceStore({ workspaceApi, cwdDebounceMs: 100, now: () => now });
+    await useStore.getState().loadWorkspaces();
+
+    // When: callers report an unchanged cwd and an unknown pane id.
+    useStore.getState().updatePaneCwd('workspace-1-pane-1', '/Users/tester');
+    useStore.getState().updatePaneCwd('missing-pane', '/Users/tester/project');
+    await vi.advanceTimersByTimeAsync(100);
+
+    // Then: no local mutation or persistence is performed.
+    expect(selectActiveWorkspace(useStore.getState())?.updatedAt).toBe(1);
+    expect(workspaceApi.update).not.toHaveBeenCalled();
+  });
+
   it('keeps only the latest debounced workspace update', async () => {
     // Given: repeated workspace updates happen within the debounce window.
     vi.useFakeTimers();

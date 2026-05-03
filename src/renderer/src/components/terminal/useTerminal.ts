@@ -3,10 +3,12 @@ import { FitAddon } from '@xterm/addon-fit';
 import { WebLinksAddon } from '@xterm/addon-web-links';
 import { Terminal } from '@xterm/xterm';
 import { useResizeObserver } from '../../hooks/useResizeObserver';
+import { parseOsc7Cwd } from './osc7';
 import { terminalTheme } from './theme';
 
 interface UseTerminalOptions {
   cwd: string;
+  onCwdChange?: (cwd: string) => void;
   shell?: string;
 }
 
@@ -27,6 +29,11 @@ export function useTerminal(options: UseTerminalOptions): UseTerminalResult {
   const fitAddonRef = useRef<FitAddon | null>(null);
   const ptyIdRef = useRef<string | null>(null);
   const initialOptionsRef = useRef(options);
+  const onCwdChangeRef = useRef(options.onCwdChange);
+
+  useEffect(() => {
+    onCwdChangeRef.current = options.onCwdChange;
+  }, [options.onCwdChange]);
 
   const fitAndResize = useCallback(() => {
     const fitAddon = fitAddonRef.current;
@@ -69,6 +76,14 @@ export function useTerminal(options: UseTerminalOptions): UseTerminalResult {
     terminalRef.current = terminal;
     fitAddonRef.current = fitAddon;
     fitAndResize();
+    const osc7Disposable = terminal.parser.registerOscHandler(7, (data) => {
+      const cwd = parseOsc7Cwd(data);
+      if (cwd) {
+        onCwdChangeRef.current?.(cwd);
+      }
+
+      return true;
+    });
 
     const ptyApi = window.api?.pty;
     if (!ptyApi) {
@@ -76,6 +91,7 @@ export function useTerminal(options: UseTerminalOptions): UseTerminalResult {
       // message keeps smoke tests simple while making a broken preload obvious in development.
       terminal.writeln('Terminal API is unavailable.');
       return () => {
+        osc7Disposable.dispose();
         terminal.dispose();
         terminalRef.current = null;
         fitAddonRef.current = null;
@@ -125,6 +141,7 @@ export function useTerminal(options: UseTerminalOptions): UseTerminalResult {
         void ptyApi.dispose(ptyId);
       }
       inputDisposable.dispose();
+      osc7Disposable.dispose();
       dataCleanup();
       exitCleanup();
       terminal.dispose();

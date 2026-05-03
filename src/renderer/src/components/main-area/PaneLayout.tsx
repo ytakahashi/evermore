@@ -36,6 +36,7 @@ export function PaneLayout({
   const resizeSplit = useWorkspaceStore((state) => state.resizeSplit);
   const setActivePane = useWorkspaceStore((state) => state.setActivePane);
   const splitPane = useWorkspaceStore((state) => state.splitPane);
+  const updatePaneCwd = useWorkspaceStore((state) => state.updatePaneCwd);
   const dragControllerRef = useRef<AbortController | null>(null);
   const splitContainerRef = useRef<HTMLDivElement | null>(null);
 
@@ -66,7 +67,12 @@ export function PaneLayout({
           setActivePane(pane.id);
         }}
       >
-        <TerminalView cwd={pane.cwd} />
+        <TerminalView
+          cwd={pane.cwd}
+          onCwdChange={(cwd) => {
+            updatePaneCwd(pane.id, cwd);
+          }}
+        />
         <div className="absolute right-2 top-2 z-20 flex items-center gap-1 rounded bg-panel/90 p-1 opacity-0 shadow-sm transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
           <button
             aria-label="Split pane vertically"
