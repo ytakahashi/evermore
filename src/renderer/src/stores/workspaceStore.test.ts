@@ -320,6 +320,103 @@ describe('workspaceStore', () => {
     );
   });
 
+  it('selects a tab in another workspace and makes that workspace active', async () => {
+    // Given: two workspaces are loaded and the second workspace has multiple tabs.
+    vi.useFakeTimers();
+    const workspace2 = createWorkspace('workspace-2', '/Users/tester/project');
+    const workspace2WithTabs: Workspace = {
+      ...workspace2,
+      tabs: [
+        workspace2.tabs[0],
+        {
+          id: 'workspace-2-tab-2',
+          title: 'server',
+          layout: {
+            type: 'leaf',
+            paneId: 'workspace-2-pane-2',
+          },
+          activePaneId: 'workspace-2-pane-2',
+        },
+      ],
+      panes: [
+        ...workspace2.panes,
+        {
+          id: 'workspace-2-pane-2',
+          cwd: '/Users/tester/project',
+          title: 'server',
+        },
+      ],
+    };
+    workspaceApi.list = vi.fn(() => Promise.resolve([workspace, workspace2WithTabs]));
+    const useStore = createWorkspaceStore({ workspaceApi, debounceMs: 50, now: () => now });
+    await useStore.getState().loadWorkspaces();
+
+    // When: a sidebar-style action selects a tab in the inactive workspace.
+    useStore.getState().selectWorkspaceTab('workspace-2', 'workspace-2-tab-2');
+    await vi.advanceTimersByTimeAsync(50);
+
+    // Then: the target workspace and tab are active and the tab choice is persisted.
+    expect(useStore.getState().activeWorkspaceId).toBe('workspace-2');
+    expect(selectActiveTab(useStore.getState())?.id).toBe('workspace-2-tab-2');
+    expect(workspaceApi.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 'workspace-2',
+        activeTabId: 'workspace-2-tab-2',
+      }),
+    );
+  });
+
+  it('selects the already-active tab of an inactive workspace without persisting', async () => {
+    // Given: two workspaces are loaded and the second workspace already has its target tab active.
+    vi.useFakeTimers();
+    const workspace2 = createWorkspace('workspace-2', '/Users/tester/project');
+    workspaceApi.list = vi.fn(() => Promise.resolve([workspace, workspace2]));
+    const useStore = createWorkspaceStore({ workspaceApi, debounceMs: 50, now: () => now });
+    await useStore.getState().loadWorkspaces();
+
+    // When: a sidebar-style action selects the already-active tab in the inactive workspace.
+    useStore.getState().selectWorkspaceTab('workspace-2', 'workspace-2-tab-1');
+    await vi.advanceTimersByTimeAsync(50);
+
+    // Then: only the active workspace changes; no workspace snapshot needs persistence.
+    expect(useStore.getState().activeWorkspaceId).toBe('workspace-2');
+    expect(selectActiveTab(useStore.getState())?.id).toBe('workspace-2-tab-1');
+    expect(workspaceApi.update).not.toHaveBeenCalled();
+  });
+
+  it('renames a tab with a trimmed title and ignores blank titles', async () => {
+    // Given: a workspace has one tab.
+    vi.useFakeTimers();
+    const useStore = createWorkspaceStore({ workspaceApi, debounceMs: 50, now: () => now });
+    await useStore.getState().loadWorkspaces();
+
+    // When: the tab is renamed with surrounding whitespace.
+    useStore.getState().renameTab('workspace-1-tab-1', '  server  ');
+    await vi.advanceTimersByTimeAsync(50);
+
+    // Then: the tab title is trimmed locally and persisted.
+    expect(selectActiveTab(useStore.getState())?.title).toBe('server');
+    expect(workspaceApi.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        tabs: [
+          expect.objectContaining({
+            id: 'workspace-1-tab-1',
+            title: 'server',
+          }),
+        ],
+      }),
+    );
+
+    // When: callers submit a blank title.
+    vi.mocked(workspaceApi.update).mockClear();
+    useStore.getState().renameTab('workspace-1-tab-1', '   ');
+    await vi.advanceTimersByTimeAsync(50);
+
+    // Then: the blank rename is discarded.
+    expect(selectActiveTab(useStore.getState())?.title).toBe('server');
+    expect(workspaceApi.update).not.toHaveBeenCalled();
+  });
+
   it('closes a tab, removes its pane, and keeps the final tab open', async () => {
     // Given: a loaded workspace with two tabs.
     vi.useFakeTimers();

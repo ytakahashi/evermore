@@ -26,6 +26,8 @@ export interface WorkspaceStoreState {
   loadWorkspaces: () => Promise<void>;
   setActiveWorkspace: (id: string) => void;
   addTab: () => void;
+  renameTab: (tabId: string, title: string) => void;
+  selectWorkspaceTab: (workspaceId: string, tabId: string) => void;
   selectTab: (tabId: string) => void;
   closeTab: (tabId: string) => void;
   setActivePane: (paneId: string) => void;
@@ -347,9 +349,30 @@ export function createWorkspaceStore(
 
         get().updateWorkspace(updatedWorkspace);
       },
-      selectTab: (tabId: string): void => {
+      renameTab: (tabId: string, title: string): void => {
         const workspace = selectActiveWorkspace(get());
-        if (!workspace || workspace.activeTabId === tabId) {
+        const trimmedTitle = title.trim();
+        if (!workspace || !trimmedTitle) {
+          return;
+        }
+
+        const tab = workspace.tabs.find((currentTab) => currentTab.id === tabId);
+        if (!tab || tab.title === trimmedTitle) {
+          return;
+        }
+
+        get().updateWorkspace(
+          replaceTab(workspace, {
+            ...tab,
+            title: trimmedTitle,
+          }),
+        );
+      },
+      selectWorkspaceTab: (workspaceId: string, tabId: string): void => {
+        const workspace = get().workspaces.find(
+          (currentWorkspace) => currentWorkspace.id === workspaceId,
+        );
+        if (!workspace) {
           return;
         }
 
@@ -358,10 +381,36 @@ export function createWorkspaceStore(
           return;
         }
 
-        get().updateWorkspace({
+        const shouldSwitchWorkspace = get().activeWorkspaceId !== workspace.id;
+        const shouldSelectTab = workspace.activeTabId !== selectedTab.id;
+
+        if (!shouldSwitchWorkspace && !shouldSelectTab) {
+          return;
+        }
+
+        if (!shouldSelectTab) {
+          set({ activeWorkspaceId: workspace.id });
+          return;
+        }
+
+        const updatedWorkspace = updateWorkspaceState({
           ...workspace,
           activeTabId: selectedTab.id,
         });
+        if (shouldSwitchWorkspace) {
+          // Sidebar tab selection can target an inactive workspace. `updateWorkspaceState()` only
+          // preserves or initializes the active id, so switching workspace remains explicit here.
+          set({ activeWorkspaceId: updatedWorkspace.id });
+        }
+        persistWorkspaceDebounced(updatedWorkspace.id);
+      },
+      selectTab: (tabId: string): void => {
+        const workspace = selectActiveWorkspace(get());
+        if (!workspace) {
+          return;
+        }
+
+        get().selectWorkspaceTab(workspace.id, tabId);
       },
       closeTab: (tabId: string): void => {
         const workspace = selectActiveWorkspace(get());

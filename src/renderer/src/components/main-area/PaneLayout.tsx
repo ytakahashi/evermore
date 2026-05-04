@@ -1,5 +1,6 @@
 import { Columns2, Rows2, X } from 'lucide-react';
 import { useEffect, useRef } from 'react';
+import { countPaneLeaves } from '../../../../shared/pane-layout';
 import type { Pane, PaneLayout as PaneLayoutModel, Tab } from '../../../../shared/types';
 import { useWorkspaceStore } from '../../stores/workspaceStore';
 import { TerminalView } from '../terminal/TerminalView';
@@ -10,14 +11,6 @@ interface PaneLayoutProps {
   panes: Pane[];
   path?: number[];
   tab: Tab;
-}
-
-function countLeaves(layout: PaneLayoutModel): number {
-  if (layout.type === 'leaf') {
-    return 1;
-  }
-
-  return countLeaves(layout.children[0]) + countLeaves(layout.children[1]);
 }
 
 function findPane(panes: Pane[], paneId: string): Pane | null {
@@ -56,7 +49,7 @@ export function PaneLayout({
     }
 
     const isActive = isActiveTab && tab.activePaneId === pane.id;
-    const canClosePane = countLeaves(tab.layout) > 1;
+    const canClosePane = countPaneLeaves(tab.layout) > 1;
 
     return (
       <section
