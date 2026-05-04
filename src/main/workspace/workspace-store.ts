@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { homedir } from 'node:os';
+import path from 'node:path';
 import Store from 'electron-store';
 import type { Pane, Workspace } from '../../shared/types';
 import type { WorkspaceStorageAdapter, WorkspaceStoreOptions } from './types';
@@ -47,12 +48,14 @@ function sanitizeWorkspace(workspace: Workspace): Workspace {
 export class WorkspaceStore {
   private readonly createId: () => string;
   private readonly getHomeDirectory: () => string;
+  private readonly getShellPath: () => string;
   private readonly now: () => number;
   private readonly storage: WorkspaceStorageAdapter;
 
   public constructor(options: WorkspaceStoreOptions = {}) {
     this.createId = options.createId ?? randomUUID;
     this.getHomeDirectory = options.getHomeDirectory ?? homedir;
+    this.getShellPath = options.getShellPath ?? (() => process.env.SHELL ?? '/bin/zsh');
     this.now = options.now ?? Date.now;
     this.storage = options.storage ?? new ElectronWorkspaceStorageAdapter();
   }
@@ -99,7 +102,7 @@ export class WorkspaceStore {
       workspaces.push(updatedWorkspace);
     }
 
-    this.storage.setWorkspaces(workspaces.map(sanitizeWorkspace));
+    this.storage.setWorkspaces(workspaces);
   }
 
   /**
@@ -118,7 +121,6 @@ export class WorkspaceStore {
     const workspaces = this.storage.getWorkspaces().map(sanitizeWorkspace);
 
     if (workspaces.length > 0) {
-      this.storage.setWorkspaces(workspaces);
       return workspaces;
     }
 
@@ -135,6 +137,7 @@ export class WorkspaceStore {
     const workspaceId = this.createId();
     const tabId = this.createId();
     const paneId = this.createId();
+    const title = path.basename(this.getShellPath() || '/bin/zsh');
 
     return {
       id: workspaceId,
@@ -143,7 +146,7 @@ export class WorkspaceStore {
       tabs: [
         {
           id: tabId,
-          title: 'zsh',
+          title,
           layout: {
             type: 'leaf',
             paneId,
@@ -155,7 +158,7 @@ export class WorkspaceStore {
         {
           id: paneId,
           cwd: rootPath,
-          title: 'zsh',
+          title,
         },
       ],
       activeTabId: tabId,

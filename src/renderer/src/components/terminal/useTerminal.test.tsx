@@ -13,6 +13,7 @@ const xtermMock = vi.hoisted(() => {
     public readonly write = vi.fn();
     public readonly writeln = vi.fn();
     public readonly dispose = vi.fn();
+    public readonly focus = vi.fn();
     public readonly inputDisposable = { dispose: vi.fn() };
     public readonly osc7Disposable = { dispose: vi.fn() };
     public readonly parser = {
@@ -86,14 +87,16 @@ interface PtyApiMock {
 
 interface TestTerminalProps {
   cwd?: string;
+  isActive?: boolean;
   onCwdChange?: (cwd: string) => void;
 }
 
 function TestTerminal({
   cwd = '/Users/tester/project',
+  isActive = true,
   onCwdChange,
 }: TestTerminalProps): React.JSX.Element {
-  const { containerRef } = useTerminal({ cwd, onCwdChange, shell: '/bin/zsh' });
+  const { containerRef } = useTerminal({ cwd, isActive, onCwdChange, shell: '/bin/zsh' });
 
   return <div ref={containerRef} />;
 }
@@ -164,6 +167,35 @@ describe('useTerminal', () => {
       });
       expect(ptyApi.resize).toHaveBeenCalledWith('pty-1', 132, 43);
     });
+    expect(xtermMock.terminalInstances[0]?.focus).toHaveBeenCalled();
+  });
+
+  it('does not focus an inactive terminal on mount or PTY creation', async () => {
+    // Given: the pane belongs to an inactive tab or pane.
+
+    // When: the terminal mounts and creates its PTY.
+    render(<TestTerminal isActive={false} />);
+    await waitFor(() => {
+      expect(ptyApi.create).toHaveBeenCalled();
+    });
+
+    // Then: the inactive xterm instance is left mounted but unfocused.
+    expect(xtermMock.terminalInstances[0]?.focus).not.toHaveBeenCalled();
+  });
+
+  it('focuses the terminal when it becomes active after mount', async () => {
+    // Given: a terminal starts inactive but mounted.
+    const { rerender } = render(<TestTerminal isActive={false} />);
+    await waitFor(() => {
+      expect(ptyApi.create).toHaveBeenCalled();
+    });
+
+    // When: the pane becomes active after a tab or pane selection change.
+    rerender(<TestTerminal isActive />);
+
+    // Then: the existing xterm instance receives focus without recreating the PTY.
+    expect(xtermMock.terminalInstances[0]?.focus).toHaveBeenCalledOnce();
+    expect(ptyApi.create).toHaveBeenCalledOnce();
   });
 
   it('cleans up the PTY and listeners when the terminal unmounts', async () => {

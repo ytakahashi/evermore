@@ -8,6 +8,7 @@ import { terminalTheme } from './theme';
 
 interface UseTerminalOptions {
   cwd: string;
+  isActive?: boolean;
   onCwdChange?: (cwd: string) => void;
   shell?: string;
 }
@@ -29,11 +30,22 @@ export function useTerminal(options: UseTerminalOptions): UseTerminalResult {
   const fitAddonRef = useRef<FitAddon | null>(null);
   const ptyIdRef = useRef<string | null>(null);
   const initialOptionsRef = useRef(options);
+  const isActiveRef = useRef(options.isActive ?? false);
   const onCwdChangeRef = useRef(options.onCwdChange);
+
+  useEffect(() => {
+    isActiveRef.current = options.isActive ?? false;
+  }, [options.isActive]);
 
   useEffect(() => {
     onCwdChangeRef.current = options.onCwdChange;
   }, [options.onCwdChange]);
+
+  const focusIfActive = useCallback((): void => {
+    if (isActiveRef.current) {
+      terminalRef.current?.focus();
+    }
+  }, []);
 
   const fitAndResize = useCallback(() => {
     const fitAddon = fitAddonRef.current;
@@ -76,6 +88,7 @@ export function useTerminal(options: UseTerminalOptions): UseTerminalResult {
     terminalRef.current = terminal;
     fitAddonRef.current = fitAddon;
     fitAndResize();
+    focusIfActive();
     const osc7Disposable = terminal.parser.registerOscHandler(7, (data) => {
       const cwd = parseOsc7Cwd(data);
       if (cwd) {
@@ -131,6 +144,7 @@ export function useTerminal(options: UseTerminalOptions): UseTerminalResult {
 
       ptyIdRef.current = id;
       fitAndResize();
+      focusIfActive();
     });
 
     return () => {
@@ -148,7 +162,11 @@ export function useTerminal(options: UseTerminalOptions): UseTerminalResult {
       terminalRef.current = null;
       fitAddonRef.current = null;
     };
-  }, [fitAndResize]);
+  }, [fitAndResize, focusIfActive]);
+
+  useEffect(() => {
+    focusIfActive();
+  }, [focusIfActive, options.isActive]);
 
   return { containerRef };
 }

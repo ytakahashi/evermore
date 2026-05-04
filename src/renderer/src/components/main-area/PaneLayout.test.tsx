@@ -5,7 +5,11 @@ import { useWorkspaceStore } from '../../stores/workspaceStore';
 import { PaneLayout } from './PaneLayout';
 
 vi.mock('../terminal/TerminalView', () => ({
-  TerminalView: ({ cwd }: { cwd?: string }) => <div data-testid="terminal-view">{cwd}</div>,
+  TerminalView: ({ cwd, isActive }: { cwd?: string; isActive?: boolean }) => (
+    <div data-active={isActive ? 'true' : 'false'} data-testid="terminal-view">
+      {cwd}
+    </div>
+  ),
 }));
 
 const workspace: Workspace = {
@@ -75,11 +79,17 @@ describe('PaneLayout', () => {
 
     // When: the layout renders.
     render(
-      <PaneLayout layout={currentTab.layout} panes={currentWorkspace.panes} tab={currentTab} />,
+      <PaneLayout
+        isActiveTab
+        layout={currentTab.layout}
+        panes={currentWorkspace.panes}
+        tab={currentTab}
+      />,
     );
 
     // Then: one terminal is shown with the pane cwd.
     expect(screen.getByTestId('terminal-view')).toHaveTextContent('/Users/tester');
+    expect(screen.getByTestId('terminal-view')).toHaveAttribute('data-active', 'true');
     expect(screen.getByRole('button', { name: 'Split pane vertically' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Split pane horizontally' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Close pane' })).toBeDisabled();
@@ -93,7 +103,12 @@ describe('PaneLayout', () => {
       throw new Error('Expected test workspace and tab.');
     }
     const { rerender } = render(
-      <PaneLayout layout={currentTab.layout} panes={currentWorkspace.panes} tab={currentTab} />,
+      <PaneLayout
+        isActiveTab
+        layout={currentTab.layout}
+        panes={currentWorkspace.panes}
+        tab={currentTab}
+      />,
     );
 
     // When: the pane is split vertically.
@@ -103,7 +118,14 @@ describe('PaneLayout', () => {
     if (!splitWorkspace || !splitTab) {
       throw new Error('Expected split workspace and tab.');
     }
-    rerender(<PaneLayout layout={splitTab.layout} panes={splitWorkspace.panes} tab={splitTab} />);
+    rerender(
+      <PaneLayout
+        isActiveTab
+        layout={splitTab.layout}
+        panes={splitWorkspace.panes}
+        tab={splitTab}
+      />,
+    );
 
     // Then: two terminal panes are rendered and close becomes available.
     expect(screen.getAllByTestId('terminal-view')).toHaveLength(2);
@@ -132,7 +154,14 @@ describe('PaneLayout', () => {
     if (!splitWorkspace || !splitTab) {
       throw new Error('Expected split workspace and tab.');
     }
-    render(<PaneLayout layout={splitTab.layout} panes={splitWorkspace.panes} tab={splitTab} />);
+    render(
+      <PaneLayout
+        isActiveTab
+        layout={splitTab.layout}
+        panes={splitWorkspace.panes}
+        tab={splitTab}
+      />,
+    );
     const separator = screen.getByRole('separator', { name: 'Resize vertical split' });
     const container = separator.parentElement;
     if (!container) {
@@ -164,5 +193,26 @@ describe('PaneLayout', () => {
         ratio: 0.7,
       }),
     );
+  });
+
+  it('does not mark panes in inactive tabs as active terminals', () => {
+    // Given: a tab remains mounted while another tab is selected.
+    const inactiveTab = {
+      ...workspace.tabs[0],
+      activePaneId: 'pane-1',
+    };
+
+    // When: the inactive tab layout renders.
+    render(
+      <PaneLayout
+        isActiveTab={false}
+        layout={inactiveTab.layout}
+        panes={workspace.panes}
+        tab={inactiveTab}
+      />,
+    );
+
+    // Then: its terminal is not eligible for focus.
+    expect(screen.getByTestId('terminal-view')).toHaveAttribute('data-active', 'false');
   });
 });

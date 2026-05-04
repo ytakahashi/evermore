@@ -5,6 +5,7 @@ import { useWorkspaceStore } from '../../stores/workspaceStore';
 import { TerminalView } from '../terminal/TerminalView';
 
 interface PaneLayoutProps {
+  isActiveTab: boolean;
   layout: PaneLayoutModel;
   panes: Pane[];
   path?: number[];
@@ -27,6 +28,7 @@ function findPane(panes: Pane[], paneId: string): Pane | null {
  * Recursively renders a terminal pane layout tree with split, close, focus, and resize controls.
  */
 export function PaneLayout({
+  isActiveTab,
   layout,
   panes,
   path = [],
@@ -49,10 +51,11 @@ export function PaneLayout({
   if (layout.type === 'leaf') {
     const pane = findPane(panes, layout.paneId);
     if (!pane) {
+      console.warn(`Pane with id ${layout.paneId} not found for leaf layout`);
       return null;
     }
 
-    const isActive = tab.activePaneId === pane.id;
+    const isActive = isActiveTab && tab.activePaneId === pane.id;
     const canClosePane = countLeaves(tab.layout) > 1;
 
     return (
@@ -69,6 +72,7 @@ export function PaneLayout({
       >
         <TerminalView
           cwd={pane.cwd}
+          isActive={isActive}
           onCwdChange={(cwd) => {
             updatePaneCwd(pane.id, cwd);
           }}
@@ -138,7 +142,13 @@ export function PaneLayout({
           isVertical ? { width: `${layout.ratio * 100}%` } : { height: `${layout.ratio * 100}%` }
         }
       >
-        <PaneLayout layout={layout.children[0]} panes={panes} path={[...path, 0]} tab={tab} />
+        <PaneLayout
+          isActiveTab={isActiveTab}
+          layout={layout.children[0]}
+          panes={panes}
+          path={[...path, 0]}
+          tab={tab}
+        />
       </div>
       <div
         aria-label={isVertical ? 'Resize vertical split' : 'Resize horizontal split'}
@@ -184,7 +194,13 @@ export function PaneLayout({
             : { height: `${(1 - layout.ratio) * 100}%` }
         }
       >
-        <PaneLayout layout={layout.children[1]} panes={panes} path={[...path, 1]} tab={tab} />
+        <PaneLayout
+          isActiveTab={isActiveTab}
+          layout={layout.children[1]}
+          panes={panes}
+          path={[...path, 1]}
+          tab={tab}
+        />
       </div>
     </div>
   );

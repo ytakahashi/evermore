@@ -3,7 +3,7 @@ import type * as nodePty from 'node-pty';
 export interface PtyCreateOptions {
   cwd: string;
   shell?: string;
-  env?: Record<string, string | undefined>;
+  env?: Record<string, string>;
   cols?: number;
   rows?: number;
 }

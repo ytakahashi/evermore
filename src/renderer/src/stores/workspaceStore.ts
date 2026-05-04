@@ -41,7 +41,7 @@ function getErrorMessage(error: unknown): string {
     return error.message;
   }
 
-  return 'Workspace operation failed.';
+  return String(error);
 }
 
 /**
@@ -241,24 +241,32 @@ export function createWorkspaceStore(
   const debounceMs = options.debounceMs ?? DEFAULT_SAVE_DEBOUNCE_MS;
   const now = options.now ?? Date.now;
   let persistTimer: ReturnType<typeof globalThis.setTimeout> | null = null;
+  const dirtyWorkspaceIds = new Set<string>();
 
   const getWorkspaceApi = (): WorkspaceApi => options.workspaceApi ?? window.api.workspace;
 
   return create<WorkspaceStoreState>((set, get) => {
-    const persistWorkspaceDebounced = (workspace: Workspace, delayMs = debounceMs): void => {
+    const persistWorkspaceDebounced = (workspaceId: string, delayMs = debounceMs): void => {
       // `updatePaneCwd` and `updateWorkspace` share this timer intentionally: any workspace mutation
       // such as tab close or split is a natural flush point that carries the latest cwd snapshot.
+      dirtyWorkspaceIds.add(workspaceId);
+
       if (persistTimer) {
         globalThis.clearTimeout(persistTimer);
       }
 
       persistTimer = globalThis.setTimeout(() => {
         persistTimer = null;
-        void getWorkspaceApi()
-          .update(workspace)
-          .catch((error: unknown) => {
-            set({ error: getErrorMessage(error) });
-          });
+        const workspaceIdsToPersist = new Set(dirtyWorkspaceIds);
+        dirtyWorkspaceIds.clear();
+        const currentWorkspaces = get().workspaces;
+        Promise.all(
+          currentWorkspaces
+            .filter((workspace) => workspaceIdsToPersist.has(workspace.id))
+            .map((workspace) => getWorkspaceApi().update(workspace)),
+        ).catch((error: unknown) => {
+          set({ error: getErrorMessage(error) });
+        });
       }, delayMs);
     };
 
@@ -311,7 +319,7 @@ export function createWorkspaceStore(
         const tabId = createStoreId();
         const paneId = createStoreId();
         const cwd = activePane?.cwd ?? workspace.rootPath;
-        const title = 'zsh';
+        const title = activePane?.title ?? workspace.panes[0]?.title ?? 'zsh';
         const updatedWorkspace: Workspace = {
           ...workspace,
           tabs: [
@@ -500,11 +508,11 @@ export function createWorkspaceStore(
             currentPane.id === paneId ? { ...currentPane, cwd } : currentPane,
           ),
         });
-        persistWorkspaceDebounced(updatedWorkspace, cwdDebounceMs);
+        persistWorkspaceDebounced(updatedWorkspace.id, cwdDebounceMs);
       },
       updateWorkspace: (workspace: Workspace): void => {
         const updatedWorkspace = updateWorkspaceState(workspace);
-        persistWorkspaceDebounced(updatedWorkspace);
+        persistWorkspaceDebounced(updatedWorkspace.id);
       },
     };
   });

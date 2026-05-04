@@ -32,7 +32,12 @@ export function MainTerminalArea(): React.JSX.Element {
                 isActive ? 'z-10 opacity-100' : 'pointer-events-none z-0 opacity-0'
               }`}
             >
-              <PaneLayout layout={tab.layout} panes={activeWorkspace.panes} tab={tab} />
+              <PaneLayout
+                isActiveTab={isActive}
+                layout={tab.layout}
+                panes={activeWorkspace.panes}
+                tab={tab}
+              />
             </div>
           );
         })}

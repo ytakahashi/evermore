@@ -3,6 +3,24 @@ import { IPC } from '../shared/ipc-channels';
 import type { Workspace, AppSettings, SSHHost, Tunnel } from '../shared/types';
 import type { Api } from '../shared/api-types';
 
+// Each pane subscribes its own callback via onData/onExit. Registering a new ipcRenderer.on()
+// per pane would exceed Node's default 10-listener limit with many open panes. A single
+// ipcRenderer listener per channel dispatches to a subscriber set instead.
+const ptyDataSubscribers = new Set<(id: string, data: string) => void>();
+const ptyExitSubscribers = new Set<(id: string, code: number) => void>();
+
+ipcRenderer.on(IPC.PTY_DATA, (_: unknown, payload: { id: string; data: string }) => {
+  for (const cb of ptyDataSubscribers) {
+    cb(payload.id, payload.data);
+  }
+});
+
+ipcRenderer.on(IPC.PTY_EXIT, (_: unknown, payload: { id: string; code: number }) => {
+  for (const cb of ptyExitSubscribers) {
+    cb(payload.id, payload.code);
+  }
+});
+
 const api = {
   pty: {
     create: (opts: { cwd: string; shell?: string }): Promise<string> =>
@@ -13,19 +31,15 @@ const api = {
       ipcRenderer.invoke(IPC.PTY_RESIZE, { id, cols, rows }),
     dispose: (id: string): Promise<void> => ipcRenderer.invoke(IPC.PTY_DISPOSE, { id }),
     onData: (cb: (id: string, data: string) => void): (() => void) => {
-      const handler = (_: unknown, payload: { id: string; data: string }): void =>
-        cb(payload.id, payload.data);
-      ipcRenderer.on(IPC.PTY_DATA, handler);
+      ptyDataSubscribers.add(cb);
       return (): void => {
-        ipcRenderer.removeListener(IPC.PTY_DATA, handler);
+        ptyDataSubscribers.delete(cb);
       };
     },
     onExit: (cb: (id: string, code: number) => void): (() => void) => {
-      const handler = (_: unknown, payload: { id: string; code: number }): void =>
-        cb(payload.id, payload.code);
-      ipcRenderer.on(IPC.PTY_EXIT, handler);
+      ptyExitSubscribers.add(cb);
       return (): void => {
-        ipcRenderer.removeListener(IPC.PTY_EXIT, handler);
+        ptyExitSubscribers.delete(cb);
       };
     },
   },

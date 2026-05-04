@@ -32,6 +32,7 @@ describe('WorkspaceStore', () => {
     store = new WorkspaceStore({
       createId: () => ids.shift() ?? 'fallback-id',
       getHomeDirectory: () => '/Users/tester',
+      getShellPath: () => '/bin/zsh',
       now: () => now,
       storage,
     });
@@ -157,5 +158,44 @@ describe('WorkspaceStore', () => {
         rootPath: '/Users/tester',
       }),
     ]);
+  });
+
+  it('does not write to storage when list() is called on existing workspaces', () => {
+    // Given: workspaces already exist in storage.
+    const defaultWorkspace = store.list()[0];
+    if (!defaultWorkspace) {
+      throw new Error('Expected default workspace to be created.');
+    }
+
+    let writeCount = 0;
+    const originalSetWorkspaces = storage.setWorkspaces.bind(storage);
+    storage.setWorkspaces = (workspaces) => {
+      writeCount++;
+      originalSetWorkspaces(workspaces);
+    };
+
+    // When: callers list available workspaces.
+    store.list();
+
+    // Then: no storage writes occur.
+    expect(writeCount).toBe(0);
+  });
+
+  it('uses the current shell basename for initial tab and pane titles', () => {
+    // Given: the platform reports a non-default shell path.
+    store = new WorkspaceStore({
+      createId: () => ids.shift() ?? 'fallback-id',
+      getHomeDirectory: () => '/Users/tester',
+      getShellPath: () => '/opt/homebrew/bin/fish',
+      now: () => now,
+      storage,
+    });
+
+    // When: the default workspace is created.
+    const workspace = store.list()[0];
+
+    // Then: the shell basename is used as the user-facing terminal title.
+    expect(workspace?.tabs[0]?.title).toBe('fish');
+    expect(workspace?.panes[0]?.title).toBe('fish');
   });
 });

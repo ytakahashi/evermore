@@ -8,6 +8,7 @@ export interface WorkspaceStorageAdapter {
 export interface WorkspaceStoreOptions {
   createId?: () => string;
   getHomeDirectory?: () => string;
+  getShellPath?: () => string;
   now?: () => number;
   storage?: WorkspaceStorageAdapter;
 }

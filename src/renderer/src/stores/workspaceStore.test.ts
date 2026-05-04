@@ -156,7 +156,7 @@ describe('workspaceStore', () => {
     expect(workspaceApi.update).not.toHaveBeenCalled();
   });
 
-  it('keeps only the latest debounced workspace update', async () => {
+  it('keeps only the latest debounced workspace update for the same workspace', async () => {
     // Given: repeated workspace updates happen within the debounce window.
     vi.useFakeTimers();
     const useStore = createWorkspaceStore({ workspaceApi, debounceMs: 50, now: () => now });
@@ -173,6 +173,56 @@ describe('workspaceStore', () => {
     // Then: only the final workspace snapshot is persisted.
     expect(workspaceApi.update).toHaveBeenCalledOnce();
     expect(workspaceApi.update).toHaveBeenCalledWith({ ...secondUpdate, updatedAt: now });
+    vi.useRealTimers();
+  });
+
+  it('persists all workspaces when the debounce timer fires', async () => {
+    // Given: a store with multiple loaded workspaces.
+    vi.useFakeTimers();
+    const workspace2 = createWorkspace('workspace-2', '/Users/tester/2');
+    workspaceApi.list = vi.fn(() => Promise.resolve([workspace, workspace2]));
+    const useStore = createWorkspaceStore({ workspaceApi, debounceMs: 50, now: () => now });
+    await useStore.getState().loadWorkspaces();
+
+    // When: multiple workspaces are updated within the debounce window.
+    const updatedWorkspace1 = { ...workspace, name: 'Updated 1' };
+    const updatedWorkspace2 = { ...workspace2, name: 'Updated 2' };
+    useStore.getState().updateWorkspace(updatedWorkspace1);
+    now = 3;
+    useStore.getState().updateWorkspace(updatedWorkspace2);
+    await vi.advanceTimersByTimeAsync(50);
+
+    // Then: both workspaces are persisted during the same flush.
+    expect(workspaceApi.update).toHaveBeenCalledTimes(2);
+    expect(workspaceApi.update).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'workspace-1', name: 'Updated 1' }),
+    );
+    expect(workspaceApi.update).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'workspace-2', name: 'Updated 2' }),
+    );
+    vi.useRealTimers();
+  });
+
+  it('does not persist unchanged workspaces during a debounce flush', async () => {
+    // Given: a store with multiple loaded workspaces.
+    vi.useFakeTimers();
+    const workspace2 = createWorkspace('workspace-2', '/Users/tester/2');
+    workspaceApi.list = vi.fn(() => Promise.resolve([workspace, workspace2]));
+    const useStore = createWorkspaceStore({ workspaceApi, debounceMs: 50, now: () => now });
+    await useStore.getState().loadWorkspaces();
+
+    // When: only one workspace changes before the debounce timer fires.
+    useStore.getState().updateWorkspace({ ...workspace, name: 'Updated 1' });
+    await vi.advanceTimersByTimeAsync(50);
+
+    // Then: unchanged workspace metadata is not rewritten by main-process update().
+    expect(workspaceApi.update).toHaveBeenCalledOnce();
+    expect(workspaceApi.update).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'workspace-1', name: 'Updated 1' }),
+    );
+    expect(workspaceApi.update).not.toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'workspace-2' }),
+    );
     vi.useRealTimers();
   });
 
