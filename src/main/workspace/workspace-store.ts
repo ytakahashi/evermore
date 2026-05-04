@@ -7,6 +7,7 @@ import type { WorkspaceStorageAdapter, WorkspaceStoreOptions } from './types';
 
 interface WorkspaceStoreSchema extends Record<string, unknown> {
   workspaces: Workspace[];
+  activeWorkspaceId: string | null;
 }
 
 class ElectronWorkspaceStorageAdapter implements WorkspaceStorageAdapter {
@@ -17,6 +18,7 @@ class ElectronWorkspaceStorageAdapter implements WorkspaceStorageAdapter {
       name: 'workspaces',
       defaults: {
         workspaces: [],
+        activeWorkspaceId: null,
       },
     });
   }
@@ -27,6 +29,14 @@ class ElectronWorkspaceStorageAdapter implements WorkspaceStorageAdapter {
 
   public setWorkspaces(workspaces: Workspace[]): void {
     this.store.set('workspaces', workspaces);
+  }
+
+  public getActiveWorkspaceId(): string | null {
+    return this.store.get('activeWorkspaceId');
+  }
+
+  public setActiveWorkspaceId(id: string | null): void {
+    this.store.set('activeWorkspaceId', id);
   }
 }
 
@@ -68,6 +78,20 @@ export class WorkspaceStore {
   }
 
   /**
+   * Returns the persisted active workspace id, or null when none has been saved.
+   */
+  public getActiveWorkspaceId(): string | null {
+    return this.storage.getActiveWorkspaceId();
+  }
+
+  /**
+   * Persists the active workspace id chosen by the renderer.
+   */
+  public setActiveWorkspaceId(id: string | null): void {
+    this.storage.setActiveWorkspaceId(id);
+  }
+
+  /**
    * Returns one workspace by id, or null when no persisted workspace matches.
    */
   public get(id: string): Workspace | null {
@@ -76,10 +100,11 @@ export class WorkspaceStore {
 
   /**
    * Creates a workspace with one tab and one pane rooted at the supplied path.
+   * Falls back to the home directory when rootPath is empty.
    */
   public create(name: string, rootPath: string): Workspace {
     const timestamp = this.now();
-    const workspace = this.createWorkspace(name, rootPath, timestamp);
+    const workspace = this.createWorkspace(name, rootPath || this.getHomeDirectory(), timestamp);
     const workspaces = [...this.ensureWorkspaces(), workspace];
     this.storage.setWorkspaces(workspaces.map(sanitizeWorkspace));
     return workspace;
@@ -106,15 +131,29 @@ export class WorkspaceStore {
   }
 
   /**
-   * Deletes a workspace and regenerates the default workspace when the last one is removed.
+   * Deletes a workspace while preserving the invariant that at least one workspace remains.
    */
   public delete(id: string): void {
-    const remainingWorkspaces = this.ensureWorkspaces().filter((workspace) => workspace.id !== id);
-    this.storage.setWorkspaces(
-      (remainingWorkspaces.length > 0 ? remainingWorkspaces : [this.createDefaultWorkspace()]).map(
-        sanitizeWorkspace,
-      ),
+    const currentWorkspaces = this.ensureWorkspaces();
+    if (currentWorkspaces.length <= 1) {
+      return;
+    }
+
+    const remainingWorkspaces = currentWorkspaces.filter((workspace) => workspace.id !== id);
+    if (remainingWorkspaces.length === currentWorkspaces.length) {
+      return;
+    }
+
+    const sanitizedWorkspaces = remainingWorkspaces.map(sanitizeWorkspace);
+    this.storage.setWorkspaces(sanitizedWorkspaces);
+
+    const activeWorkspaceId = this.storage.getActiveWorkspaceId();
+    const activeWorkspaceExists = sanitizedWorkspaces.some(
+      (workspace) => workspace.id === activeWorkspaceId,
     );
+    if (!activeWorkspaceExists) {
+      this.storage.setActiveWorkspaceId(sanitizedWorkspaces[0]?.id ?? null);
+    }
   }
 
   private ensureWorkspaces(): Workspace[] {

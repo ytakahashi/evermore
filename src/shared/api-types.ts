@@ -10,11 +10,12 @@ export interface Api {
     onExit: (cb: (id: string, code: number) => void) => () => void;
   };
   workspace: {
-    list: () => Promise<Workspace[]>;
+    list: () => Promise<{ workspaces: Workspace[]; activeWorkspaceId: string | null }>;
     get: (id: string) => Promise<Workspace | null>;
     create: (name: string, rootPath: string) => Promise<Workspace>;
     update: (workspace: Workspace) => Promise<void>;
     delete: (id: string) => Promise<void>;
+    setActiveWorkspaceId: (id: string | null) => Promise<void>;
   };
   ssh: {
     listHosts: () => Promise<SSHHost[]>;

@@ -5,9 +5,11 @@ import type { WorkspaceStorageAdapter } from './types';
 
 class MemoryWorkspaceStorageAdapter implements WorkspaceStorageAdapter {
   public workspaces: Workspace[];
+  public activeWorkspaceId: string | null;
 
-  public constructor(workspaces: Workspace[] = []) {
+  public constructor(workspaces: Workspace[] = [], activeWorkspaceId: string | null = null) {
     this.workspaces = workspaces;
+    this.activeWorkspaceId = activeWorkspaceId;
   }
 
   public getWorkspaces(): Workspace[] {
@@ -16,6 +18,14 @@ class MemoryWorkspaceStorageAdapter implements WorkspaceStorageAdapter {
 
   public setWorkspaces(workspaces: Workspace[]): void {
     this.workspaces = workspaces;
+  }
+
+  public getActiveWorkspaceId(): string | null {
+    return this.activeWorkspaceId;
+  }
+
+  public setActiveWorkspaceId(id: string | null): void {
+    this.activeWorkspaceId = id;
   }
 }
 
@@ -140,7 +150,7 @@ describe('WorkspaceStore', () => {
     });
   });
 
-  it('regenerates the default workspace when the final workspace is deleted', () => {
+  it('does not delete the final workspace', () => {
     // Given: one default workspace exists.
     const defaultWorkspace = store.list()[0];
     if (!defaultWorkspace) {
@@ -150,14 +160,42 @@ describe('WorkspaceStore', () => {
     // When: it is deleted.
     store.delete(defaultWorkspace.id);
 
-    // Then: a replacement default workspace keeps the app bootable.
-    expect(store.list()).toEqual([
-      expect.objectContaining({
-        id: 'workspace-2',
-        name: 'Default',
-        rootPath: '/Users/tester',
-      }),
-    ]);
+    // Then: the store preserves the final workspace.
+    expect(store.list()).toEqual([defaultWorkspace]);
+  });
+
+  it('moves the active workspace id when the active workspace is deleted', () => {
+    // Given: the active workspace points at the second workspace.
+    const defaultWorkspace = store.list()[0];
+    if (!defaultWorkspace) {
+      throw new Error('Expected default workspace to be created.');
+    }
+    const projectWorkspace = store.create('Project', '/Users/tester/project');
+    store.setActiveWorkspaceId(projectWorkspace.id);
+
+    // When: the active workspace is deleted.
+    store.delete(projectWorkspace.id);
+
+    // Then: the remaining workspace becomes active.
+    expect(store.list()).toEqual([defaultWorkspace]);
+    expect(store.getActiveWorkspaceId()).toBe(defaultWorkspace.id);
+  });
+
+  it('preserves the active workspace id when deleting an inactive workspace', () => {
+    // Given: the first workspace is active and another workspace exists.
+    const defaultWorkspace = store.list()[0];
+    if (!defaultWorkspace) {
+      throw new Error('Expected default workspace to be created.');
+    }
+    const projectWorkspace = store.create('Project', '/Users/tester/project');
+    store.setActiveWorkspaceId(defaultWorkspace.id);
+
+    // When: the inactive workspace is deleted.
+    store.delete(projectWorkspace.id);
+
+    // Then: the active workspace id remains unchanged.
+    expect(store.list()).toEqual([defaultWorkspace]);
+    expect(store.getActiveWorkspaceId()).toBe(defaultWorkspace.id);
   });
 
   it('does not write to storage when list() is called on existing workspaces', () => {
@@ -179,6 +217,25 @@ describe('WorkspaceStore', () => {
 
     // Then: no storage writes occur.
     expect(writeCount).toBe(0);
+  });
+
+  it('persists and retrieves the active workspace id independently of workspaces', () => {
+    // Given: the default workspace exists.
+    const workspace = store.list()[0];
+    if (!workspace) throw new Error('Expected default workspace.');
+
+    // When: the renderer sets the active workspace id.
+    store.setActiveWorkspaceId(workspace.id);
+
+    // Then: the persisted value is readable.
+    expect(store.getActiveWorkspaceId()).toBe(workspace.id);
+    expect(storage.activeWorkspaceId).toBe(workspace.id);
+
+    // When: the active id is cleared.
+    store.setActiveWorkspaceId(null);
+
+    // Then: null is persisted and returned.
+    expect(store.getActiveWorkspaceId()).toBeNull();
   });
 
   it('uses the current shell basename for initial tab and pane titles', () => {

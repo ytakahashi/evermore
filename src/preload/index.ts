@@ -44,13 +44,16 @@ const api = {
     },
   },
   workspace: {
-    list: (): Promise<Workspace[]> => ipcRenderer.invoke(IPC.WS_LIST),
+    list: (): Promise<{ workspaces: Workspace[]; activeWorkspaceId: string | null }> =>
+      ipcRenderer.invoke(IPC.WS_LIST),
     get: (id: string): Promise<Workspace | null> => ipcRenderer.invoke(IPC.WS_GET, { id }),
     create: (name: string, rootPath: string): Promise<Workspace> =>
       ipcRenderer.invoke(IPC.WS_CREATE, { name, rootPath }),
     update: (workspace: Workspace): Promise<void> =>
       ipcRenderer.invoke(IPC.WS_UPDATE, { workspace }),
     delete: (id: string): Promise<void> => ipcRenderer.invoke(IPC.WS_DELETE, { id }),
+    setActiveWorkspaceId: (id: string | null): Promise<void> =>
+      ipcRenderer.invoke(IPC.WS_SET_ACTIVE_ID, { id }),
   },
   ssh: {
     listHosts: (): Promise<SSHHost[]> => ipcRenderer.invoke(IPC.SSH_LIST_HOSTS),

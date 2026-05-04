@@ -13,6 +13,7 @@ export const IPC = {
   WS_CREATE: 'workspace:create',
   WS_UPDATE: 'workspace:update',
   WS_DELETE: 'workspace:delete',
+  WS_SET_ACTIVE_ID: 'workspace:set-active-id',
 
   // SSH
   SSH_LIST_HOSTS: 'ssh:list-hosts',

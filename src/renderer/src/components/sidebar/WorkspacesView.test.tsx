@@ -88,17 +88,51 @@ const workspace2: Workspace = {
   updatedAt: 1,
 };
 
+const newWorkspace: Workspace = {
+  id: 'workspace-new',
+  name: 'New',
+  rootPath: '/Users/tester/new',
+  tabs: [
+    {
+      id: 'workspace-new-tab-1',
+      title: 'zsh',
+      layout: {
+        type: 'leaf',
+        paneId: 'workspace-new-pane-1',
+      },
+      activePaneId: 'workspace-new-pane-1',
+    },
+  ],
+  panes: [
+    {
+      id: 'workspace-new-pane-1',
+      cwd: '/Users/tester/new',
+      title: 'zsh',
+    },
+  ],
+  activeTabId: 'workspace-new-tab-1',
+  createdAt: 2,
+  updatedAt: 2,
+};
+
 describe('WorkspacesView', () => {
+  let workspaceCreate: ReturnType<typeof vi.fn<() => Promise<Workspace>>>;
+  let workspaceDelete: ReturnType<typeof vi.fn<() => Promise<void>>>;
   let workspaceUpdate: ReturnType<typeof vi.fn<() => Promise<void>>>;
 
   beforeEach(() => {
     vi.useFakeTimers();
+    workspaceCreate = vi.fn(() => Promise.resolve(newWorkspace));
+    workspaceDelete = vi.fn(() => Promise.resolve());
     workspaceUpdate = vi.fn(() => Promise.resolve());
     Object.defineProperty(window, 'api', {
       configurable: true,
       value: {
         workspace: {
+          create: workspaceCreate,
+          delete: workspaceDelete,
           update: workspaceUpdate,
+          setActiveWorkspaceId: vi.fn(() => Promise.resolve()),
         },
       } as unknown as Window['api'],
     });
@@ -162,5 +196,164 @@ describe('WorkspacesView', () => {
         activeTabId: 'workspace-2-tab-2',
       }),
     );
+  });
+
+  it('creates a workspace from the inline input and calls the API', async () => {
+    // Given: the sidebar is rendered with two workspaces.
+    render(<WorkspacesView />);
+
+    // When: the user opens the create input and submits a name.
+    fireEvent.click(screen.getByRole('button', { name: 'New workspace' }));
+    const input = screen.getByPlaceholderText('Workspace name');
+    fireEvent.change(input, { target: { value: 'My Project' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+
+    // workspaceCreate is invoked synchronously inside the async createWorkspace action.
+    expect(workspaceCreate).toHaveBeenCalledWith('My Project', '');
+
+    // Flush the resolved Promise so the store's setState completes.
+    await vi.advanceTimersByTimeAsync(0);
+
+    // Then: the new workspace appears in the sidebar and becomes active.
+    expect(useWorkspaceStore.getState().workspaces).toHaveLength(3);
+    expect(useWorkspaceStore.getState().activeWorkspaceId).toBe('workspace-new');
+  });
+
+  it('uses the default name when the create input is submitted empty', async () => {
+    // Given: the sidebar is rendered.
+    render(<WorkspacesView />);
+
+    // When: the user opens the create input and presses Enter without typing.
+    fireEvent.click(screen.getByRole('button', { name: 'New workspace' }));
+    const input = screen.getByPlaceholderText('Workspace name');
+    fireEvent.keyDown(input, { key: 'Enter' });
+
+    // Then: the default name is sent to the API.
+    expect(workspaceCreate).toHaveBeenCalledWith('Workspace', '');
+  });
+
+  it('cancels workspace creation with Escape and does not call the API', async () => {
+    // Given: the create input is shown.
+    render(<WorkspacesView />);
+    fireEvent.click(screen.getByRole('button', { name: 'New workspace' }));
+    const input = screen.getByPlaceholderText('Workspace name');
+    fireEvent.change(input, { target: { value: 'Draft' } });
+
+    // When: Escape is pressed.
+    fireEvent.keyDown(input, { key: 'Escape' });
+
+    // Then: the input disappears without creating a workspace.
+    expect(screen.queryByPlaceholderText('Workspace name')).not.toBeInTheDocument();
+    expect(workspaceCreate).not.toHaveBeenCalled();
+  });
+
+  it('cancels workspace creation when the input loses focus without Enter/Escape', () => {
+    // Given: the create input is open with a draft.
+    render(<WorkspacesView />);
+    fireEvent.click(screen.getByRole('button', { name: 'New workspace' }));
+    const input = screen.getByPlaceholderText('Workspace name');
+    fireEvent.change(input, { target: { value: 'Draft' } });
+
+    // When: the input loses focus without an explicit confirmation.
+    fireEvent.blur(input);
+
+    // Then: no workspace is created.
+    expect(workspaceCreate).not.toHaveBeenCalled();
+    expect(screen.queryByPlaceholderText('Workspace name')).not.toBeInTheDocument();
+  });
+
+  it('does not create a workspace when Escape fires a blur on DOM removal', async () => {
+    // Given: the create input is open.
+    render(<WorkspacesView />);
+    fireEvent.click(screen.getByRole('button', { name: 'New workspace' }));
+    const input = screen.getByPlaceholderText('Workspace name');
+    fireEvent.change(input, { target: { value: 'Draft' } });
+
+    // When: Escape is pressed and a blur fires immediately after (simulating browser DOM removal).
+    fireEvent.keyDown(input, { key: 'Escape' });
+    fireEvent.blur(input);
+
+    // Then: no workspace is created.
+    expect(workspaceCreate).not.toHaveBeenCalled();
+  });
+
+  it('renames a workspace with Enter and persists the new name', async () => {
+    // Given: the sidebar shows two workspaces.
+    render(<WorkspacesView />);
+
+    // When: the user double-clicks to rename and confirms with Enter.
+    fireEvent.doubleClick(screen.getByRole('button', { name: 'Default' }));
+    const input = screen.getByRole('textbox', { name: 'Rename Default' });
+    fireEvent.change(input, { target: { value: '  Renamed  ' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+    await vi.advanceTimersByTimeAsync(300);
+
+    // Then: the trimmed name is shown and persisted.
+    expect(screen.getByRole('button', { name: 'Renamed' })).toBeInTheDocument();
+    expect(workspaceUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'workspace-1', name: 'Renamed' }),
+    );
+  });
+
+  it('cancels workspace rename with Escape and does not persist', async () => {
+    // Given: the rename input is open.
+    render(<WorkspacesView />);
+    fireEvent.doubleClick(screen.getByRole('button', { name: 'Default' }));
+    const input = screen.getByRole('textbox', { name: 'Rename Default' });
+    fireEvent.change(input, { target: { value: 'Changed' } });
+
+    // When: Escape is pressed followed by the blur that browsers fire on DOM removal.
+    fireEvent.keyDown(input, { key: 'Escape' });
+    fireEvent.blur(input);
+    await vi.advanceTimersByTimeAsync(300);
+
+    // Then: the original name is preserved and no update is persisted.
+    expect(screen.getByRole('button', { name: 'Default' })).toBeInTheDocument();
+    expect(workspaceUpdate).not.toHaveBeenCalled();
+  });
+
+  it('deletes a workspace when confirmed and switches active to the first remaining', async () => {
+    // Given: the confirmation dialog accepts automatically.
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    render(<WorkspacesView />);
+
+    // When: the delete button for the active workspace is clicked.
+    const deleteButton = screen.getByRole('button', { name: 'Delete Default' });
+    fireEvent.click(deleteButton);
+
+    // workspaceDelete is invoked synchronously inside the async deleteWorkspace action.
+    expect(workspaceDelete).toHaveBeenCalledWith('workspace-1');
+
+    // Flush the resolved Promise so the store's setState completes.
+    await vi.advanceTimersByTimeAsync(0);
+
+    // Then: the workspace is removed and the remaining one becomes active.
+    expect(useWorkspaceStore.getState().workspaces).toHaveLength(1);
+    expect(useWorkspaceStore.getState().activeWorkspaceId).toBe('workspace-2');
+  });
+
+  it('does not delete when the confirmation dialog is dismissed', async () => {
+    // Given: the confirmation dialog rejects.
+    vi.spyOn(window, 'confirm').mockReturnValue(false);
+    render(<WorkspacesView />);
+
+    // When: the delete button is clicked but the user cancels.
+    fireEvent.click(screen.getByRole('button', { name: 'Delete Default' }));
+
+    // Then: nothing is deleted.
+    expect(workspaceDelete).not.toHaveBeenCalled();
+    expect(useWorkspaceStore.getState().workspaces).toHaveLength(2);
+  });
+
+  it('disables the delete button when only one workspace remains', () => {
+    // Given: a single workspace is loaded.
+    useWorkspaceStore.setState({ workspaces: [workspace1], activeWorkspaceId: workspace1.id });
+    render(<WorkspacesView />);
+
+    // When: the sidebar renders.
+    const deleteButton = screen.getByRole('button', { name: 'Delete Default' });
+
+    // Then: the delete button is disabled to prevent removing the last workspace.
+    expect(deleteButton).toBeDisabled();
   });
 });

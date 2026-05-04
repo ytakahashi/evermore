@@ -1,10 +1,11 @@
 import { useEffect } from 'react';
-import { selectActiveWorkspace, useWorkspaceStore } from '../../stores/workspaceStore';
+import { useWorkspaceStore } from '../../stores/workspaceStore';
 import { PaneLayout } from './PaneLayout';
 import { TabBar } from './TabBar';
 
 export function MainTerminalArea(): React.JSX.Element {
-  const activeWorkspace = useWorkspaceStore(selectActiveWorkspace);
+  const workspaces = useWorkspaceStore((state) => state.workspaces);
+  const activeWorkspaceId = useWorkspaceStore((state) => state.activeWorkspaceId);
   const error = useWorkspaceStore((state) => state.error);
   const isLoading = useWorkspaceStore((state) => state.isLoading);
   const loadWorkspaces = useWorkspaceStore((state) => state.loadWorkspaces);
@@ -14,30 +15,50 @@ export function MainTerminalArea(): React.JSX.Element {
   }, [loadWorkspaces]);
 
   let content: React.JSX.Element;
-  if (isLoading && !activeWorkspace) {
+  if (isLoading && workspaces.length === 0) {
     content = <div className="p-4 text-sm text-muted">Loading workspace...</div>;
-  } else if (error && !activeWorkspace) {
+  } else if (error && workspaces.length === 0) {
     content = <div className="p-4 text-sm text-danger">Failed to load workspace: {error}</div>;
-  } else if (activeWorkspace) {
+  } else if (workspaces.length > 0) {
     content = (
       <div className="relative h-full min-h-0 w-full">
-        {activeWorkspace.tabs.map((tab) => {
-          const isActive = tab.id === activeWorkspace.activeTabId;
+        {workspaces.map((workspace) => {
+          const isActiveWorkspace = workspace.id === activeWorkspaceId;
 
           return (
+            // Current implementation keeps non-active workspaces mounted so their PTY processes survive workspace
+            // switches. This eagerly creates PTYs for every loaded workspace; a later pane-runtime
+            // layer should lazy-mount only visited workspaces and then keep those mounted.
+            //
+            // `display: none` can make hidden xterm containers report zero dimensions and trigger a
+            // resize to the fallback PTY size. That wrapping drift is accepted for now because
+            // preserving running PTYs is the higher-priority workspace behavior.
             <div
-              key={tab.id}
-              aria-hidden={!isActive}
-              className={`absolute inset-0 min-h-0 w-full ${
-                isActive ? 'z-10 opacity-100' : 'pointer-events-none z-0 opacity-0'
-              }`}
+              key={workspace.id}
+              aria-hidden={!isActiveWorkspace}
+              className="absolute inset-0 min-h-0 w-full"
+              style={{ display: isActiveWorkspace ? undefined : 'none' }}
             >
-              <PaneLayout
-                isActiveTab={isActive}
-                layout={tab.layout}
-                panes={activeWorkspace.panes}
-                tab={tab}
-              />
+              {workspace.tabs.map((tab) => {
+                const isActive = tab.id === workspace.activeTabId;
+
+                return (
+                  <div
+                    key={tab.id}
+                    aria-hidden={!isActive}
+                    className={`absolute inset-0 min-h-0 w-full ${
+                      isActive ? 'z-10 opacity-100' : 'pointer-events-none z-0 opacity-0'
+                    }`}
+                  >
+                    <PaneLayout
+                      isActiveTab={isActiveWorkspace && isActive}
+                      layout={tab.layout}
+                      panes={workspace.panes}
+                      tab={tab}
+                    />
+                  </div>
+                );
+              })}
             </div>
           );
         })}

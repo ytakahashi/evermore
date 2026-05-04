@@ -47,11 +47,12 @@ describe('workspaceStore', () => {
     now = 2;
     workspace = createWorkspace('workspace-1', '/Users/tester');
     workspaceApi = {
-      list: vi.fn(() => Promise.resolve([workspace])),
+      list: vi.fn(() => Promise.resolve({ workspaces: [workspace], activeWorkspaceId: null })),
       get: vi.fn(() => Promise.resolve(workspace)),
       create: vi.fn(() => Promise.resolve(workspace)),
       update: vi.fn(() => Promise.resolve()),
       delete: vi.fn(() => Promise.resolve()),
+      setActiveWorkspaceId: vi.fn(() => Promise.resolve()),
     };
   });
 
@@ -73,6 +74,39 @@ describe('workspaceStore', () => {
     expect(selectActiveWorkspace(state)).toBe(workspace);
     expect(selectActiveTab(state)).toBe(workspace.tabs[0]);
     expect(selectActivePane(state)).toBe(workspace.panes[0]);
+  });
+
+  it('restores the persisted active workspace id on load', async () => {
+    // Given: two workspaces are persisted and the second was the last active.
+    const workspace2 = createWorkspace('workspace-2', '/Users/tester/2');
+    workspaceApi.list = vi.fn(() =>
+      Promise.resolve({
+        workspaces: [workspace, workspace2],
+        activeWorkspaceId: 'workspace-2',
+      }),
+    );
+    const useStore = createWorkspaceStore({ workspaceApi });
+
+    // When: renderer state is loaded.
+    await useStore.getState().loadWorkspaces();
+
+    // Then: the second workspace is active without writing anything back.
+    expect(useStore.getState().activeWorkspaceId).toBe('workspace-2');
+    expect(workspaceApi.setActiveWorkspaceId).not.toHaveBeenCalled();
+  });
+
+  it('falls back to the first workspace when the persisted active id is stale', async () => {
+    // Given: the persisted active id no longer matches any workspace.
+    workspaceApi.list = vi.fn(() =>
+      Promise.resolve({ workspaces: [workspace], activeWorkspaceId: 'deleted-workspace' }),
+    );
+    const useStore = createWorkspaceStore({ workspaceApi });
+
+    // When: renderer state is loaded.
+    await useStore.getState().loadWorkspaces();
+
+    // Then: the first available workspace is selected.
+    expect(useStore.getState().activeWorkspaceId).toBe('workspace-1');
   });
 
   it('updates local state immediately and persists after the debounce interval', async () => {
@@ -180,7 +214,9 @@ describe('workspaceStore', () => {
     // Given: a store with multiple loaded workspaces.
     vi.useFakeTimers();
     const workspace2 = createWorkspace('workspace-2', '/Users/tester/2');
-    workspaceApi.list = vi.fn(() => Promise.resolve([workspace, workspace2]));
+    workspaceApi.list = vi.fn(() =>
+      Promise.resolve({ workspaces: [workspace, workspace2], activeWorkspaceId: null }),
+    );
     const useStore = createWorkspaceStore({ workspaceApi, debounceMs: 50, now: () => now });
     await useStore.getState().loadWorkspaces();
 
@@ -207,7 +243,9 @@ describe('workspaceStore', () => {
     // Given: a store with multiple loaded workspaces.
     vi.useFakeTimers();
     const workspace2 = createWorkspace('workspace-2', '/Users/tester/2');
-    workspaceApi.list = vi.fn(() => Promise.resolve([workspace, workspace2]));
+    workspaceApi.list = vi.fn(() =>
+      Promise.resolve({ workspaces: [workspace, workspace2], activeWorkspaceId: null }),
+    );
     const useStore = createWorkspaceStore({ workspaceApi, debounceMs: 50, now: () => now });
     await useStore.getState().loadWorkspaces();
 
@@ -301,7 +339,9 @@ describe('workspaceStore', () => {
         },
       ],
     };
-    workspaceApi.list = vi.fn(() => Promise.resolve([secondTabWorkspace]));
+    workspaceApi.list = vi.fn(() =>
+      Promise.resolve({ workspaces: [secondTabWorkspace], activeWorkspaceId: null }),
+    );
     const useStore = createWorkspaceStore({ workspaceApi, debounceMs: 50, now: () => now });
     await useStore.getState().loadWorkspaces();
 
@@ -347,7 +387,9 @@ describe('workspaceStore', () => {
         },
       ],
     };
-    workspaceApi.list = vi.fn(() => Promise.resolve([workspace, workspace2WithTabs]));
+    workspaceApi.list = vi.fn(() =>
+      Promise.resolve({ workspaces: [workspace, workspace2WithTabs], activeWorkspaceId: null }),
+    );
     const useStore = createWorkspaceStore({ workspaceApi, debounceMs: 50, now: () => now });
     await useStore.getState().loadWorkspaces();
 
@@ -370,7 +412,9 @@ describe('workspaceStore', () => {
     // Given: two workspaces are loaded and the second workspace already has its target tab active.
     vi.useFakeTimers();
     const workspace2 = createWorkspace('workspace-2', '/Users/tester/project');
-    workspaceApi.list = vi.fn(() => Promise.resolve([workspace, workspace2]));
+    workspaceApi.list = vi.fn(() =>
+      Promise.resolve({ workspaces: [workspace, workspace2], activeWorkspaceId: null }),
+    );
     const useStore = createWorkspaceStore({ workspaceApi, debounceMs: 50, now: () => now });
     await useStore.getState().loadWorkspaces();
 
@@ -476,7 +520,9 @@ describe('workspaceStore', () => {
       ],
       activeTabId: 'workspace-1-tab-1',
     };
-    workspaceApi.list = vi.fn(() => Promise.resolve([secondTabWorkspace]));
+    workspaceApi.list = vi.fn(() =>
+      Promise.resolve({ workspaces: [secondTabWorkspace], activeWorkspaceId: null }),
+    );
     const useStore = createWorkspaceStore({ workspaceApi, debounceMs: 50, now: () => now });
     await useStore.getState().loadWorkspaces();
 
@@ -646,7 +692,9 @@ describe('workspaceStore', () => {
       ],
       activeTabId: 'tab-1',
     };
-    workspaceApi.list = vi.fn(() => Promise.resolve([multiTabWorkspace]));
+    workspaceApi.list = vi.fn(() =>
+      Promise.resolve({ workspaces: [multiTabWorkspace], activeWorkspaceId: null }),
+    );
     const useStore = createWorkspaceStore({ workspaceApi, debounceMs: 50, now: () => now });
     await useStore.getState().loadWorkspaces();
 
@@ -720,7 +768,9 @@ describe('workspaceStore', () => {
       ],
       activeTabId: 'tab-1',
     };
-    workspaceApi.list = vi.fn(() => Promise.resolve([nestedWorkspace]));
+    workspaceApi.list = vi.fn(() =>
+      Promise.resolve({ workspaces: [nestedWorkspace], activeWorkspaceId: null }),
+    );
     const useStore = createWorkspaceStore({ workspaceApi, debounceMs: 50, now: () => now });
     await useStore.getState().loadWorkspaces();
 
@@ -780,5 +830,141 @@ describe('workspaceStore', () => {
         ratio: 0.62,
       }),
     );
+  });
+
+  it('creates a workspace, adds it to the list, and makes it active', async () => {
+    // Given: a loaded store and a mock that returns a new workspace.
+    const newWorkspace = createWorkspace('workspace-2', '/Users/tester/new');
+    workspaceApi.create = vi.fn(() => Promise.resolve(newWorkspace));
+    const useStore = createWorkspaceStore({ workspaceApi });
+    await useStore.getState().loadWorkspaces();
+
+    // When: a new workspace is created.
+    await useStore.getState().createWorkspace('new');
+
+    // Then: the store appends the workspace and switches to it.
+    expect(workspaceApi.create).toHaveBeenCalledWith('new', '');
+    expect(useStore.getState().workspaces).toHaveLength(2);
+    expect(useStore.getState().activeWorkspaceId).toBe('workspace-2');
+  });
+
+  it('trims the name and falls back to "Workspace" when the name is blank', async () => {
+    // Given: a store where create resolves to any workspace.
+    const newWorkspace = createWorkspace('workspace-2', '/Users/tester/new');
+    workspaceApi.create = vi.fn(() => Promise.resolve(newWorkspace));
+    const useStore = createWorkspaceStore({ workspaceApi });
+    await useStore.getState().loadWorkspaces();
+
+    // When: createWorkspace is called with a blank name.
+    await useStore.getState().createWorkspace('   ');
+
+    // Then: the main process receives the default name.
+    expect(workspaceApi.create).toHaveBeenCalledWith('Workspace', '');
+  });
+
+  it('stores an error when createWorkspace fails', async () => {
+    // Given: the workspace API rejects on create.
+    workspaceApi.create = vi.fn(() => Promise.reject(new Error('create failed')));
+    const useStore = createWorkspaceStore({ workspaceApi });
+    await useStore.getState().loadWorkspaces();
+
+    // When: creation is attempted.
+    await useStore.getState().createWorkspace('new');
+
+    // Then: the error is surfaced and no workspace is added.
+    expect(useStore.getState().error).toBe('create failed');
+    expect(useStore.getState().workspaces).toHaveLength(1);
+  });
+
+  it('deletes a workspace and falls back to the first remaining workspace when active', async () => {
+    // Given: two workspaces are loaded and the first is active.
+    const workspace2 = createWorkspace('workspace-2', '/Users/tester/2');
+    workspaceApi.list = vi.fn(() =>
+      Promise.resolve({ workspaces: [workspace, workspace2], activeWorkspaceId: null }),
+    );
+    const useStore = createWorkspaceStore({ workspaceApi });
+    await useStore.getState().loadWorkspaces();
+
+    // When: the active workspace is deleted.
+    await useStore.getState().deleteWorkspace('workspace-1');
+
+    // Then: it is removed and the remaining workspace becomes active.
+    expect(workspaceApi.delete).toHaveBeenCalledWith('workspace-1');
+    expect(useStore.getState().workspaces).toHaveLength(1);
+    expect(useStore.getState().activeWorkspaceId).toBe('workspace-2');
+  });
+
+  it('deletes an inactive workspace without changing the active workspace', async () => {
+    // Given: two workspaces are loaded and the first is active.
+    const workspace2 = createWorkspace('workspace-2', '/Users/tester/2');
+    workspaceApi.list = vi.fn(() =>
+      Promise.resolve({ workspaces: [workspace, workspace2], activeWorkspaceId: null }),
+    );
+    const useStore = createWorkspaceStore({ workspaceApi });
+    await useStore.getState().loadWorkspaces();
+
+    // When: the inactive workspace is deleted.
+    await useStore.getState().deleteWorkspace('workspace-2');
+
+    // Then: the active workspace stays the same.
+    expect(useStore.getState().activeWorkspaceId).toBe('workspace-1');
+    expect(useStore.getState().workspaces).toHaveLength(1);
+  });
+
+  it('does not delete the last remaining workspace', async () => {
+    // Given: only one workspace exists.
+    const useStore = createWorkspaceStore({ workspaceApi });
+    await useStore.getState().loadWorkspaces();
+
+    // When: deletion is attempted on the only workspace.
+    await useStore.getState().deleteWorkspace('workspace-1');
+
+    // Then: the workspace is preserved and the API is not called.
+    expect(workspaceApi.delete).not.toHaveBeenCalled();
+    expect(useStore.getState().workspaces).toHaveLength(1);
+  });
+
+  it('stores an error when deleteWorkspace fails', async () => {
+    // Given: two workspaces are loaded and the API rejects on delete.
+    const workspace2 = createWorkspace('workspace-2', '/Users/tester/2');
+    workspaceApi.list = vi.fn(() =>
+      Promise.resolve({ workspaces: [workspace, workspace2], activeWorkspaceId: null }),
+    );
+    workspaceApi.delete = vi.fn(() => Promise.reject(new Error('delete failed')));
+    const useStore = createWorkspaceStore({ workspaceApi });
+    await useStore.getState().loadWorkspaces();
+
+    // When: deletion is attempted.
+    await useStore.getState().deleteWorkspace('workspace-1');
+
+    // Then: the error is surfaced and the list is unchanged.
+    expect(useStore.getState().error).toBe('delete failed');
+    expect(useStore.getState().workspaces).toHaveLength(2);
+  });
+
+  it('renames a workspace with a trimmed name and ignores blank names', async () => {
+    // Given: a loaded workspace.
+    vi.useFakeTimers();
+    const useStore = createWorkspaceStore({ workspaceApi, debounceMs: 50, now: () => now });
+    await useStore.getState().loadWorkspaces();
+
+    // When: the workspace is renamed with surrounding whitespace.
+    useStore.getState().renameWorkspace('workspace-1', '  Project  ');
+    await vi.advanceTimersByTimeAsync(50);
+
+    // Then: the trimmed name is applied and persisted.
+    expect(useStore.getState().workspaces[0]?.name).toBe('Project');
+    expect(workspaceApi.update).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'workspace-1', name: 'Project' }),
+    );
+
+    // When: callers submit a blank name.
+    vi.mocked(workspaceApi.update).mockClear();
+    useStore.getState().renameWorkspace('workspace-1', '   ');
+    await vi.advanceTimersByTimeAsync(50);
+
+    // Then: the blank rename is discarded.
+    expect(useStore.getState().workspaces[0]?.name).toBe('Project');
+    expect(workspaceApi.update).not.toHaveBeenCalled();
   });
 });

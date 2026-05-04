@@ -25,6 +25,9 @@ export interface WorkspaceStoreState {
   error: string | null;
   loadWorkspaces: () => Promise<void>;
   setActiveWorkspace: (id: string) => void;
+  createWorkspace: (name: string) => Promise<void>;
+  deleteWorkspace: (id: string) => Promise<void>;
+  renameWorkspace: (id: string, name: string) => void;
   addTab: () => void;
   renameTab: (tabId: string, title: string) => void;
   selectWorkspaceTab: (workspaceId: string, tabId: string) => void;
@@ -295,10 +298,11 @@ export function createWorkspaceStore(
         set({ isLoading: true, error: null });
 
         try {
-          const workspaces = await getWorkspaceApi().list();
-          const currentActiveWorkspaceId = get().activeWorkspaceId;
+          const { workspaces, activeWorkspaceId: persistedActiveId } =
+            await getWorkspaceApi().list();
+          // Validate that the persisted id still refers to a known workspace.
           const activeWorkspaceId =
-            workspaces.find((workspace) => workspace.id === currentActiveWorkspaceId)?.id ??
+            workspaces.find((workspace) => workspace.id === persistedActiveId)?.id ??
             workspaces[0]?.id ??
             null;
 
@@ -309,6 +313,50 @@ export function createWorkspaceStore(
       },
       setActiveWorkspace: (id: string): void => {
         set({ activeWorkspaceId: id });
+        void getWorkspaceApi().setActiveWorkspaceId(id);
+      },
+      createWorkspace: async (name: string): Promise<void> => {
+        const trimmedName = name.trim() || 'Workspace';
+        try {
+          // Pass empty rootPath so the main process defaults to the home directory.
+          const workspace = await getWorkspaceApi().create(trimmedName, '');
+          set((state) => ({
+            workspaces: [...state.workspaces, workspace],
+            activeWorkspaceId: workspace.id,
+          }));
+          void getWorkspaceApi().setActiveWorkspaceId(workspace.id);
+        } catch (error: unknown) {
+          set({ error: getErrorMessage(error) });
+        }
+      },
+      deleteWorkspace: async (id: string): Promise<void> => {
+        const state = get();
+        if (state.workspaces.length <= 1) {
+          return;
+        }
+        try {
+          await getWorkspaceApi().delete(id);
+          const remainingWorkspaces = state.workspaces.filter((w) => w.id !== id);
+          const newActiveId =
+            state.activeWorkspaceId === id
+              ? (remainingWorkspaces[0]?.id ?? null)
+              : state.activeWorkspaceId;
+          set({ workspaces: remainingWorkspaces, activeWorkspaceId: newActiveId });
+          void getWorkspaceApi().setActiveWorkspaceId(newActiveId);
+        } catch (error: unknown) {
+          set({ error: getErrorMessage(error) });
+        }
+      },
+      renameWorkspace: (id: string, name: string): void => {
+        const trimmedName = name.trim();
+        if (!trimmedName) {
+          return;
+        }
+        const workspace = get().workspaces.find((w) => w.id === id);
+        if (!workspace || workspace.name === trimmedName) {
+          return;
+        }
+        get().updateWorkspace({ ...workspace, name: trimmedName });
       },
       addTab: (): void => {
         const state = get();
@@ -390,6 +438,7 @@ export function createWorkspaceStore(
 
         if (!shouldSelectTab) {
           set({ activeWorkspaceId: workspace.id });
+          void getWorkspaceApi().setActiveWorkspaceId(workspace.id);
           return;
         }
 
@@ -401,6 +450,7 @@ export function createWorkspaceStore(
           // Sidebar tab selection can target an inactive workspace. `updateWorkspaceState()` only
           // preserves or initializes the active id, so switching workspace remains explicit here.
           set({ activeWorkspaceId: updatedWorkspace.id });
+          void getWorkspaceApi().setActiveWorkspaceId(updatedWorkspace.id);
         }
         persistWorkspaceDebounced(updatedWorkspace.id);
       },

@@ -41,11 +41,12 @@ describe('App', () => {
       value: {
         pty: {},
         workspace: {
-          list: vi.fn(() => Promise.resolve([workspace])),
+          list: vi.fn(() => Promise.resolve({ workspaces: [workspace], activeWorkspaceId: null })),
           get: vi.fn(() => Promise.resolve(workspace)),
           create: vi.fn(() => Promise.resolve(workspace)),
           update: vi.fn(() => Promise.resolve()),
           delete: vi.fn(() => Promise.resolve()),
+          setActiveWorkspaceId: vi.fn(() => Promise.resolve()),
         },
         ssh: {},
         tunnel: {},
@@ -65,11 +66,12 @@ describe('App', () => {
     render(<App />);
 
     // Then: the primary scaffold regions are visible.
-    expect(screen.getAllByText('evermore')).not.toHaveLength(0);
     expect(screen.getByText('Workspaces')).toBeInTheDocument();
     await waitFor(() => {
-      expect(screen.getByText('Terminal View')).toBeInTheDocument();
+      // TopBar shows the active workspace name once workspaces are loaded.
+      expect(screen.getAllByText('Default')).not.toHaveLength(0);
     });
+    await waitFor(() => expect(screen.getByText('Terminal View')).toBeInTheDocument());
   });
 
   it('renders named sidebar navigation buttons', () => {
