@@ -39,6 +39,7 @@ export interface SSHHost {
   port?: number;
   identityFile?: string;
   hasForwarding: boolean;
+  forwards: ForwardEntry[];
 }
 
 export interface Tunnel {

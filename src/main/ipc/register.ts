@@ -1,5 +1,6 @@
 import type { BrowserWindow } from 'electron';
 import { registerPtyHandlers } from './handlers/pty';
+import { registerSshHandlers } from './handlers/ssh';
 import { registerWorkspaceHandlers } from './handlers/workspace';
 
 interface RegisterIpcHandlersOptions {
@@ -15,9 +16,11 @@ interface RegisterIpcHandlersOptions {
 export function registerIpcHandlers(options: RegisterIpcHandlersOptions): () => void {
   const disposePtyHandlers = registerPtyHandlers({ getWindow: options.getWindow });
   const disposeWorkspaceHandlers = registerWorkspaceHandlers();
+  const disposeSshHandlers = registerSshHandlers();
 
   return () => {
     disposePtyHandlers();
     disposeWorkspaceHandlers();
+    disposeSshHandlers();
   };
 }
