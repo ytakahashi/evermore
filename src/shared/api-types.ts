@@ -1,4 +1,4 @@
-import type { Workspace, AppSettings, SSHHost, Tunnel } from './types';
+import type { Workspace, AppSettings, SSHHost, Tunnel, TunnelStatus } from './types';
 
 export interface Api {
   pty: {
@@ -28,7 +28,9 @@ export interface Api {
     start: (alias: string) => Promise<void>;
     stop: (alias: string) => Promise<void>;
     logs: (alias: string) => Promise<string[]>;
-    onStatusChanged: (cb: (alias: string, status: string, error?: string) => void) => () => void;
+    onStatusChanged: (
+      cb: (alias: string, status: TunnelStatus, error?: string) => void,
+    ) => () => void;
     onLog: (cb: (alias: string, data: string) => void) => () => void;
   };
   settings: {

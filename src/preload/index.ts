@@ -1,6 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import { IPC } from '../shared/ipc-channels';
-import type { Workspace, AppSettings, SSHHost, Tunnel } from '../shared/types';
+import type { Workspace, AppSettings, SSHHost, Tunnel, TunnelStatus } from '../shared/types';
 import type { Api } from '../shared/api-types';
 
 // Each pane subscribes its own callback via onData/onExit. Registering a new ipcRenderer.on()
@@ -74,11 +74,11 @@ const api = {
     stop: (alias: string): Promise<void> => ipcRenderer.invoke(IPC.TUNNEL_STOP, { alias }),
     logs: (alias: string): Promise<string[]> => ipcRenderer.invoke(IPC.TUNNEL_LOGS, { alias }),
     onStatusChanged: (
-      cb: (alias: string, status: string, error?: string) => void,
+      cb: (alias: string, status: TunnelStatus, error?: string) => void,
     ): (() => void) => {
       const handler = (
         _: unknown,
-        payload: { alias: string; status: string; error?: string },
+        payload: { alias: string; status: TunnelStatus; error?: string },
       ): void => cb(payload.alias, payload.status, payload.error);
       ipcRenderer.on(IPC.TUNNEL_STATUS_CHANGED, handler);
       return (): void => {
