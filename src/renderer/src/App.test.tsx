@@ -2,6 +2,7 @@ import { render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import App from './App';
 import type { Workspace } from '../../shared/types';
+import { useTunnelsStore } from './stores/tunnelsStore';
 
 vi.mock('./components/terminal/TerminalView', () => ({
   TerminalView: () => <div>Terminal View</div>,
@@ -49,13 +50,21 @@ describe('App', () => {
           setActiveWorkspaceId: vi.fn(() => Promise.resolve()),
         },
         ssh: {},
-        tunnel: {},
+        tunnel: {
+          list: vi.fn(() => Promise.resolve([])),
+          start: vi.fn(() => Promise.resolve()),
+          stop: vi.fn(() => Promise.resolve()),
+          logs: vi.fn(() => Promise.resolve([])),
+          onStatusChanged: vi.fn(() => vi.fn()),
+          onLog: vi.fn(() => vi.fn()),
+        },
         settings: {},
       } as unknown as Window['api'],
     });
   });
 
   afterEach(() => {
+    useTunnelsStore.setState({ tunnels: [], isLoading: false, error: null });
     Reflect.deleteProperty(window, 'api');
   });
 
