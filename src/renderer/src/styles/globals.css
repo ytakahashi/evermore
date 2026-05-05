@@ -32,6 +32,9 @@
   --color-neutral: #6b7280; /* stopped */
   --color-danger: #f87171; /* error */
   --color-warning: #fbbf24;
+  --color-status-running: var(--color-success);
+  --color-status-stopped: var(--color-neutral);
+  --color-status-error: var(--color-danger);
 
   /* ── Fonts ── */
   --font-sans: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Helvetica Neue', sans-serif;

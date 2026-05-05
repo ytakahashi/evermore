@@ -1,8 +1,7 @@
 import { create, type StoreApi, type UseBoundStore } from 'zustand';
 import type { Api } from '../../../shared/api-types';
+import { TUNNEL_LOG_BUFFER_SIZE } from '../../../shared/tunnel-constants';
 import type { Tunnel, TunnelStatus } from '../../../shared/types';
-
-const DEFAULT_LOG_BUFFER_SIZE = 200;
 
 type TunnelApi = Pick<Api['tunnel'], 'list' | 'start' | 'stop'>;
 
@@ -42,7 +41,7 @@ function getErrorMessage(error: unknown): string {
 export function createTunnelsStore(
   options: CreateTunnelsStoreOptions = {},
 ): UseBoundStore<StoreApi<TunnelsStoreState>> {
-  const logBufferSize = options.logBufferSize ?? DEFAULT_LOG_BUFFER_SIZE;
+  const logBufferSize = options.logBufferSize ?? TUNNEL_LOG_BUFFER_SIZE;
   const now = options.now ?? Date.now;
   const getTunnelApi = (): TunnelApi => options.tunnelApi ?? window.api.tunnel;
 

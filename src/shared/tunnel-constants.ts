@@ -1,0 +1,1 @@
+export const TUNNEL_LOG_BUFFER_SIZE = 200;

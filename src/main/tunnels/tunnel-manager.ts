@@ -1,6 +1,7 @@
 import { spawn as nodeSpawn } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
 import type { Readable } from 'node:stream';
+import { TUNNEL_LOG_BUFFER_SIZE } from '../../shared/tunnel-constants';
 import type { TunnelStatus } from '../../shared/types';
 import type { TunnelManagerCallbacks, TunnelRuntimeState, TunnelSpawn } from './types';
 
@@ -26,7 +27,6 @@ interface TunnelRecord extends TunnelRuntimeState {
 
 const DEFAULT_STARTUP_GRACE_MS = 1500;
 const DEFAULT_KILL_GRACE_MS = 2000;
-const DEFAULT_LOG_BUFFER_SIZE = 200;
 
 /**
  * Owns SSH tunnel processes and exposes serializable runtime state for main-process IPC.
@@ -47,7 +47,7 @@ export class TunnelManager {
     this.now = options.now ?? Date.now;
     this.startupGraceMs = options.startupGraceMs ?? DEFAULT_STARTUP_GRACE_MS;
     this.killGraceMs = options.killGraceMs ?? DEFAULT_KILL_GRACE_MS;
-    this.logBufferSize = options.logBufferSize ?? DEFAULT_LOG_BUFFER_SIZE;
+    this.logBufferSize = options.logBufferSize ?? TUNNEL_LOG_BUFFER_SIZE;
   }
 
   /**
