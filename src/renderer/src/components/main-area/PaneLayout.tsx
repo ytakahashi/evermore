@@ -65,6 +65,7 @@ export function PaneLayout({
       >
         <TerminalView
           cwd={pane.cwd}
+          initialCommand={pane.initialCommand}
           isActive={isActive}
           onCwdChange={(cwd) => {
             updatePaneCwd(pane.id, cwd);

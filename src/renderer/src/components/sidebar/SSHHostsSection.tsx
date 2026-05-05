@@ -1,6 +1,7 @@
 import { RefreshCw, Server } from 'lucide-react';
 import type { SSHHost } from '../../../../shared/types';
 import { useConnectionsStore } from '../../stores/connectionsStore';
+import { useWorkspaceStore } from '../../stores/workspaceStore';
 
 function formatHostDetail(host: SSHHost): string | null {
   // Skip the subtitle entirely when none of HostName / User / Port is configured,
@@ -17,16 +18,17 @@ function formatHostDetail(host: SSHHost): string | null {
 
 interface HostRowProps {
   host: SSHHost;
+  onOpen: (alias: string) => void;
 }
 
-function HostRow({ host }: HostRowProps): React.JSX.Element {
+function HostRow({ host, onOpen }: HostRowProps): React.JSX.Element {
   const detail = formatHostDetail(host);
   return (
     <button
       className="group flex w-full items-start gap-2 rounded-md px-2 py-1.5 text-left text-sm text-muted hover:bg-raised/50 hover:text-foreground"
       type="button"
       onClick={() => {
-        // Step 5 wires this row to workspaceStore.openSshHostTab(host.alias).
+        onOpen(host.alias);
       }}
     >
       <Server size={14} className="mt-0.5 shrink-0 text-subtle group-hover:text-brand" />
@@ -57,6 +59,7 @@ export function SSHHostsSection(): React.JSX.Element {
   const isLoading = useConnectionsStore((state) => state.isLoading);
   const error = useConnectionsStore((state) => state.error);
   const reloadHosts = useConnectionsStore((state) => state.reloadHosts);
+  const openSshHostTab = useWorkspaceStore((state) => state.openSshHostTab);
 
   let content: React.ReactNode;
   if (isLoading) {
@@ -84,7 +87,7 @@ export function SSHHostsSection(): React.JSX.Element {
         {hosts.map((host, index) => (
           // Index is appended because OpenSSH allows the same alias to appear in multiple
           // Include files; alias alone is not guaranteed unique across the merged list.
-          <HostRow key={`${host.alias}-${index}`} host={host} />
+          <HostRow key={`${host.alias}-${index}`} host={host} onOpen={openSshHostTab} />
         ))}
       </div>
     );

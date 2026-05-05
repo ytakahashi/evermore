@@ -87,16 +87,24 @@ interface PtyApiMock {
 
 interface TestTerminalProps {
   cwd?: string;
+  initialCommand?: string;
   isActive?: boolean;
   onCwdChange?: (cwd: string) => void;
 }
 
 function TestTerminal({
   cwd = '/Users/tester/project',
+  initialCommand,
   isActive = true,
   onCwdChange,
 }: TestTerminalProps): React.JSX.Element {
-  const { containerRef } = useTerminal({ cwd, isActive, onCwdChange, shell: '/bin/zsh' });
+  const { containerRef } = useTerminal({
+    cwd,
+    initialCommand,
+    isActive,
+    onCwdChange,
+    shell: '/bin/zsh',
+  });
 
   return <div ref={containerRef} />;
 }
@@ -168,6 +176,42 @@ describe('useTerminal', () => {
       expect(ptyApi.resize).toHaveBeenCalledWith('pty-1', 132, 43);
     });
     expect(xtermMock.terminalInstances[0]?.focus).toHaveBeenCalled();
+  });
+
+  it('writes the initial command once after PTY creation', async () => {
+    // Given: a terminal pane was created for an SSH host tab.
+    const { rerender } = render(<TestTerminal initialCommand="ssh 'dev'" />);
+
+    // When: the PTY is created and the component rerenders with the same command.
+    await waitFor(() => {
+      expect(ptyApi.write).toHaveBeenCalledWith('pty-1', "ssh 'dev'\r");
+    });
+    rerender(<TestTerminal initialCommand="ssh 'dev'" />);
+
+    // Then: the command is injected once for that PTY.
+    expect(ptyApi.write).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not write the initial command if PTY creation resolves after unmount', async () => {
+    // Given: PTY creation is still pending when the pane is closed.
+    let resolveCreate!: (id: string) => void;
+    ptyApi.create = vi.fn(
+      () =>
+        new Promise<string>((resolve) => {
+          resolveCreate = resolve;
+        }),
+    );
+
+    // When: the terminal unmounts before IPC returns the PTY id.
+    const { unmount } = render(<TestTerminal initialCommand="ssh 'dev'" />);
+    unmount();
+    resolveCreate?.('late-pty');
+    await waitFor(() => {
+      expect(ptyApi.dispose).toHaveBeenCalledWith('late-pty');
+    });
+
+    // Then: no command is sent to the disposed process.
+    expect(ptyApi.write).not.toHaveBeenCalled();
   });
 
   it('does not focus an inactive terminal on mount or PTY creation', async () => {

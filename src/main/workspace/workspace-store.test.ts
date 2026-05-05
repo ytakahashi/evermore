@@ -124,8 +124,8 @@ describe('WorkspaceStore', () => {
     expect(store.list()).toEqual([defaultWorkspace]);
   });
 
-  it('does not persist runtime PTY ids', () => {
-    // Given: a workspace update includes a runtime PTY id from the renderer.
+  it('does not persist runtime pane state', () => {
+    // Given: a workspace update includes runtime pane state from the renderer.
     const workspace = store.list()[0];
     if (!workspace) {
       throw new Error('Expected default workspace to be created.');
@@ -137,12 +137,13 @@ describe('WorkspaceStore', () => {
       panes: [
         {
           ...workspace.panes[0],
+          initialCommand: "ssh 'dev'",
           ptyId: 'pty-runtime-1',
         },
       ],
     });
 
-    // Then: storage receives the pane without runtime-only process state.
+    // Then: storage receives the pane without runtime-only process state or replay commands.
     expect(storage.workspaces[0]?.panes[0]).toEqual({
       id: 'pane-1',
       cwd: '/Users/tester',

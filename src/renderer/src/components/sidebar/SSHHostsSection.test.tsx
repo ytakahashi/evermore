@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { SSHHost } from '../../../../shared/types';
 import { useConnectionsStore } from '../../stores/connectionsStore';
+import { useWorkspaceStore } from '../../stores/workspaceStore';
 import { SSHHostsSection } from './SSHHostsSection';
 
 const hosts: SSHHost[] = [
@@ -29,6 +30,7 @@ const hosts: SSHHost[] = [
 ];
 
 const initialConnectionsState = useConnectionsStore.getState();
+const initialWorkspaceState = useWorkspaceStore.getState();
 
 describe('SSHHostsSection', () => {
   afterEach(() => {
@@ -39,6 +41,7 @@ describe('SSHHostsSection', () => {
       loadHosts: initialConnectionsState.loadHosts,
       reloadHosts: initialConnectionsState.reloadHosts,
     });
+    useWorkspaceStore.setState(initialWorkspaceState);
   });
 
   it('renders host rows with detail text and forwarding badges', () => {
@@ -122,5 +125,19 @@ describe('SSHHostsSection', () => {
     await waitFor(() => {
       expect(screen.getByRole('button', { name: 'Reload SSH hosts' })).toBeDisabled();
     });
+  });
+
+  it('opens a host tab when a host row is clicked', () => {
+    // Given: SSH hosts are listed and the workspace store can open an SSH tab.
+    const openSshHostTab = vi.fn();
+    useConnectionsStore.setState({ hosts });
+    useWorkspaceStore.setState({ openSshHostTab });
+
+    // When: the user clicks a host row.
+    render(<SSHHostsSection />);
+    fireEvent.click(screen.getByRole('button', { name: /dev/ }));
+
+    // Then: the host alias is passed to the workspace action.
+    expect(openSshHostTab).toHaveBeenCalledWith('dev');
   });
 });

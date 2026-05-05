@@ -8,6 +8,7 @@ import { terminalTheme } from './theme';
 
 interface UseTerminalOptions {
   cwd: string;
+  initialCommand?: string;
   isActive?: boolean;
   onCwdChange?: (cwd: string) => void;
   shell?: string;
@@ -30,6 +31,7 @@ export function useTerminal(options: UseTerminalOptions): UseTerminalResult {
   const fitAddonRef = useRef<FitAddon | null>(null);
   const ptyIdRef = useRef<string | null>(null);
   const initialOptionsRef = useRef(options);
+  const initialCommandWrittenPtyIdsRef = useRef(new Set<string>());
   const isActiveRef = useRef(options.isActive ?? false);
   const onCwdChangeRef = useRef(options.onCwdChange);
 
@@ -145,6 +147,14 @@ export function useTerminal(options: UseTerminalOptions): UseTerminalResult {
       ptyIdRef.current = id;
       fitAndResize();
       focusIfActive();
+
+      const initialCommand = initialOptions.initialCommand;
+      if (initialCommand && !initialCommandWrittenPtyIdsRef.current.has(id)) {
+        initialCommandWrittenPtyIdsRef.current.add(id);
+        // Fire-and-forget: IPC failures here surface through subsequent terminal silence;
+        // retrying would risk replaying the command twice if the PTY is still alive.
+        void ptyApi.write(id, `${initialCommand}\r`);
+      }
     });
 
     return () => {

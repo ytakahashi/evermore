@@ -4,6 +4,7 @@ import { useTerminal } from './useTerminal';
 
 interface TerminalViewProps {
   cwd?: string;
+  initialCommand?: string;
   isActive?: boolean;
   onCwdChange?: (cwd: string) => void;
   shell?: string;
@@ -14,11 +15,12 @@ interface TerminalViewProps {
  */
 export function TerminalView({
   cwd = '',
+  initialCommand,
   isActive = false,
   onCwdChange,
   shell,
 }: TerminalViewProps): React.JSX.Element {
-  const { containerRef } = useTerminal({ cwd, isActive, onCwdChange, shell });
+  const { containerRef } = useTerminal({ cwd, initialCommand, isActive, onCwdChange, shell });
 
   return (
     <div className="h-full min-h-0 w-full bg-terminal p-2">

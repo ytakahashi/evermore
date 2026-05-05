@@ -313,6 +313,42 @@ describe('workspaceStore', () => {
     });
   });
 
+  it('opens an SSH host in a new active tab with a quoted initial command', async () => {
+    // Given: a loaded workspace with deterministic tab and pane ids.
+    vi.useFakeTimers();
+    const ids = ['tab-2', 'pane-2'];
+    const useStore = createWorkspaceStore({
+      createId: () => ids.shift() ?? 'fallback-id',
+      workspaceApi,
+      debounceMs: 50,
+      now: () => now,
+    });
+    await useStore.getState().loadWorkspaces();
+
+    // When: a host alias is opened from the Connections sidebar.
+    useStore.getState().openSshHostTab("dev'host");
+    const updatedWorkspace = selectActiveWorkspace(useStore.getState());
+
+    // Then: the SSH tab is active and the command is shell-quoted before terminal injection.
+    expect(updatedWorkspace?.activeTabId).toBe('tab-2');
+    expect(updatedWorkspace?.tabs[1]).toEqual({
+      id: 'tab-2',
+      title: "dev'host",
+      layout: {
+        type: 'leaf',
+        paneId: 'pane-2',
+      },
+      activePaneId: 'pane-2',
+    });
+    expect(updatedWorkspace?.panes[1]).toEqual({
+      id: 'pane-2',
+      cwd: '/Users/tester',
+      title: "dev'host",
+      // POSIX single-quote escape: close, escape ', reopen.
+      initialCommand: "ssh 'dev'\\''host'",
+    });
+  });
+
   it('selects a tab and persists the active tab id', async () => {
     // Given: a workspace has two tabs.
     vi.useFakeTimers();

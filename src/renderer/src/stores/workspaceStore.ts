@@ -30,6 +30,7 @@ export interface WorkspaceStoreState {
   renameWorkspace: (id: string, name: string) => void;
   addTab: () => void;
   renameTab: (tabId: string, title: string) => void;
+  openSshHostTab: (alias: string) => void;
   selectWorkspaceTab: (workspaceId: string, tabId: string) => void;
   selectTab: (tabId: string) => void;
   closeTab: (tabId: string) => void;
@@ -190,6 +191,42 @@ function selectNextTabIdAfterClose(workspace: Workspace, closingTabId: string): 
   const remainingTabs = workspace.tabs.filter((tab) => tab.id !== closingTabId);
 
   return remainingTabs[Math.min(closingIndex, remainingTabs.length - 1)]?.id ?? null;
+}
+
+function shellQuote(value: string): string {
+  return `'${value.replaceAll("'", "'\\''")}'`;
+}
+
+interface CreateTabWithPaneOptions {
+  cwd: string;
+  initialCommand?: string;
+  title: string;
+}
+
+function createTabWithPane(
+  createId: () => string,
+  options: CreateTabWithPaneOptions,
+): { pane: Pane; tab: Tab } {
+  const tabId = createId();
+  const paneId = createId();
+
+  return {
+    pane: {
+      id: paneId,
+      cwd: options.cwd,
+      title: options.title,
+      initialCommand: options.initialCommand,
+    },
+    tab: {
+      id: tabId,
+      title: options.title,
+      layout: {
+        type: 'leaf',
+        paneId,
+      },
+      activePaneId: paneId,
+    },
+  };
 }
 
 /**
@@ -366,33 +403,14 @@ export function createWorkspaceStore(
           return;
         }
 
-        const tabId = createStoreId();
-        const paneId = createStoreId();
         const cwd = activePane?.cwd ?? workspace.rootPath;
         const title = activePane?.title ?? workspace.panes[0]?.title ?? 'zsh';
+        const { pane, tab } = createTabWithPane(createStoreId, { cwd, title });
         const updatedWorkspace: Workspace = {
           ...workspace,
-          tabs: [
-            ...workspace.tabs,
-            {
-              id: tabId,
-              title,
-              layout: {
-                type: 'leaf',
-                paneId,
-              },
-              activePaneId: paneId,
-            },
-          ],
-          panes: [
-            ...workspace.panes,
-            {
-              id: paneId,
-              cwd,
-              title,
-            },
-          ],
-          activeTabId: tabId,
+          tabs: [...workspace.tabs, tab],
+          panes: [...workspace.panes, pane],
+          activeTabId: tab.id,
         };
 
         get().updateWorkspace(updatedWorkspace);
@@ -415,6 +433,31 @@ export function createWorkspaceStore(
             title: trimmedTitle,
           }),
         );
+      },
+      openSshHostTab: (alias: string): void => {
+        const state = get();
+        const workspace = selectActiveWorkspace(state);
+        const activePane = selectActivePane(state);
+        if (!workspace) {
+          return;
+        }
+
+        const cwd = activePane?.cwd ?? workspace.rootPath;
+        // SSH aliases come from ~/.ssh/config, but the command is injected into a shell. Quoting
+        // keeps unusual Host aliases from being interpreted as shell syntax.
+        const initialCommand = `ssh ${shellQuote(alias)}`;
+        const { pane, tab } = createTabWithPane(createStoreId, {
+          cwd,
+          initialCommand,
+          title: alias,
+        });
+
+        get().updateWorkspace({
+          ...workspace,
+          tabs: [...workspace.tabs, tab],
+          panes: [...workspace.panes, pane],
+          activeTabId: tab.id,
+        });
       },
       selectWorkspaceTab: (workspaceId: string, tabId: string): void => {
         const workspace = get().workspaces.find(

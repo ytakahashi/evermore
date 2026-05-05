@@ -30,6 +30,7 @@ export interface Pane {
   cwd: string; // absolute path
   title: string; // display name
   ptyId?: string; // runtime only
+  initialCommand?: string; // runtime only; sanitizePane drops it from persistence so restored panes do not replay
 }
 
 export interface SSHHost {

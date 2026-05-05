@@ -41,7 +41,7 @@ class ElectronWorkspaceStorageAdapter implements WorkspaceStorageAdapter {
 }
 
 function sanitizePane(pane: Pane): Pane {
-  const { ptyId: _ptyId, ...persistedPane } = pane;
+  const { ptyId: _ptyId, initialCommand: _initialCommand, ...persistedPane } = pane;
   return persistedPane;
 }
 
