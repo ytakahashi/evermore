@@ -7,7 +7,7 @@ import { TunnelManager } from '../../tunnels/tunnel-manager';
 type TunnelSshConfigManager = Pick<SshConfigManager, 'list'>;
 type TunnelRuntimeManager = Pick<
   TunnelManager,
-  'start' | 'stop' | 'getRuntimeState' | 'logs' | 'disposeAll'
+  'start' | 'stop' | 'getRuntimeState' | 'list' | 'logs' | 'disposeAll'
 >;
 
 interface RegisterTunnelHandlersOptions {
@@ -25,17 +25,34 @@ function toTunnel(host: SSHHost, tunnelManager: TunnelRuntimeManager): Tunnel {
 
   return {
     alias: host.alias,
-    // Shares the array reference owned by SshConfigManager's cache. IPC structured-clone breaks
-    // the alias at the renderer boundary, so this is only safe while no main-process consumer
-    // mutates the result of tunnel:list. Clone (e.g. `[...host.forwards]`) before adding any
-    // forwards-mutating logic here.
-    forwards: host.forwards,
+    // Clone the array to prevent accidental mutation of the SshConfigManager's cache.
+    forwards: [...host.forwards],
     status: runtimeState?.status ?? 'stopped',
     pid: runtimeState?.pid,
     startedAt: runtimeState?.startedAt,
     lastError: runtimeState?.lastError,
     recentLogs: runtimeState?.recentLogs ?? [],
   };
+}
+
+function warnAboutUnconfiguredActiveTunnels(
+  hosts: SSHHost[],
+  tunnelManager: TunnelRuntimeManager,
+): void {
+  const configuredTunnelAliases = new Set(
+    hosts.filter((host) => host.hasForwarding).map((host) => host.alias),
+  );
+
+  for (const runtimeEntry of tunnelManager.list()) {
+    if (
+      !configuredTunnelAliases.has(runtimeEntry.alias) &&
+      (runtimeEntry.state.status === 'starting' || runtimeEntry.state.status === 'running')
+    ) {
+      console.warn(
+        `[Evermore] SSH tunnel "${runtimeEntry.alias}" is ${runtimeEntry.state.status} but is no longer configured in ~/.ssh/config. Leaving the process running until it is stopped or the app quits.`,
+      );
+    }
+  }
 }
 
 /**
@@ -66,12 +83,12 @@ export function registerTunnelHandlers(options: RegisterTunnelHandlersOptions): 
       },
     });
 
-  ipcMain.handle(IPC.TUNNEL_LIST, () =>
-    options.sshConfigManager
-      .list()
-      .filter((host) => host.hasForwarding)
-      .map((host) => toTunnel(host, tunnelManager)),
-  );
+  ipcMain.handle(IPC.TUNNEL_LIST, () => {
+    const hosts = options.sshConfigManager.list();
+    warnAboutUnconfiguredActiveTunnels(hosts, tunnelManager);
+
+    return hosts.filter((host) => host.hasForwarding).map((host) => toTunnel(host, tunnelManager));
+  });
   ipcMain.handle(IPC.TUNNEL_START, (_event, payload: { alias: string }) => {
     tunnelManager.start(payload.alias);
   });

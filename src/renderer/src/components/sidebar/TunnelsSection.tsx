@@ -1,7 +1,7 @@
 import { ChevronDown, ChevronRight, Play, RefreshCw, Square } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import type { ForwardEntry, Tunnel, TunnelStatus } from '../../../../shared/types';
-import { useConnectionsStore } from '../../stores/connectionsStore';
+import { useReloadConnections } from '../../hooks/useReloadConnections';
 import { useTunnelsStore } from '../../stores/tunnelsStore';
 
 const ACTION_DISABLE_MS = 500;
@@ -167,9 +167,7 @@ export function TunnelsSection(): React.JSX.Element {
   const error = useTunnelsStore((state) => state.error);
   const startTunnel = useTunnelsStore((state) => state.startTunnel);
   const stopTunnel = useTunnelsStore((state) => state.stopTunnel);
-  const loadTunnels = useTunnelsStore((state) => state.loadTunnels);
-  const reloadHosts = useConnectionsStore((state) => state.reloadHosts);
-  const hostsLoading = useConnectionsStore((state) => state.isLoading);
+  const { isReloading, reloadConnections } = useReloadConnections();
   const [expandedAliases, setExpandedAliases] = useState<Set<string>>(() => new Set());
   const [busyAliases, setBusyAliases] = useState<Set<string>>(() => new Set());
   const busyTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
@@ -183,8 +181,6 @@ export function TunnelsSection(): React.JSX.Element {
       busyTimers.clear();
     };
   }, []);
-
-  const isReloading = isLoading || hostsLoading;
 
   const markBusy = (alias: string): void => {
     setBusyAliases((current) => new Set(current).add(alias));
@@ -215,8 +211,7 @@ export function TunnelsSection(): React.JSX.Element {
   };
 
   const handleReload = async (): Promise<void> => {
-    await reloadHosts();
-    await loadTunnels();
+    await reloadConnections();
   };
 
   const toggleExpanded = (alias: string): void => {

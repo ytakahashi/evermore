@@ -48,8 +48,10 @@ export interface Tunnel {
   forwards: ForwardEntry[];
   status: TunnelStatus;
   pid?: number;
+  /** Unix timestamp (ms) when the tunnel reached the 'running' state. */
   startedAt?: number;
   lastError?: string;
+  /** Ring buffer of recent log lines, capped at TUNNEL_LOG_BUFFER_SIZE (default 200). */
   recentLogs: string[];
 }
 

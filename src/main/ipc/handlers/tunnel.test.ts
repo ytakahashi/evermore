@@ -18,6 +18,7 @@ const tunnelManagerMock = vi.hoisted(() => ({
   callbacks: undefined as TunnelManagerCallbacks | undefined,
   disposeAll: vi.fn(),
   getRuntimeState: vi.fn(),
+  list: vi.fn(),
   logs: vi.fn(),
   start: vi.fn(),
   stop: vi.fn(),
@@ -33,6 +34,7 @@ vi.mock('../../tunnels/tunnel-manager', () => ({
     return {
       disposeAll: tunnelManagerMock.disposeAll,
       getRuntimeState: tunnelManagerMock.getRuntimeState,
+      list: tunnelManagerMock.list,
       logs: tunnelManagerMock.logs,
       start: tunnelManagerMock.start,
       stop: tunnelManagerMock.stop,
@@ -62,6 +64,7 @@ interface TestTunnelManager {
   start: ReturnType<typeof vi.fn<(alias: string) => void>>;
   stop: ReturnType<typeof vi.fn<(alias: string) => void>>;
   getRuntimeState: ReturnType<typeof vi.fn<(alias: string) => TunnelRuntimeState | undefined>>;
+  list: ReturnType<typeof vi.fn<() => Array<{ alias: string; state: TunnelRuntimeState }>>>;
   logs: ReturnType<typeof vi.fn<(alias: string) => string[]>>;
   disposeAll: ReturnType<typeof vi.fn<() => void>>;
 }
@@ -75,6 +78,9 @@ function createTunnelManager(
     getRuntimeState: vi.fn<(alias: string) => TunnelRuntimeState | undefined>(
       (alias: string) => runtimeStates[alias],
     ),
+    list: vi.fn<() => Array<{ alias: string; state: TunnelRuntimeState }>>(() =>
+      Object.entries(runtimeStates).flatMap(([alias, state]) => (state ? [{ alias, state }] : [])),
+    ),
     logs: vi.fn<(alias: string) => string[]>((alias: string) => [`${alias} log`]),
     disposeAll: vi.fn<() => void>(),
   };
@@ -87,6 +93,7 @@ describe('registerTunnelHandlers', () => {
     tunnelManagerMock.callbacks = undefined;
     tunnelManagerMock.disposeAll.mockClear();
     tunnelManagerMock.getRuntimeState.mockClear();
+    tunnelManagerMock.list.mockClear();
     tunnelManagerMock.logs.mockClear();
     tunnelManagerMock.start.mockClear();
     tunnelManagerMock.stop.mockClear();
@@ -273,5 +280,48 @@ describe('registerTunnelHandlers', () => {
 
     // Then: the event is dropped instead of touching a dead renderer.
     expect(window.webContents.send).not.toHaveBeenCalled();
+  });
+
+  it('warns when an active runtime tunnel is no longer configured', () => {
+    // Given: runtime state still has an active tunnel that config no longer contains.
+    const consoleWarn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const sshConfigManager = {
+      list: vi.fn(() => [
+        {
+          alias: 'configured',
+          hasForwarding: true,
+          forwards: [],
+        },
+      ]),
+    };
+    const tunnelManager = createTunnelManager({
+      configured: {
+        status: 'running',
+        recentLogs: [],
+      },
+      removed: {
+        status: 'running',
+        recentLogs: [],
+      },
+      'failed-removed': {
+        status: 'error',
+        recentLogs: [],
+      },
+    });
+
+    // When: renderer asks for the current tunnel list after config reload.
+    registerTunnelHandlers({
+      getWindow: () => null,
+      sshConfigManager,
+      tunnelManager,
+    });
+    getHandler(IPC.TUNNEL_LIST)?.({});
+
+    // Then: only the active unconfigured runtime tunnel is reported for developer visibility.
+    expect(consoleWarn).toHaveBeenCalledOnce();
+    expect(consoleWarn).toHaveBeenCalledWith(
+      expect.stringContaining('SSH tunnel "removed" is running'),
+    );
+    consoleWarn.mockRestore();
   });
 });

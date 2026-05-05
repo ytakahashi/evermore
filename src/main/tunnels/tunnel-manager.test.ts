@@ -317,6 +317,24 @@ describe('TunnelManager', () => {
     expect(spawnedProcesses[1]?.killSignals).toEqual(['SIGTERM', 'SIGKILL']);
   });
 
+  it('disposes starting tunnels and ignores already settled tunnels', () => {
+    // Given: one starting tunnel, one cleanly stopped tunnel, and one error tunnel.
+    manager.start('starting');
+    manager.start('stopped');
+    spawnedProcesses[1]?.emitExit(0);
+    manager.start('failed');
+    spawnedProcesses[2]?.emitError(new Error('ssh not found'));
+
+    // When: the manager is disposed and the starting process remains alive.
+    manager.disposeAll();
+    vi.advanceTimersByTime(2000);
+
+    // Then: only the still-active tunnel is terminated.
+    expect(spawnedProcesses[0]?.killSignals).toEqual(['SIGTERM', 'SIGKILL']);
+    expect(spawnedProcesses[1]?.killSignals).toEqual([]);
+    expect(spawnedProcesses[2]?.killSignals).toEqual([]);
+  });
+
   it('keeps a FIFO ring buffer of recent log lines', () => {
     // Given: the manager has a log buffer size of three.
     manager.start('dev');

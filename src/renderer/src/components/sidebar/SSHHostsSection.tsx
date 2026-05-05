@@ -1,5 +1,6 @@
 import { RefreshCw, Server } from 'lucide-react';
 import type { SSHHost } from '../../../../shared/types';
+import { useReloadConnections } from '../../hooks/useReloadConnections';
 import { useConnectionsStore } from '../../stores/connectionsStore';
 import { useWorkspaceStore } from '../../stores/workspaceStore';
 
@@ -58,8 +59,8 @@ export function SSHHostsSection(): React.JSX.Element {
   const hosts = useConnectionsStore((state) => state.hosts);
   const isLoading = useConnectionsStore((state) => state.isLoading);
   const error = useConnectionsStore((state) => state.error);
-  const reloadHosts = useConnectionsStore((state) => state.reloadHosts);
   const openSshHostTab = useWorkspaceStore((state) => state.openSshHostTab);
+  const { isReloading, reloadConnections } = useReloadConnections();
 
   let content: React.ReactNode;
   if (isLoading) {
@@ -72,7 +73,7 @@ export function SSHHostsSection(): React.JSX.Element {
           className="rounded border border-border px-2 py-1 text-xs text-muted hover:bg-raised hover:text-foreground"
           type="button"
           onClick={() => {
-            void reloadHosts();
+            void reloadConnections();
           }}
         >
           Retry
@@ -100,11 +101,11 @@ export function SSHHostsSection(): React.JSX.Element {
         <button
           aria-label="Reload SSH hosts"
           className="flex size-4 items-center justify-center rounded hover:bg-raised hover:text-foreground disabled:cursor-default disabled:opacity-40"
-          disabled={isLoading}
+          disabled={isReloading}
           title="Reload SSH hosts"
           type="button"
           onClick={() => {
-            void reloadHosts();
+            void reloadConnections();
           }}
         >
           <RefreshCw size={12} />

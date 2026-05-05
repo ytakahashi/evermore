@@ -22,6 +22,20 @@ export interface TunnelsStoreState {
   appendLog: (alias: string, line: string) => void;
 }
 
+/**
+ * Counts tunnels that have reached the running state.
+ */
+export function selectRunningTunnelCount(state: TunnelsStoreState): number {
+  return state.tunnels.filter((tunnel) => tunnel.status === 'running').length;
+}
+
+/**
+ * Counts tunnels currently reporting an error state.
+ */
+export function selectErrorTunnelCount(state: TunnelsStoreState): number {
+  return state.tunnels.filter((tunnel) => tunnel.status === 'error').length;
+}
+
 function getErrorMessage(error: unknown): string {
   if (error instanceof Error) {
     return error.message;

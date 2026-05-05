@@ -1,6 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { Tunnel } from '../../../shared/types';
-import { createTunnelsStore } from './tunnelsStore';
+import {
+  createTunnelsStore,
+  selectErrorTunnelCount,
+  selectRunningTunnelCount,
+} from './tunnelsStore';
 
 type TunnelApiMock = Pick<Window['api']['tunnel'], 'list' | 'start' | 'stop'>;
 
@@ -170,5 +174,41 @@ describe('tunnelsStore', () => {
 
     // Then: config-ineligible tunnels are not created in renderer state.
     expect(useStore.getState().tunnels).toEqual([]);
+  });
+
+  it('selects running and error tunnel counts', () => {
+    // Given: tunnel state contains multiple runtime states.
+    const useStore = createTunnelsStore();
+    useStore.setState({
+      tunnels: [
+        {
+          ...tunnel,
+          alias: 'running-1',
+          status: 'running',
+        },
+        {
+          ...tunnel,
+          alias: 'running-2',
+          status: 'running',
+        },
+        {
+          ...tunnel,
+          alias: 'failed',
+          status: 'error',
+        },
+        {
+          ...tunnel,
+          alias: 'stopped',
+          status: 'stopped',
+        },
+      ],
+    });
+
+    // When: selectors read the current tunnel state.
+    const state = useStore.getState();
+
+    // Then: each selector counts only its matching status.
+    expect(selectRunningTunnelCount(state)).toBe(2);
+    expect(selectErrorTunnelCount(state)).toBe(1);
   });
 });

@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { SSHHost } from '../../../../shared/types';
 import { useConnectionsStore } from '../../stores/connectionsStore';
+import { useTunnelsStore } from '../../stores/tunnelsStore';
 import { useWorkspaceStore } from '../../stores/workspaceStore';
 import { SSHHostsSection } from './SSHHostsSection';
 
@@ -30,6 +31,7 @@ const hosts: SSHHost[] = [
 ];
 
 const initialConnectionsState = useConnectionsStore.getState();
+const initialTunnelsState = useTunnelsStore.getState();
 const initialWorkspaceState = useWorkspaceStore.getState();
 
 describe('SSHHostsSection', () => {
@@ -40,6 +42,16 @@ describe('SSHHostsSection', () => {
       error: null,
       loadHosts: initialConnectionsState.loadHosts,
       reloadHosts: initialConnectionsState.reloadHosts,
+    });
+    useTunnelsStore.setState({
+      tunnels: [],
+      isLoading: false,
+      error: null,
+      loadTunnels: initialTunnelsState.loadTunnels,
+      startTunnel: initialTunnelsState.startTunnel,
+      stopTunnel: initialTunnelsState.stopTunnel,
+      setStatus: initialTunnelsState.setStatus,
+      appendLog: initialTunnelsState.appendLog,
     });
     useWorkspaceStore.setState(initialWorkspaceState);
   });
@@ -105,10 +117,12 @@ describe('SSHHostsSection', () => {
     expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument();
   });
 
-  it('reloads hosts from the section header and disables reload while loading', async () => {
+  it('reloads hosts before tunnels from the section header and disables reload while loading', async () => {
     // Given: the store has a reload action.
     const reloadHosts = vi.fn(() => Promise.resolve());
+    const loadTunnels = vi.fn(() => Promise.resolve());
     useConnectionsStore.setState({ reloadHosts });
+    useTunnelsStore.setState({ loadTunnels });
     render(<SSHHostsSection />);
 
     // When: the user clicks the reload button.
@@ -117,6 +131,9 @@ describe('SSHHostsSection', () => {
 
     // Then: the reload action runs.
     expect(reloadHosts).toHaveBeenCalledOnce();
+    await waitFor(() => {
+      expect(loadTunnels).toHaveBeenCalledOnce();
+    });
 
     // When: loading starts.
     useConnectionsStore.setState({ isLoading: true });
