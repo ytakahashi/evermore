@@ -17,6 +17,7 @@ export const IPC = {
 
   // SSH
   SSH_LIST_HOSTS: 'ssh:list-hosts',
+  SSH_RELOAD_HOSTS: 'ssh:reload-hosts',
   SSH_RESOLVE: 'ssh:resolve', // ssh -G wrapper
   SSH_CONFIG_CHANGED: 'ssh:config-changed', // main -> renderer
 

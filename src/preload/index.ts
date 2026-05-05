@@ -57,6 +57,7 @@ const api = {
   },
   ssh: {
     listHosts: (): Promise<SSHHost[]> => ipcRenderer.invoke(IPC.SSH_LIST_HOSTS),
+    reloadHosts: (): Promise<SSHHost[]> => ipcRenderer.invoke(IPC.SSH_RELOAD_HOSTS),
     resolve: (alias: string): Promise<Record<string, string[]>> =>
       ipcRenderer.invoke(IPC.SSH_RESOLVE, { alias }),
     onConfigChanged: (cb: () => void): (() => void) => {

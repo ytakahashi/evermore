@@ -3,7 +3,7 @@ import { IPC } from '../../../shared/ipc-channels';
 import { SshConfigManager } from '../../ssh-config/manager';
 
 interface RegisterSshHandlersOptions {
-  sshConfigManager?: Pick<SshConfigManager, 'list'>;
+  sshConfigManager?: Pick<SshConfigManager, 'list' | 'refresh'>;
 }
 
 /**
@@ -13,8 +13,10 @@ export function registerSshHandlers(options: RegisterSshHandlersOptions = {}): (
   const sshConfigManager = options.sshConfigManager ?? new SshConfigManager();
 
   ipcMain.handle(IPC.SSH_LIST_HOSTS, () => sshConfigManager.list());
+  ipcMain.handle(IPC.SSH_RELOAD_HOSTS, () => sshConfigManager.refresh());
 
   return () => {
     ipcMain.removeHandler(IPC.SSH_LIST_HOSTS);
+    ipcMain.removeHandler(IPC.SSH_RELOAD_HOSTS);
   };
 }

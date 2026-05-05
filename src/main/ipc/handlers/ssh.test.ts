@@ -30,6 +30,7 @@ describe('registerSshHandlers', () => {
     ];
     const sshConfigManager = {
       list: vi.fn(() => hosts),
+      refresh: vi.fn(() => []),
     };
 
     // When: SSH handlers are registered and the list handler is invoked.
@@ -43,11 +44,38 @@ describe('registerSshHandlers', () => {
     expect(sshConfigManager.list).toHaveBeenCalledOnce();
   });
 
-  it('removes the list handler during teardown', () => {
+  it('registers ssh:reload-hosts and returns refreshed manager results', () => {
+    // Given: a manager can refresh parsed hosts.
+    const hosts: SSHHost[] = [
+      {
+        alias: 'reloaded',
+        hostname: 'reloaded.example.com',
+        hasForwarding: false,
+        forwards: [],
+      },
+    ];
+    const sshConfigManager = {
+      list: vi.fn(() => []),
+      refresh: vi.fn(() => hosts),
+    };
+
+    // When: SSH handlers are registered and the reload handler is invoked.
+    registerSshHandlers({ sshConfigManager });
+    const handler = ipcMainMock.handle.mock.calls.find(
+      ([channel]) => channel === IPC.SSH_RELOAD_HOSTS,
+    )?.[1];
+
+    // Then: the handler bridges to refresh so cached config is invalidated.
+    expect(handler?.({})).toBe(hosts);
+    expect(sshConfigManager.refresh).toHaveBeenCalledOnce();
+  });
+
+  it('removes the ssh handlers during teardown', () => {
     // Given: SSH handlers have been registered.
     const dispose = registerSshHandlers({
       sshConfigManager: {
         list: vi.fn(() => []),
+        refresh: vi.fn(() => []),
       },
     });
 
@@ -56,5 +84,6 @@ describe('registerSshHandlers', () => {
 
     // Then: the IPC handler is removed.
     expect(ipcMainMock.removeHandler).toHaveBeenCalledWith(IPC.SSH_LIST_HOSTS);
+    expect(ipcMainMock.removeHandler).toHaveBeenCalledWith(IPC.SSH_RELOAD_HOSTS);
   });
 });

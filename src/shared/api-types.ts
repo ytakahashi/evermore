@@ -19,6 +19,7 @@ export interface Api {
   };
   ssh: {
     listHosts: () => Promise<SSHHost[]>;
+    reloadHosts: () => Promise<SSHHost[]>;
     resolve: (alias: string) => Promise<Record<string, string[]>>;
     onConfigChanged: (cb: () => void) => () => void;
   };
