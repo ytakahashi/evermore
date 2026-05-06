@@ -1,4 +1,4 @@
-import { Settings, Terminal, Layout } from 'lucide-react';
+import { Folders, Settings, Zap } from 'lucide-react';
 import { useUiStore, type SidebarView } from '../../stores/uiStore';
 
 function getButtonClassName(isActive: boolean): string {
@@ -42,16 +42,16 @@ export function SidebarBottomNav(): React.JSX.Element {
   return (
     <nav className="flex items-center justify-around border-t border-border bg-panel p-1">
       <SidebarViewButton label="Workspaces" view="workspaces">
-        <Layout size={18} />
+        <Folders size={18} />
       </SidebarViewButton>
       <SidebarViewButton label="Connections" view="connections">
-        <Terminal size={18} />
+        <Zap size={18} />
       </SidebarViewButton>
       <button
         aria-label="Settings"
         className="rounded p-1.5 text-muted opacity-40"
         disabled
-        title="Settings coming in Phase 4"
+        title="Settings coming in a future update"
         type="button"
       >
         <Settings size={18} />
