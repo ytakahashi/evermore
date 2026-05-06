@@ -4,8 +4,8 @@
   /* ── App surfaces ── */
   --color-background: #020408; /* body → bg-background */
   --color-surface: #060b1a; /* app base color → bg-surface */
-  --color-panel: #0a1224; /* sidebar, panel, tab bar → bg-panel */
-  --color-raised: #0f1830; /* hover, modal, popover → bg-raised */
+  --color-panel: #010101; /* sidebar, panel, tab bar → bg-panel */
+  --color-raised: #262222; /* hover, modal, popover → bg-raised */
   --color-terminal: #03060e; /* xterm.js background → bg-terminal */
 
   /* ── Foreground ── */
@@ -25,6 +25,8 @@
   --color-border: rgb(255 255 255 / 0.1);
   --color-border-subtle: rgb(255 255 255 / 0.06);
   --color-border-strong: rgb(255 255 255 / 0.16);
+  --color-border-pane-active: #ff6ea181;
+  --color-pane-inactive-overlay: rgb(255 255 255 / 0.08);
   --color-ring: #ff6ea0; /* focus ring */
 
   /* ── Status ── */

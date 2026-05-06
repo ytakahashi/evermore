@@ -25,6 +25,11 @@ export function TerminalView({
   return (
     <div className="relative h-full min-h-0 w-full bg-terminal">
       <div ref={containerRef} className="absolute inset-2 overflow-hidden" />
+      <div
+        className={`pointer-events-none absolute inset-0 z-10 bg-pane-inactive-overlay transition-opacity duration-200 ${
+          isActive ? 'opacity-0' : 'opacity-100'
+        }`}
+      />
     </div>
   );
 }

@@ -85,7 +85,7 @@ function PaneCell({ isActiveTab, pane, rect, tab }: PaneCellProps): React.JSX.El
   return (
     <section
       className={`group absolute overflow-hidden border ${
-        isActive ? 'border-brand/70' : 'border-border-subtle'
+        isActive ? 'border-border-pane-active/70' : 'border-border-subtle'
       }`}
       style={{
         left: `${rect.leftPct}%`,
@@ -207,7 +207,7 @@ function SplitterHandle({ containerRef, split }: SplitterHandleProps): React.JSX
   return (
     <div
       aria-label={isVertical ? 'Resize vertical split' : 'Resize horizontal split'}
-      className={`z-10 bg-border-subtle hover:bg-brand ${
+      className={`z-10 bg-border-subtle hover:bg-border-pane-active ${
         isVertical ? 'cursor-col-resize' : 'cursor-row-resize'
       }`}
       role="separator"
