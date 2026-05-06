@@ -1,9 +1,10 @@
 import { app, shell, BrowserWindow } from 'electron';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { electronApp, optimizer, is } from '@electron-toolkit/utils';
+import { electronApp, is } from '@electron-toolkit/utils';
 import icon from '../../resources/icon.png?asset';
 import { registerIpcHandlers } from './ipc/register';
+import { attachWindowShortcuts } from './window-shortcuts';
 
 const _filename = fileURLToPath(import.meta.url);
 const _dirname = dirname(_filename);
@@ -58,11 +59,12 @@ app.whenReady().then(() => {
   // Set app user model id for windows
   electronApp.setAppUserModelId('net.ytakahashi.evermore');
 
-  // Default open or close DevTools by F12 in development
-  // and ignore CommandOrControl + R in production.
-  // see https://github.com/alex8088/electron-toolkit/tree/master/packages/utils
+  // Suppress only Cmd-modified renderer shortcuts (reload / zoom / production DevTools) so that
+  // Ctrl-modified key combinations such as Ctrl+R reach xterm for shell reverse-i-search. The
+  // previous `optimizer.watchWindowShortcuts` from `@electron-toolkit/utils` OR-blocked
+  // `KeyR && (input.control || input.meta)` and killed Ctrl+R as a side-effect.
   app.on('browser-window-created', (_, window) => {
-    optimizer.watchWindowShortcuts(window);
+    attachWindowShortcuts(window);
   });
 
   disposeIpcHandlers = registerIpcHandlers({

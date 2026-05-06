@@ -8,6 +8,8 @@ const xtermMock = vi.hoisted(() => {
   const fitAddonInstances: MockFitAddon[] = [];
 
   class MockTerminal {
+    public readonly cols = 132;
+    public readonly rows = 43;
     public readonly loadAddon = vi.fn();
     public readonly open = vi.fn();
     public readonly write = vi.fn();
@@ -154,11 +156,29 @@ describe('useTerminal', () => {
     }
 
     globalThis.ResizeObserver = MockResizeObserver;
+
+    // Mock document.fonts
+    if (typeof document !== 'undefined') {
+      let resolveFontsReady: () => void;
+      const fontsReady = new Promise<void>((resolve) => {
+        resolveFontsReady = resolve;
+      });
+      Object.defineProperty(document, 'fonts', {
+        configurable: true,
+        value: {
+          ready: fontsReady,
+          _resolve: () => resolveFontsReady(),
+        },
+      });
+    }
   });
 
   afterEach(() => {
     Reflect.deleteProperty(window, 'api');
     Reflect.deleteProperty(globalThis, 'ResizeObserver');
+    if (typeof document !== 'undefined') {
+      Reflect.deleteProperty(document, 'fonts');
+    }
   });
 
   it('creates a PTY when the terminal mounts and resizes it after creation', async () => {
@@ -173,7 +193,7 @@ describe('useTerminal', () => {
         cwd: '/Users/tester/project',
         shell: '/bin/zsh',
       });
-      expect(ptyApi.resize).toHaveBeenCalledWith('pty-1', 132, 43);
+      expect(ptyApi.resize).toHaveBeenCalledWith('pty-1', 129, 43);
     });
     expect(xtermMock.terminalInstances[0]?.focus).toHaveBeenCalled();
   });
@@ -281,7 +301,7 @@ describe('useTerminal', () => {
     // Given: a mounted terminal with a current PTY id.
     render(<TestTerminal />);
     await waitFor(() => {
-      expect(ptyApi.resize).toHaveBeenCalledWith('pty-1', 132, 43);
+      expect(ptyApi.resize).toHaveBeenCalledWith('pty-1', 129, 43);
     });
     ptyApi.resize.mockClear();
 
@@ -289,7 +309,7 @@ describe('useTerminal', () => {
     resizeObserverCallback?.();
 
     // Then: the latest xterm dimensions are sent to the main PTY.
-    expect(ptyApi.resize).toHaveBeenCalledWith('pty-1', 132, 43);
+    expect(ptyApi.resize).toHaveBeenCalledWith('pty-1', 129, 43);
   });
 
   it('does not recreate the PTY when cwd props change after mount', async () => {
@@ -329,5 +349,46 @@ describe('useTerminal', () => {
     expect(onCwdChange).toHaveBeenCalledOnce();
     expect(onCwdChange).toHaveBeenCalledWith('/Users/tester/My Project');
     expect(ptyApi.create).toHaveBeenCalledOnce();
+  });
+
+  it('re-fits the terminal after fonts are ready', async () => {
+    // Given: a terminal is mounting while fonts are loading.
+    render(<TestTerminal />);
+
+    // 1. Initial fit on mount.
+    // 2. fitAndResize on PTY creation success.
+    await waitFor(() => {
+      expect(ptyApi.create).toHaveBeenCalled();
+      expect(xtermMock.fitAddonInstances[0]?.fit).toHaveBeenCalledTimes(2);
+    });
+
+    // When: fonts become ready.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (document.fonts as any)._resolve();
+
+    // Then: fit is called a 3rd time.
+    await waitFor(() => {
+      expect(xtermMock.fitAddonInstances[0]?.fit).toHaveBeenCalledTimes(3);
+    });
+  });
+
+  it('does not re-fit if the component unmounts before fonts are ready', async () => {
+    // Given: a terminal mounts and then quickly unmounts.
+    const { unmount } = render(<TestTerminal />);
+
+    await waitFor(() => {
+      expect(ptyApi.create).toHaveBeenCalled();
+    });
+    const fitSpy = xtermMock.fitAddonInstances[0]?.fit;
+    expect(fitSpy).toHaveBeenCalledTimes(2);
+    unmount();
+
+    // When: fonts finally become ready.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (document.fonts as any)._resolve();
+
+    // Then: no further fit calls are made (stale closure guard).
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(fitSpy).toHaveBeenCalledTimes(2);
   });
 });
