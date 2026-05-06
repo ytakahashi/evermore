@@ -203,7 +203,7 @@ export function WorkspacesView(): React.JSX.Element {
                       aria-current={isActiveTab ? 'page' : undefined}
                       className={`flex w-full items-center gap-2 rounded-md py-1 pl-8 pr-2 text-left text-sm ${
                         isActiveTab
-                          ? 'bg-terminal text-foreground'
+                          ? 'bg-tab-active text-foreground'
                           : 'text-muted hover:bg-raised/50'
                       }`}
                       type="button"
