@@ -5,6 +5,8 @@
 - Evermore is a simple terminal workspace for developers.
 - The application is built with Electron and a React frontend.
 
+Refer to [ARCHITECTURE.md](./ARCHITECTURE.md) for details.
+
 ## Coding Style Guidelines
 
 ### Editing
