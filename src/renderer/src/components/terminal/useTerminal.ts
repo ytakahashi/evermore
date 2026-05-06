@@ -6,6 +6,8 @@ import { useResizeObserver } from '../../hooks/useResizeObserver';
 import { parseOsc7Cwd } from './osc7';
 import { terminalTheme } from './theme';
 
+const PTY_COLUMNS_SAFETY_MARGIN = 3;
+
 interface UseTerminalOptions {
   cwd: string;
   initialCommand?: string;
@@ -49,20 +51,23 @@ export function useTerminal(options: UseTerminalOptions): UseTerminalResult {
     }
   }, []);
 
-  const fitAndResize = useCallback(() => {
+  const fitAndResize = useCallback((): void => {
+    const terminal = terminalRef.current;
     const fitAddon = fitAddonRef.current;
     const ptyId = ptyIdRef.current;
-    if (!fitAddon) {
+    if (!terminal || !fitAddon) {
       return;
     }
 
     fitAddon.fit();
 
     if (ptyId) {
-      // `fit()` mutates xterm's viewport, while `proposeDimensions()` gives us the character grid
-      // main needs for the actual PTY. Keeping them paired avoids visual and backend sizes drifting.
-      const dimensions = fitAddon.proposeDimensions();
-      void window.api.pty.resize(ptyId, dimensions?.cols ?? 80, dimensions?.rows ?? 24);
+      // Use xterm's committed size after `fit()`. Calling `proposeDimensions()` again can observe
+      // post-fit rounded cell metrics and produce a value that differs from the actual viewport.
+      // The PTY is kept slightly narrower than xterm so TUI apps wrap before DOM renderer
+      // overhang or CJK string-width differences can clip the rightmost cells.
+      const ptyCols = Math.max(1, terminal.cols - PTY_COLUMNS_SAFETY_MARGIN);
+      void window.api.pty.resize(ptyId, ptyCols, terminal.rows);
     }
   }, []);
 
@@ -90,6 +95,16 @@ export function useTerminal(options: UseTerminalOptions): UseTerminalResult {
     terminalRef.current = terminal;
     fitAddonRef.current = fitAddon;
     fitAndResize();
+
+    // Re-fit once fonts are ready to ensure accurate cell width measurements
+    if (typeof document !== 'undefined' && 'fonts' in document) {
+      void document.fonts.ready.then(() => {
+        if (terminalRef.current === terminal && fitAddonRef.current === fitAddon) {
+          fitAndResize();
+        }
+      });
+    }
+
     focusIfActive();
     const osc7Disposable = terminal.parser.registerOscHandler(7, (data) => {
       const cwd = parseOsc7Cwd(data);
