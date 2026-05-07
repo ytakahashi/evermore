@@ -55,6 +55,7 @@ export function createSshResolutionsStore(
   options: CreateSshResolutionsStoreOptions = {},
 ): UseBoundStore<StoreApi<SshResolutionsStoreState>> {
   const getSshApi = (): SshApi => options.sshApi ?? window.api.ssh;
+  let generation = 0;
 
   return create<SshResolutionsStoreState>((set, get) => ({
     resolutions: {},
@@ -72,8 +73,13 @@ export function createSshResolutionsStore(
         },
       }));
 
+      const generationAtStart = generation;
+
       try {
         const data = await getSshApi().resolve(alias);
+        if (generationAtStart !== generation) {
+          return;
+        }
         set((state) => ({
           resolutions: {
             ...state.resolutions,
@@ -81,6 +87,9 @@ export function createSshResolutionsStore(
           },
         }));
       } catch (error: unknown) {
+        if (generationAtStart !== generation) {
+          return;
+        }
         set((state) => ({
           resolutions: {
             ...state.resolutions,
@@ -91,6 +100,7 @@ export function createSshResolutionsStore(
     },
 
     clear: (): void => {
+      generation += 1;
       set({ resolutions: {} });
     },
   }));

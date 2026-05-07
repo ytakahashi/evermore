@@ -122,4 +122,40 @@ describe('sshResolutionsStore', () => {
     // Then
     expect(store.getState().resolutions).toEqual({});
   });
+
+  it('does not restore an in-flight result after clear', async () => {
+    // Given: a resolution request is still running when the cache is cleared.
+    let resolveFirst!: (value: Record<string, string[]>) => void;
+    const sshApi = {
+      resolve: vi
+        .fn()
+        .mockImplementationOnce(
+          () =>
+            new Promise<Record<string, string[]>>((resolve) => {
+              resolveFirst = resolve;
+            }),
+        )
+        .mockResolvedValueOnce({ hostname: ['fresh'] }),
+    };
+    const store = createSshResolutionsStore({ sshApi });
+
+    // When: clear runs before the first request completes.
+    const stalePromise = store.getState().resolveAlias('my-host');
+    store.getState().clear();
+    resolveFirst({ hostname: ['stale'] });
+    await stalePromise;
+
+    // Then: the late result is ignored instead of repopulating cleared state.
+    expect(store.getState().resolutions).toEqual({});
+
+    // When: the alias is resolved again after invalidation.
+    await store.getState().resolveAlias('my-host');
+
+    // Then: a fresh API result is stored.
+    expect(store.getState().resolutions['my-host']).toEqual({
+      status: 'ready',
+      data: { hostname: ['fresh'] },
+    });
+    expect(sshApi.resolve).toHaveBeenCalledTimes(2);
+  });
 });

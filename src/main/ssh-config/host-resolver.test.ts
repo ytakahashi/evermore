@@ -114,6 +114,37 @@ describe('SshHostResolver', () => {
     expect(execFile).toHaveBeenCalledTimes(2);
   });
 
+  it('does not cache an in-flight result that completes after clear', async () => {
+    // Given: the first ssh -G call is still running when the cache is cleared.
+    let resolveFirst!: (value: { stdout: string; stderr: string }) => void;
+    const execFile = vi
+      .fn()
+      .mockImplementationOnce(
+        () =>
+          new Promise<{ stdout: string; stderr: string }>((resolve) => {
+            resolveFirst = resolve;
+          }),
+      )
+      .mockResolvedValueOnce({ stdout: 'hostname fresh', stderr: '' });
+    const resolver = new SshHostResolver({ execFile });
+
+    // When: clear runs before the first call completes.
+    const stalePromise = resolver.resolve('a');
+    resolver.clear();
+    resolveFirst({ stdout: 'hostname stale', stderr: '' });
+    const staleResult = await stalePromise;
+
+    // Then: the in-flight caller still receives its result, but it is not cached.
+    expect(staleResult['hostname']).toEqual(['stale']);
+
+    // When: the alias is resolved again after invalidation.
+    const freshResult = await resolver.resolve('a');
+
+    // Then: a new subprocess result is used instead of the stale late result.
+    expect(freshResult['hostname']).toEqual(['fresh']);
+    expect(execFile).toHaveBeenCalledTimes(2);
+  });
+
   it('does not cache if execFile fails', async () => {
     // Given
     const execFile = vi

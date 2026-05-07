@@ -70,6 +70,7 @@ const defaultExecFile: SshExecFile = (file, args) => execFileAsync(file, args);
 export class SshHostResolver {
   private cache = new Map<string, Record<string, string[]>>();
   private execFile: SshExecFile;
+  private generation = 0;
 
   constructor(options: SshHostResolverOptions = {}) {
     this.execFile = options.execFile ?? defaultExecFile;
@@ -87,6 +88,8 @@ export class SshHostResolver {
    *    each spawn their own process. This is accepted because resolution is typically
    *    triggered on-demand from UI interactions (e.g., expanding a host row), making
    *    collisions rare in practice.
+   * 5. Cache invalidation: If `clear()` runs while `ssh -G` is still in flight, the
+   *    late result is returned to that caller but is not written back into the cache.
    *
    * @param alias - The SSH host alias to resolve.
    * @returns A promise that resolves to the configuration record.
@@ -98,9 +101,12 @@ export class SshHostResolver {
       return cached;
     }
 
+    const generationAtStart = this.generation;
     const { stdout } = await this.execFile('ssh', ['-G', alias]);
     const resolved = parseSshGOutput(stdout);
-    this.cache.set(alias, resolved);
+    if (generationAtStart === this.generation) {
+      this.cache.set(alias, resolved);
+    }
     return resolved;
   }
 
@@ -108,6 +114,7 @@ export class SshHostResolver {
    * Clears the internal resolution cache.
    */
   clear(): void {
+    this.generation += 1;
     this.cache.clear();
   }
 }

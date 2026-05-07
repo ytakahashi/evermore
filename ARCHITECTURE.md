@@ -175,8 +175,7 @@ handler that bridges it to the renderer.
 ### Allowed dependencies
 
 - `shared/`
-- Node.js built-ins, `electron` main-process modules, `node-pty`, `ssh-config`, `electron-store`,
-  `chokidar`
+- Node.js built-ins, `electron` main-process modules, `node-pty`, `ssh-config`, `electron-store`
 
 ### Disallowed dependencies
 
