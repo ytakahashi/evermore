@@ -1,4 +1,4 @@
-import { Folder } from 'lucide-react';
+import { Folder, PanelLeftClose, PanelLeftOpen } from 'lucide-react';
 import {
   selectErrorTunnelCount,
   selectRunningTunnelCount,
@@ -14,6 +14,7 @@ interface TunnelBadgeProps {
 
 function TunnelBadge({ errorCount, runningCount }: TunnelBadgeProps): React.JSX.Element | null {
   const setSidebarView = useUiStore((state) => state.setSidebarView);
+  const setSidebarOpen = useUiStore((state) => state.setSidebarOpen);
 
   if (errorCount === 0 && runningCount === 0) {
     return null;
@@ -38,6 +39,7 @@ function TunnelBadge({ errorCount, runningCount }: TunnelBadgeProps): React.JSX.
       type="button"
       onClick={() => {
         setSidebarView('connections');
+        setSidebarOpen(true);
       }}
     >
       <span
@@ -53,6 +55,8 @@ export function TopBar(): React.JSX.Element {
   const activeWorkspace = useWorkspaceStore(selectActiveWorkspace);
   const runningTunnelCount = useTunnelsStore(selectRunningTunnelCount);
   const errorTunnelCount = useTunnelsStore(selectErrorTunnelCount);
+  const sidebarOpen = useUiStore((state) => state.sidebarOpen);
+  const toggleSidebar = useUiStore((state) => state.toggleSidebar);
 
   return (
     <header
@@ -60,6 +64,16 @@ export function TopBar(): React.JSX.Element {
       style={{ WebkitAppRegion: 'drag' } as React.CSSProperties}
     >
       <div className="flex min-w-0 items-center gap-2 text-xs font-medium text-muted">
+        <button
+          aria-label={sidebarOpen ? 'Close sidebar' : 'Open sidebar'}
+          className="flex size-6 shrink-0 items-center justify-center rounded text-muted hover:bg-raised hover:text-foreground"
+          style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+          title={sidebarOpen ? 'Close sidebar' : 'Open sidebar'}
+          type="button"
+          onClick={toggleSidebar}
+        >
+          {sidebarOpen ? <PanelLeftClose size={14} /> : <PanelLeftOpen size={14} />}
+        </button>
         <Folder size={12} />
         <span className="truncate">{activeWorkspace?.name ?? ''}</span>
       </div>

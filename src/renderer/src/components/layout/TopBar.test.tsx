@@ -2,7 +2,7 @@ import { act, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { Workspace } from '../../../../shared/types';
 import { useTunnelsStore } from '../../stores/tunnelsStore';
-import { useUiStore } from '../../stores/uiStore';
+import { SIDEBAR_DEFAULT_WIDTH, useUiStore } from '../../stores/uiStore';
 import { useWorkspaceStore } from '../../stores/workspaceStore';
 import { TopBar } from './TopBar';
 
@@ -64,7 +64,38 @@ describe('TopBar', () => {
       isLoading: false,
       error: null,
     });
-    useUiStore.setState({ sidebarView: 'workspaces' });
+    useUiStore.setState({
+      sidebarView: 'workspaces',
+      sidebarOpen: true,
+      sidebarWidth: SIDEBAR_DEFAULT_WIDTH,
+    });
+  });
+
+  it('renders the sidebar toggle button and toggles state on click', () => {
+    // Given: the sidebar is open.
+    useUiStore.setState({ sidebarOpen: true });
+
+    // When: the top bar renders.
+    render(<TopBar />);
+
+    // Then: the close sidebar button is visible.
+    const toggleButton = screen.getByRole('button', { name: 'Close sidebar' });
+    expect(toggleButton).toBeInTheDocument();
+    expect(toggleButton).toHaveAttribute('title', 'Close sidebar');
+
+    // When: the toggle button is clicked.
+    fireEvent.click(toggleButton);
+
+    // Then: the sidebar state is set to closed and the button changes.
+    expect(useUiStore.getState().sidebarOpen).toBe(false);
+    expect(screen.getByRole('button', { name: 'Open sidebar' })).toBeInTheDocument();
+
+    // When: the toggle button is clicked again.
+    fireEvent.click(screen.getByRole('button', { name: 'Open sidebar' }));
+
+    // Then: the sidebar state is set back to open.
+    expect(useUiStore.getState().sidebarOpen).toBe(true);
+    expect(screen.getByRole('button', { name: 'Close sidebar' })).toBeInTheDocument();
   });
 
   it('displays the active workspace name', () => {
@@ -179,8 +210,8 @@ describe('TopBar', () => {
   });
 
   it('opens the connections sidebar when the tunnel badge is clicked', () => {
-    // Given: a visible tunnel badge and the workspace view is selected.
-    useUiStore.setState({ sidebarView: 'workspaces' });
+    // Given: a visible tunnel badge, the workspace view is selected, and the sidebar is closed.
+    useUiStore.setState({ sidebarView: 'workspaces', sidebarOpen: false });
     useTunnelsStore.setState({
       tunnels: [
         {
@@ -198,5 +229,6 @@ describe('TopBar', () => {
 
     // Then: the connections sidebar view is selected.
     expect(useUiStore.getState().sidebarView).toBe('connections');
+    expect(useUiStore.getState().sidebarOpen).toBe(true);
   });
 });

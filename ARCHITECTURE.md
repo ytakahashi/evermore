@@ -245,7 +245,9 @@ The renderer is a single React 19 app rendered into `#root` by `main.tsx` with `
   - `workspaceStore.ts` mirrors the persisted workspace tree, debounces writes to main, and exposes
     selectors `selectActiveWorkspace` / `selectActiveTab` / `selectActivePane`. Pure tree
     manipulation lives in the same file as private helpers.
-  - `uiStore.ts` is purely transient renderer state (sidebar view).
+  - `uiStore.ts` is purely transient renderer state (sidebar view, sidebar open/close, sidebar
+    width). The open/close flag and width are intentionally not persisted: every app launch starts
+    with the sidebar open at the default width.
   - `connectionsStore.ts` mirrors SSH host data fetched via `window.api.ssh`.
   - `tunnelsStore.ts` mirrors tunnel runtime state and is updated by `useTunnelEventBridge` from
     main-process events.
