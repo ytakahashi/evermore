@@ -4,6 +4,7 @@ import { registerSshHandlers } from './handlers/ssh';
 import { registerTunnelHandlers } from './handlers/tunnel';
 import { registerWorkspaceHandlers } from './handlers/workspace';
 import { SshConfigManager } from '../ssh-config/manager';
+import { SshHostResolver } from '../ssh-config/host-resolver';
 
 interface RegisterIpcHandlersOptions {
   getWindow: () => BrowserWindow | null;
@@ -17,9 +18,10 @@ interface RegisterIpcHandlersOptions {
  */
 export function registerIpcHandlers(options: RegisterIpcHandlersOptions): () => void {
   const sshConfigManager = new SshConfigManager();
+  const sshHostResolver = new SshHostResolver();
   const disposePtyHandlers = registerPtyHandlers({ getWindow: options.getWindow });
   const disposeWorkspaceHandlers = registerWorkspaceHandlers();
-  const disposeSshHandlers = registerSshHandlers({ sshConfigManager });
+  const disposeSshHandlers = registerSshHandlers({ sshConfigManager, sshHostResolver });
   const disposeTunnelHandlers = registerTunnelHandlers({
     getWindow: options.getWindow,
     sshConfigManager,
