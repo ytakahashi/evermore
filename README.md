@@ -7,6 +7,7 @@ Evermore is a simple terminal workspace for developers, built with Electron and 
 - Workspace sidebar with persistent workspace and tab layout state
 - Split-pane terminal area backed by main-process PTY ownership
 - SSH host discovery from `~/.ssh/config`, including `Include` expansion
+- SSH host detail expansion showing resolved directives (via `ssh -G`)
 - SSH host shortcuts that open terminal tabs with `ssh <alias>`
 - SSH tunnel runtime state for hosts with `LocalForward`, `RemoteForward`, or `DynamicForward`
 - Tunnel start/stop controls, status updates, and recent log snapshots

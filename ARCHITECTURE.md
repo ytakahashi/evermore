@@ -26,7 +26,7 @@ src/
 │   ├── ipc/              # IPC composition root and handlers
 │   ├── pty/              # PtyManager (node-pty)
 │   ├── tunnels/          # TunnelManager (child_process for `ssh -N`)
-│   ├── ssh-config/       # SshConfigManager + parser (with Include expansion)
+│   ├── ssh-config/       # SshConfigManager + parser + SshHostResolver (ssh -G)
 │   └── workspace/        # WorkspaceStore (electron-store)
 ├── preload/      # Context bridge that exposes `window.api`
 ├── renderer/src/ # React renderer
@@ -34,7 +34,7 @@ src/
 │   ├── App.tsx           # Mounts AppShell + global event bridges
 │   ├── components/       # Layout, sidebar, main area, terminal
 │   ├── hooks/            # Cross-feature hooks
-│   ├── stores/           # zustand stores (workspace, ui, connections, tunnels)
+│   ├── stores/           # zustand stores (workspace, ui, connections, tunnels, sshResolutions)
 │   ├── styles/
 │   └── test/
 └── shared/       # Cross-process types, constants, and pure helpers
@@ -148,7 +148,9 @@ handler that bridges it to the renderer.
   - `TunnelManager` owns `ssh -N <alias>` child processes, status transitions, log ring buffers, and
     graceful SIGTERM → SIGKILL termination.
   - `SshConfigManager` reads and caches `~/.ssh/config`, expanding `Include` directives (including
-    globs) with OpenSSH-compatible semantics.
+    globs) with OpenSSH-compatible semantics. `SshHostResolver` provides on-demand `ssh -G`
+    resolution for detailed host directives, caching results in memory until `ssh:reload-hosts`
+    invalidates them.
   - `WorkspaceStore` persists workspaces and the active workspace id in `electron-store`, sanitizing
     runtime-only pane fields before write.
 
@@ -166,6 +168,9 @@ handler that bridges it to the renderer.
 - **`SshConfigManager` is shared across SSH and tunnel handlers.** A second instance would mean two
   separate parses and a stale cache; `register.ts` is the only place that should construct it for
   production.
+- **`SshHostResolver` is constructed once in `register.ts` and DI'd into the SSH handler.** A second
+  instance would defeat the in-memory cache and force redundant `ssh -G` subprocess spawns on every
+  renderer call.
 
 ### Allowed dependencies
 
@@ -245,6 +250,8 @@ The renderer is a single React 19 app rendered into `#root` by `main.tsx` with `
   - `connectionsStore.ts` mirrors SSH host data fetched via `window.api.ssh`.
   - `tunnelsStore.ts` mirrors tunnel runtime state and is updated by `useTunnelEventBridge` from
     main-process events.
+  - `sshResolutionsStore.ts` caches on-demand SSH host resolution results fetched via
+    `window.api.ssh.resolve`. It is cleared whenever SSH hosts are reloaded.
 
 ### Invariants
 
