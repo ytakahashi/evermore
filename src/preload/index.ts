@@ -60,13 +60,6 @@ const api = {
     reloadHosts: (): Promise<SSHHost[]> => ipcRenderer.invoke(IPC.SSH_RELOAD_HOSTS),
     resolve: (alias: string): Promise<Record<string, string[]>> =>
       ipcRenderer.invoke(IPC.SSH_RESOLVE, { alias }),
-    onConfigChanged: (cb: () => void): (() => void) => {
-      const handler = (): void => cb();
-      ipcRenderer.on(IPC.SSH_CONFIG_CHANGED, handler);
-      return (): void => {
-        ipcRenderer.removeListener(IPC.SSH_CONFIG_CHANGED, handler);
-      };
-    },
   },
   tunnel: {
     list: (): Promise<Tunnel[]> => ipcRenderer.invoke(IPC.TUNNEL_LIST),

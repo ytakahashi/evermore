@@ -1,6 +1,7 @@
 import { useCallback } from 'react';
 import { useConnectionsStore } from '../stores/connectionsStore';
 import { useTunnelsStore } from '../stores/tunnelsStore';
+import { useSshResolutionsStore } from '../stores/sshResolutionsStore';
 
 export interface ReloadConnectionsState {
   isReloading: boolean;
@@ -18,6 +19,7 @@ export function useReloadConnections(): ReloadConnectionsState {
     await useConnectionsStore.getState().reloadHosts();
     if (useConnectionsStore.getState().error === null) {
       await useTunnelsStore.getState().loadTunnels();
+      useSshResolutionsStore.getState().clear();
     }
   }, []);
 

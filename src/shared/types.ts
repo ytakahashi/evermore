@@ -71,12 +71,6 @@ export interface AppSettings {
     sidebarWidth: number;
     sidebarView: 'workspaces' | 'connections';
   };
-  ssh: {
-    pinnedHosts: string[];
-    hiddenHosts: string[];
-    favoriteTunnels: string[];
-    autoStartTunnels: string[];
-  };
   terminal: {
     fontSize: number;
     fontFamily: string;

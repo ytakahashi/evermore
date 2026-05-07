@@ -2,10 +2,12 @@ import { act, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { useConnectionsStore } from '../stores/connectionsStore';
 import { useTunnelsStore } from '../stores/tunnelsStore';
+import { useSshResolutionsStore } from '../stores/sshResolutionsStore';
 import { useReloadConnections } from './useReloadConnections';
 
 const initialConnectionsState = useConnectionsStore.getState();
 const initialTunnelsState = useTunnelsStore.getState();
+const initialSshResolutionsState = useSshResolutionsStore.getState();
 
 describe('useReloadConnections', () => {
   afterEach(() => {
@@ -26,9 +28,14 @@ describe('useReloadConnections', () => {
       setStatus: initialTunnelsState.setStatus,
       appendLog: initialTunnelsState.appendLog,
     });
+    useSshResolutionsStore.setState({
+      resolutions: {},
+      resolveAlias: initialSshResolutionsState.resolveAlias,
+      clear: initialSshResolutionsState.clear,
+    });
   });
 
-  it('reloads SSH hosts before loading tunnels', async () => {
+  it('reloads SSH hosts before loading tunnels and clears resolution cache', async () => {
     // Given: SSH host reload is delayed.
     let resolveReload: () => void = () => undefined;
     let reloadPromise: Promise<void> = Promise.resolve();
@@ -39,8 +46,10 @@ describe('useReloadConnections', () => {
         }),
     );
     const loadTunnels = vi.fn(() => Promise.resolve());
+    const clearResolutions = vi.fn();
     useConnectionsStore.setState({ reloadHosts });
     useTunnelsStore.setState({ loadTunnels });
+    useSshResolutionsStore.setState({ clear: clearResolutions });
     const { result } = renderHook(() => useReloadConnections());
 
     // When: the combined reload starts.
@@ -48,9 +57,10 @@ describe('useReloadConnections', () => {
       reloadPromise = result.current.reloadConnections();
     });
 
-    // Then: tunnel loading waits for SSH config reload.
+    // Then: tunnel loading and resolution clearing wait for SSH config reload.
     expect(reloadHosts).toHaveBeenCalledOnce();
     expect(loadTunnels).not.toHaveBeenCalled();
+    expect(clearResolutions).not.toHaveBeenCalled();
 
     resolveReload();
     await act(async () => {
@@ -58,17 +68,20 @@ describe('useReloadConnections', () => {
     });
 
     expect(loadTunnels).toHaveBeenCalledOnce();
+    expect(clearResolutions).toHaveBeenCalledOnce();
   });
 
-  it('does not load tunnels when SSH host reload leaves an error in state', async () => {
+  it('does not load tunnels or clear resolutions when SSH host reload leaves an error in state', async () => {
     // Given: SSH host reload reports an error.
     const reloadHosts = vi.fn(() => {
       useConnectionsStore.setState({ error: 'cannot read config' });
       return Promise.resolve();
     });
     const loadTunnels = vi.fn(() => Promise.resolve());
+    const clearResolutions = vi.fn();
     useConnectionsStore.setState({ reloadHosts });
     useTunnelsStore.setState({ loadTunnels });
+    useSshResolutionsStore.setState({ clear: clearResolutions });
     const { result } = renderHook(() => useReloadConnections());
 
     // When: the combined reload runs.
@@ -76,9 +89,10 @@ describe('useReloadConnections', () => {
       await result.current.reloadConnections();
     });
 
-    // Then: stale tunnel data is not refreshed from a failed config parse.
+    // Then: stale tunnel data and resolution cache are not cleared from a failed config parse.
     expect(reloadHosts).toHaveBeenCalledOnce();
     expect(loadTunnels).not.toHaveBeenCalled();
+    expect(clearResolutions).not.toHaveBeenCalled();
   });
 
   it('reports reloading while either store is loading', async () => {

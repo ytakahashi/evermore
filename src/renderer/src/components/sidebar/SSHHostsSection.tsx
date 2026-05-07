@@ -1,7 +1,9 @@
-import { RefreshCw, Server } from 'lucide-react';
+import { ChevronDown, ChevronRight, RefreshCw, Server } from 'lucide-react';
+import { useEffect, useState } from 'react';
 import type { SSHHost } from '../../../../shared/types';
 import { useReloadConnections } from '../../hooks/useReloadConnections';
 import { useConnectionsStore } from '../../stores/connectionsStore';
+import { useSshResolutionsStore } from '../../stores/sshResolutionsStore';
 import { useWorkspaceStore } from '../../stores/workspaceStore';
 
 function formatHostDetail(host: SSHHost): string | null {
@@ -17,38 +19,135 @@ function formatHostDetail(host: SSHHost): string | null {
   return `${userPrefix}${hostname}${portSuffix}`;
 }
 
-interface HostRowProps {
-  host: SSHHost;
-  onOpen: (alias: string) => void;
+function ResolutionDetail({ alias }: { alias: string }): React.JSX.Element | null {
+  const resolution = useSshResolutionsStore((state) => state.resolutions[alias]);
+  const resolveAlias = useSshResolutionsStore((state) => state.resolveAlias);
+
+  // Trigger resolution on mount and whenever the cache is cleared (e.g. after a reload),
+  // so an already-expanded row re-fetches without requiring a collapse + reopen.
+  useEffect(() => {
+    if (!resolution) {
+      void resolveAlias(alias);
+    }
+  }, [alias, resolution, resolveAlias]);
+
+  if (!resolution) {
+    return <div className="mt-2 pl-4 text-xs italic text-subtle">Resolving...</div>;
+  }
+
+  if (resolution.status === 'loading') {
+    return <div className="mt-2 pl-4 text-xs italic text-subtle">Resolving...</div>;
+  }
+
+  if (resolution.status === 'error') {
+    return (
+      <div className="mt-2 space-y-1 pl-4 text-xs">
+        <div className="text-danger">Error: {resolution.error}</div>
+        <button
+          className="text-brand hover:underline"
+          type="button"
+          onClick={() => {
+            void resolveAlias(alias);
+          }}
+        >
+          Retry
+        </button>
+      </div>
+    );
+  }
+
+  if (resolution.status === 'ready' && resolution.data) {
+    const data = resolution.data;
+    const directives = [
+      { key: 'hostname', label: 'Host' },
+      { key: 'user', label: 'User' },
+      { key: 'port', label: 'Port' },
+      { key: 'identityfile', label: 'Identity' },
+      { key: 'proxyjump', label: 'ProxyJump' },
+      { key: 'forwardagent', label: 'AgentFwd' },
+    ];
+
+    return (
+      <dl className="mt-2 space-y-1 border-l border-border-subtle pl-4 text-[11px]">
+        {directives.map(({ key, label }) => {
+          const values = data[key];
+          if (!values || values.length === 0) return null;
+          return (
+            <div key={key} className="flex gap-2">
+              <dt className="w-16 shrink-0 font-medium uppercase text-subtle">{label}</dt>
+              <dd className="min-w-0 flex-1 truncate text-muted">
+                {values.map((v, i) => (
+                  <div key={i} className="truncate">
+                    {v || '(none)'}
+                  </div>
+                ))}
+              </dd>
+            </div>
+          );
+        })}
+      </dl>
+    );
+  }
+
+  return null;
 }
 
-function HostRow({ host, onOpen }: HostRowProps): React.JSX.Element {
+interface HostRowProps {
+  expanded: boolean;
+  host: SSHHost;
+  onOpen: (alias: string) => void;
+  onToggle: (alias: string) => void;
+}
+
+function HostRow({ expanded, host, onOpen, onToggle }: HostRowProps): React.JSX.Element {
   const detail = formatHostDetail(host);
+
+  const handleToggle = (): void => {
+    onToggle(host.alias);
+  };
+
   return (
-    <button
-      className="group flex w-full items-start gap-2 rounded-md px-2 py-1.5 text-left text-sm text-muted hover:bg-raised/50 hover:text-foreground"
-      type="button"
-      onClick={() => {
-        onOpen(host.alias);
-      }}
-    >
-      <Server size={14} className="mt-0.5 shrink-0 text-subtle group-hover:text-brand" />
-      <span className="min-w-0 flex-1">
-        <span className="flex min-w-0 items-center gap-1.5">
-          <span className="truncate text-foreground">{host.alias}</span>
-          {host.hasForwarding && (
-            <span
-              aria-label="has port forwarding"
-              title="Has port forwarding configured"
-              className="rounded border border-border px-1 py-px text-[9px] font-bold uppercase text-subtle"
-            >
-              fwd
+    <div className="group rounded-md px-2 py-1.5 text-sm text-muted hover:bg-raised/50">
+      <div className="flex min-w-0 items-start gap-2">
+        <button
+          aria-expanded={expanded}
+          className="flex min-w-0 flex-1 items-start gap-1 text-left"
+          type="button"
+          onClick={handleToggle}
+        >
+          <span className="mt-0.5 shrink-0 text-subtle group-hover:text-brand">
+            {expanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="flex min-w-0 items-center gap-1.5">
+              <Server size={13} className="shrink-0 text-subtle/70" />
+              <span className="truncate text-foreground">{host.alias}</span>
+              {host.hasForwarding && (
+                <span
+                  aria-label="has port forwarding"
+                  className="rounded border border-border px-1 py-px text-[9px] font-bold uppercase text-subtle"
+                  title="Has port forwarding configured"
+                >
+                  fwd
+                </span>
+              )}
             </span>
-          )}
-        </span>
-        {detail && <span className="block truncate text-xs text-subtle">{detail}</span>}
-      </span>
-    </button>
+            {!expanded && detail && (
+              <span className="block truncate pl-4 text-xs text-subtle">{detail}</span>
+            )}
+          </span>
+        </button>
+        <button
+          aria-label={`Open ssh ${host.alias}`}
+          className="flex shrink-0 items-center gap-1 rounded border border-border px-2 py-0.5 text-[11px] text-muted hover:bg-raised hover:text-foreground"
+          type="button"
+          onClick={() => onOpen(host.alias)}
+        >
+          Open
+        </button>
+      </div>
+      {expanded && <ResolutionDetail alias={host.alias} />}
+    </div>
   );
 }
 
@@ -61,6 +160,19 @@ export function SSHHostsSection(): React.JSX.Element {
   const error = useConnectionsStore((state) => state.error);
   const openSshHostTab = useWorkspaceStore((state) => state.openSshHostTab);
   const { isReloading, reloadConnections } = useReloadConnections();
+  const [expandedAliases, setExpandedAliases] = useState<Set<string>>(() => new Set());
+
+  const toggleExpanded = (alias: string): void => {
+    setExpandedAliases((current) => {
+      const next = new Set(current);
+      if (next.has(alias)) {
+        next.delete(alias);
+      } else {
+        next.add(alias);
+      }
+      return next;
+    });
+  };
 
   let content: React.ReactNode;
   if (isLoading) {
@@ -88,7 +200,13 @@ export function SSHHostsSection(): React.JSX.Element {
         {hosts.map((host, index) => (
           // Index is appended because OpenSSH allows the same alias to appear in multiple
           // Include files; alias alone is not guaranteed unique across the merged list.
-          <HostRow key={`${host.alias}-${index}`} host={host} onOpen={openSshHostTab} />
+          <HostRow
+            key={`${host.alias}-${index}`}
+            expanded={expandedAliases.has(host.alias)}
+            host={host}
+            onOpen={openSshHostTab}
+            onToggle={toggleExpanded}
+          />
         ))}
       </div>
     );
