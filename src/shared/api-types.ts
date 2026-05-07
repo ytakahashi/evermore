@@ -21,7 +21,6 @@ export interface Api {
     listHosts: () => Promise<SSHHost[]>;
     reloadHosts: () => Promise<SSHHost[]>;
     resolve: (alias: string) => Promise<Record<string, string[]>>;
-    onConfigChanged: (cb: () => void) => () => void;
   };
   tunnel: {
     list: () => Promise<Tunnel[]>;

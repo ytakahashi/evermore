@@ -70,7 +70,9 @@ export function TabBar(): React.JSX.Element {
             <div
               key={tab.id}
               className={`flex h-full min-w-36 max-w-52 items-center border-r border-border text-xs ${
-                isActive ? 'bg-tab-active text-foreground' : 'bg-panel text-muted hover:bg-raised/50'
+                isActive
+                  ? 'bg-tab-active text-foreground'
+                  : 'bg-panel text-muted hover:bg-raised/50'
               }`}
             >
               {isEditing ? (
