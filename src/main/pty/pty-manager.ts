@@ -3,6 +3,7 @@ import { existsSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import * as nodePty from 'node-pty';
 import type { IDisposable, IPty } from 'node-pty';
+import { buildPtyProcessEnv } from './pty-locale';
 import type { PtyCreateOptions, PtyManagerCallbacks, PtySpawn } from './types';
 
 interface PtyRecord {
@@ -38,8 +39,7 @@ export class PtyManager {
       rows: options.rows ?? 24,
       cwd: this.resolveCwd(options.cwd),
       env: {
-        ...process.env,
-        ...options.env,
+        ...buildPtyProcessEnv(process.env, options.env),
         TERM: 'xterm-256color',
         COLORTERM: 'truecolor',
       },
