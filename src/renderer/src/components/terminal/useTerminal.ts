@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef, type MutableRefObject } from 'react';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebLinksAddon } from '@xterm/addon-web-links';
 import { Terminal } from '@xterm/xterm';
@@ -7,12 +7,17 @@ import { parseOsc7Cwd } from './osc7';
 import { terminalTheme } from './theme';
 
 const PTY_COLUMNS_SAFETY_MARGIN = 3;
+const BACKSPACE = '\x7f';
+const CTRL_C = '\x03';
+const CTRL_U = '\x15';
+const ENTER = '\r';
 
 interface UseTerminalOptions {
   cwd: string;
   initialCommand?: string;
   isActive?: boolean;
   onCwdChange?: (cwd: string) => void;
+  onPtyIdChange?: (ptyId: string | null) => void;
   shell?: string;
 }
 
@@ -34,8 +39,10 @@ export function useTerminal(options: UseTerminalOptions): UseTerminalResult {
   const ptyIdRef = useRef<string | null>(null);
   const initialOptionsRef = useRef(options);
   const initialCommandWrittenPtyIdsRef = useRef(new Set<string>());
+  const pendingCommandRef = useRef('');
   const isActiveRef = useRef(options.isActive ?? false);
   const onCwdChangeRef = useRef(options.onCwdChange);
+  const onPtyIdChangeRef = useRef(options.onPtyIdChange);
 
   useEffect(() => {
     isActiveRef.current = options.isActive ?? false;
@@ -44,6 +51,10 @@ export function useTerminal(options: UseTerminalOptions): UseTerminalResult {
   useEffect(() => {
     onCwdChangeRef.current = options.onCwdChange;
   }, [options.onCwdChange]);
+
+  useEffect(() => {
+    onPtyIdChangeRef.current = options.onPtyIdChange;
+  }, [options.onPtyIdChange]);
 
   const focusIfActive = useCallback((): void => {
     if (isActiveRef.current) {
@@ -110,6 +121,10 @@ export function useTerminal(options: UseTerminalOptions): UseTerminalResult {
       const cwd = parseOsc7Cwd(data);
       if (cwd) {
         onCwdChangeRef.current?.(cwd);
+        const ptyId = ptyIdRef.current;
+        if (ptyId) {
+          void window.api?.paneInfo?.notifyCwd(ptyId, cwd);
+        }
       }
 
       return true;
@@ -139,11 +154,22 @@ export function useTerminal(options: UseTerminalOptions): UseTerminalResult {
         terminal.writeln('');
         terminal.writeln(`[process exited with code ${code}]`);
         ptyIdRef.current = null;
+        onPtyIdChangeRef.current?.(null);
       }
     });
     const inputDisposable = terminal.onData((data) => {
       const ptyId = ptyIdRef.current;
       if (ptyId) {
+        // Capture the plain command line submitted by the terminal UI for sidebar display. This is
+        // intentionally lightweight and only tracks ASCII printable input appended at the cursor,
+        // Enter, Backspace, Ctrl-C, and Ctrl-U. Unicode input such as Japanese text and edits made
+        // after cursor movement can drift from the real shell buffer. That limitation is accepted
+        // until a future shell integration layer, such as OSC 133, can report the submitted command
+        // with shell-level accuracy.
+        const submittedCommand = updatePendingCommand(pendingCommandRef, data);
+        if (submittedCommand) {
+          void window.api?.paneInfo?.notifyCommand(ptyId, submittedCommand);
+        }
         void ptyApi.write(ptyId, data);
       }
     });
@@ -160,12 +186,15 @@ export function useTerminal(options: UseTerminalOptions): UseTerminalResult {
       }
 
       ptyIdRef.current = id;
+      onPtyIdChangeRef.current?.(id);
+      void window.api?.paneInfo?.notifyCwd(id, initialOptions.cwd);
       fitAndResize();
       focusIfActive();
 
       const initialCommand = initialOptions.initialCommand;
       if (initialCommand && !initialCommandWrittenPtyIdsRef.current.has(id)) {
         initialCommandWrittenPtyIdsRef.current.add(id);
+        void window.api?.paneInfo?.notifyCommand(id, initialCommand);
         // Fire-and-forget: IPC failures here surface through subsequent terminal silence;
         // retrying would risk replaying the command twice if the PTY is still alive.
         void ptyApi.write(id, `${initialCommand}\r`);
@@ -177,6 +206,7 @@ export function useTerminal(options: UseTerminalOptions): UseTerminalResult {
       const ptyId = ptyIdRef.current;
       ptyIdRef.current = null;
       if (ptyId) {
+        onPtyIdChangeRef.current?.(null);
         void ptyApi.dispose(ptyId);
       }
       inputDisposable.dispose();
@@ -194,4 +224,35 @@ export function useTerminal(options: UseTerminalOptions): UseTerminalResult {
   }, [focusIfActive, options.isActive]);
 
   return { containerRef };
+}
+
+function updatePendingCommand(
+  pendingCommandRef: MutableRefObject<string>,
+  data: string,
+): string | null {
+  if (data === ENTER) {
+    const submittedCommand = pendingCommandRef.current.trim();
+    pendingCommandRef.current = '';
+    return submittedCommand || null;
+  }
+
+  if (data === BACKSPACE) {
+    pendingCommandRef.current = pendingCommandRef.current.slice(0, -1);
+    return null;
+  }
+
+  if (data === CTRL_C || data === CTRL_U) {
+    pendingCommandRef.current = '';
+    return null;
+  }
+
+  if (isPrintableInput(data)) {
+    pendingCommandRef.current += data;
+  }
+
+  return null;
+}
+
+function isPrintableInput(data: string): boolean {
+  return /^[\x20-\x7e]+$/.test(data);
 }

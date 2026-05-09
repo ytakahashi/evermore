@@ -92,6 +92,7 @@ interface TestTerminalProps {
   initialCommand?: string;
   isActive?: boolean;
   onCwdChange?: (cwd: string) => void;
+  onPtyIdChange?: (ptyId: string | null) => void;
 }
 
 function TestTerminal({
@@ -99,12 +100,14 @@ function TestTerminal({
   initialCommand,
   isActive = true,
   onCwdChange,
+  onPtyIdChange,
 }: TestTerminalProps): React.JSX.Element {
   const { containerRef } = useTerminal({
     cwd,
     initialCommand,
     isActive,
     onCwdChange,
+    onPtyIdChange,
     shell: '/bin/zsh',
   });
 
@@ -113,8 +116,10 @@ function TestTerminal({
 
 describe('useTerminal', () => {
   let ptyApi: PtyApiMock;
+  let paneInfoApi: Pick<Window['api']['paneInfo'], 'notifyCommand' | 'notifyCwd'>;
   let dataCleanup: Mock<() => void>;
   let exitCleanup: Mock<() => void>;
+  let exitListener: ((id: string, code: number) => void) | null;
   let dataListener: ((id: string, data: string) => void) | null;
   let resizeObserverCallback: (() => void) | null;
 
@@ -122,6 +127,7 @@ describe('useTerminal', () => {
     dataCleanup = vi.fn<() => void>();
     exitCleanup = vi.fn<() => void>();
     dataListener = null;
+    exitListener = null;
     resizeObserverCallback = null;
     xtermMock.terminalInstances.length = 0;
     xtermMock.fitAddonInstances.length = 0;
@@ -135,12 +141,19 @@ describe('useTerminal', () => {
         dataListener = cb;
         return dataCleanup;
       }),
-      onExit: vi.fn(() => exitCleanup),
+      onExit: vi.fn((cb) => {
+        exitListener = cb;
+        return exitCleanup;
+      }),
+    };
+    paneInfoApi = {
+      notifyCommand: vi.fn(() => Promise.resolve()),
+      notifyCwd: vi.fn(() => Promise.resolve()),
     };
 
     Object.defineProperty(window, 'api', {
       configurable: true,
-      value: { pty: ptyApi },
+      value: { paneInfo: paneInfoApi, pty: ptyApi },
     });
 
     class MockResizeObserver implements ResizeObserver {
@@ -196,6 +209,22 @@ describe('useTerminal', () => {
       expect(ptyApi.resize).toHaveBeenCalledWith('pty-1', 129, 43);
     });
     expect(xtermMock.terminalInstances[0]?.focus).toHaveBeenCalled();
+    expect(paneInfoApi.notifyCwd).toHaveBeenCalledWith('pty-1', '/Users/tester/project');
+  });
+
+  it('reports PTY id lifecycle changes', async () => {
+    // Given: a terminal pane receives a PTY id callback.
+    const onPtyIdChange = vi.fn<(ptyId: string | null) => void>();
+    const { unmount } = render(<TestTerminal onPtyIdChange={onPtyIdChange} />);
+
+    // When: the PTY is created and then the pane unmounts.
+    await waitFor(() => {
+      expect(onPtyIdChange).toHaveBeenCalledWith('pty-1');
+    });
+    unmount();
+
+    // Then: the owning pane can clear its runtime id.
+    expect(onPtyIdChange).toHaveBeenCalledWith(null);
   });
 
   it('writes the initial command once after PTY creation', async () => {
@@ -210,6 +239,41 @@ describe('useTerminal', () => {
 
     // Then: the command is injected once for that PTY.
     expect(ptyApi.write).toHaveBeenCalledTimes(1);
+    expect(paneInfoApi.notifyCommand).toHaveBeenCalledWith('pty-1', "ssh 'dev'");
+  });
+
+  it('reports the submitted terminal command before writing Enter to the PTY', async () => {
+    // Given: a terminal pane has an active PTY.
+    render(<TestTerminal />);
+    await waitFor(() => {
+      expect(ptyApi.create).toHaveBeenCalled();
+    });
+
+    // When: the user types a command and presses Enter.
+    xtermMock.terminalInstances[0]?.emitInput('pnpm run dev');
+    xtermMock.terminalInstances[0]?.emitInput('\r');
+
+    // Then: the command text the user submitted is sent to pane info.
+    expect(paneInfoApi.notifyCommand).toHaveBeenCalledWith('pty-1', 'pnpm run dev');
+    expect(ptyApi.write).toHaveBeenCalledWith('pty-1', 'pnpm run dev');
+    expect(ptyApi.write).toHaveBeenCalledWith('pty-1', '\r');
+  });
+
+  it('handles simple command editing before reporting submitted input', async () => {
+    // Given: a terminal pane has an active PTY.
+    render(<TestTerminal />);
+    await waitFor(() => {
+      expect(ptyApi.create).toHaveBeenCalled();
+    });
+
+    // When: the user corrects input with backspace and submits it.
+    xtermMock.terminalInstances[0]?.emitInput('pnpm run deX');
+    xtermMock.terminalInstances[0]?.emitInput('\x7f');
+    xtermMock.terminalInstances[0]?.emitInput('v');
+    xtermMock.terminalInstances[0]?.emitInput('\r');
+
+    // Then: the edited command is reported.
+    expect(paneInfoApi.notifyCommand).toHaveBeenCalledWith('pty-1', 'pnpm run dev');
   });
 
   it('does not write the initial command if PTY creation resolves after unmount', async () => {
@@ -281,6 +345,21 @@ describe('useTerminal', () => {
     expect(xtermMock.terminalInstances[0]?.dispose).toHaveBeenCalledOnce();
   });
 
+  it('clears the PTY id when the process exits', async () => {
+    // Given: a mounted terminal with an active PTY id.
+    const onPtyIdChange = vi.fn<(ptyId: string | null) => void>();
+    render(<TestTerminal onPtyIdChange={onPtyIdChange} />);
+    await waitFor(() => {
+      expect(onPtyIdChange).toHaveBeenCalledWith('pty-1');
+    });
+
+    // When: main reports process exit.
+    exitListener?.('pty-1', 0);
+
+    // Then: the pane runtime id is cleared.
+    expect(onPtyIdChange).toHaveBeenCalledWith(null);
+  });
+
   it('writes PTY output to xterm only for the active PTY id', async () => {
     // Given: a mounted terminal with a registered PTY data listener.
     render(<TestTerminal />);
@@ -348,6 +427,7 @@ describe('useTerminal', () => {
     expect(handled).toBe(true);
     expect(onCwdChange).toHaveBeenCalledOnce();
     expect(onCwdChange).toHaveBeenCalledWith('/Users/tester/My Project');
+    expect(paneInfoApi.notifyCwd).toHaveBeenCalledWith('pty-1', '/Users/tester/My Project');
     expect(ptyApi.create).toHaveBeenCalledOnce();
   });
 

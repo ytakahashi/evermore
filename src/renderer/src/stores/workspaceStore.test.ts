@@ -188,6 +188,23 @@ describe('workspaceStore', () => {
     expect(workspaceApi.update).not.toHaveBeenCalled();
   });
 
+  it('updates pane PTY ids without scheduling persistence', async () => {
+    // Given: a loaded workspace store.
+    vi.useFakeTimers();
+    const useStore = createWorkspaceStore({ workspaceApi, debounceMs: 50, now: () => now });
+    await useStore.getState().loadWorkspaces();
+
+    // When: a TerminalView reports its runtime PTY id and later clears it.
+    useStore.getState().setPanePtyId('workspace-1-pane-1', 'pty-1');
+    expect(selectActivePane(useStore.getState())?.ptyId).toBe('pty-1');
+    useStore.getState().setPanePtyId('workspace-1-pane-1', null);
+    await vi.advanceTimersByTimeAsync(50);
+
+    // Then: the runtime-only id updates local state without touching persisted workspace data.
+    expect(selectActivePane(useStore.getState())?.ptyId).toBeUndefined();
+    expect(workspaceApi.update).not.toHaveBeenCalled();
+  });
+
   it('keeps only the latest debounced workspace update for the same workspace', async () => {
     // Given: repeated workspace updates happen within the debounce window.
     vi.useFakeTimers();

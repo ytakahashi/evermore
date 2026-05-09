@@ -1,4 +1,11 @@
-import type { Workspace, AppSettings, SSHHost, Tunnel, TunnelStatus } from './types';
+import type {
+  Workspace,
+  AppSettings,
+  PaneRuntimeInfo,
+  SSHHost,
+  Tunnel,
+  TunnelStatus,
+} from './types';
 
 export interface Api {
   pty: {
@@ -8,6 +15,19 @@ export interface Api {
     dispose: (id: string) => Promise<void>;
     onData: (cb: (id: string, data: string) => void) => () => void;
     onExit: (cb: (id: string, code: number) => void) => () => void;
+  };
+  paneInfo: {
+    list: () => Promise<PaneRuntimeInfo[]>;
+    notifyCwd: (ptyId: string, cwd: string) => Promise<void>;
+    /**
+     * Reports the command text submitted in the terminal UI for display purposes.
+     *
+     * This is intentionally separate from foreground process inspection: `ps` may see resolved
+     * runtime executables such as `node .../pnpm.cjs`, while the sidebar should show the command
+     * the user actually ran, such as `pnpm run dev`.
+     */
+    notifyCommand: (ptyId: string, command: string) => Promise<void>;
+    onChanged: (cb: (info: PaneRuntimeInfo) => void) => () => void;
   };
   workspace: {
     list: () => Promise<{ workspaces: Workspace[]; activeWorkspaceId: string | null }>;

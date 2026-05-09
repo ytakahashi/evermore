@@ -18,9 +18,20 @@ export interface PtyExitEvent {
   code: number;
 }
 
+export interface PtyCreateEvent {
+  id: string;
+  pid: number;
+}
+
+export interface PtyDisposeEvent {
+  id: string;
+}
+
 export interface PtyManagerCallbacks {
   onData: (event: PtyDataEvent) => void;
   onExit: (event: PtyExitEvent) => void;
+  onCreate?: (event: PtyCreateEvent) => void;
+  onDispose?: (event: PtyDisposeEvent) => void;
 }
 
 export type PtySpawn = typeof nodePty.spawn;

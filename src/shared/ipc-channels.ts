@@ -7,6 +7,12 @@ export const IPC = {
   PTY_DATA: 'pty:data', // main -> renderer
   PTY_EXIT: 'pty:exit', // main -> renderer
 
+  // Pane info
+  PANE_INFO_LIST: 'pane-info:list',
+  PANE_INFO_NOTIFY_CWD: 'pane-info:notify-cwd',
+  PANE_INFO_NOTIFY_COMMAND: 'pane-info:notify-command',
+  PANE_INFO_CHANGED: 'pane-info:changed', // main -> renderer
+
   // Workspace
   WS_LIST: 'workspace:list',
   WS_GET: 'workspace:get',

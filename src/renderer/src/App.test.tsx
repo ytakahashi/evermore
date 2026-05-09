@@ -2,6 +2,7 @@ import { render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import App from './App';
 import type { Workspace } from '../../shared/types';
+import { usePaneInfoStore } from './stores/paneInfoStore';
 import { useTunnelsStore } from './stores/tunnelsStore';
 
 vi.mock('./components/terminal/TerminalView', () => ({
@@ -40,6 +41,12 @@ describe('App', () => {
       configurable: true,
       value: {
         pty: {},
+        paneInfo: {
+          list: vi.fn(() => Promise.resolve([])),
+          notifyCommand: vi.fn(() => Promise.resolve()),
+          notifyCwd: vi.fn(() => Promise.resolve()),
+          onChanged: vi.fn(() => vi.fn()),
+        },
         workspace: {
           list: vi.fn(() => Promise.resolve({ workspaces: [workspace], activeWorkspaceId: null })),
           get: vi.fn(() => Promise.resolve(workspace)),
@@ -64,6 +71,7 @@ describe('App', () => {
 
   afterEach(() => {
     useTunnelsStore.setState({ tunnels: [], isLoading: false, error: null });
+    usePaneInfoStore.setState({ infosByPtyId: {}, isLoading: false, error: null });
     Reflect.deleteProperty(window, 'api');
   });
 

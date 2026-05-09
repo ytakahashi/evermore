@@ -36,6 +36,7 @@ export interface WorkspaceStoreState {
   selectTab: (tabId: string) => void;
   closeTab: (tabId: string) => void;
   setActivePane: (paneId: string) => void;
+  setPanePtyId: (paneId: string, ptyId: string | null) => void;
   splitPane: (paneId: string, direction: SplitDirection) => void;
   closePane: (paneId: string) => void;
   resizeSplit: (path: number[], ratio: number) => void;
@@ -547,6 +548,25 @@ export function createWorkspaceStore(
             activePaneId: paneId,
           }),
         );
+      },
+      setPanePtyId: (paneId: string, ptyId: string | null): void => {
+        set((state) => ({
+          workspaces: state.workspaces.map((workspace) => ({
+            ...workspace,
+            panes: workspace.panes.map((pane) => {
+              if (pane.id !== paneId) {
+                return pane;
+              }
+
+              if (ptyId === null) {
+                const { ptyId: _ptyId, ...paneWithoutPtyId } = pane;
+                return paneWithoutPtyId;
+              }
+
+              return { ...pane, ptyId };
+            }),
+          })),
+        }));
       },
       splitPane: (paneId: string, direction: SplitDirection): void => {
         const workspace = selectActiveWorkspace(get());

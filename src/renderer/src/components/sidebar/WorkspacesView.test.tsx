@@ -1,6 +1,7 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Workspace } from '../../../../shared/types';
+import { usePaneInfoStore } from '../../stores/paneInfoStore';
 import { useWorkspaceStore } from '../../stores/workspaceStore';
 import { WorkspacesView } from './WorkspacesView';
 
@@ -69,6 +70,7 @@ const workspace2: Workspace = {
     {
       id: 'workspace-2-pane-1',
       cwd: '/Users/tester/project',
+      ptyId: 'pty-server',
     },
     {
       id: 'workspace-2-pane-2',
@@ -137,6 +139,7 @@ describe('WorkspacesView', () => {
       isLoading: false,
       error: null,
     });
+    usePaneInfoStore.setState({ infosByPtyId: {}, isLoading: false, error: null });
   });
 
   afterEach(() => {
@@ -146,6 +149,7 @@ describe('WorkspacesView', () => {
       isLoading: false,
       error: null,
     });
+    usePaneInfoStore.setState({ infosByPtyId: {}, isLoading: false, error: null });
     Reflect.deleteProperty(window, 'api');
     vi.useRealTimers();
   });
@@ -167,6 +171,29 @@ describe('WorkspacesView', () => {
     expect(screen.getByText('/Users/tester')).toBeInTheDocument();
     expect(screen.getAllByText('/Users/tester/project')).toHaveLength(2);
     expect(screen.getByText('/Users/tester/project/logs')).toBeInTheDocument();
+  });
+
+  it('shows running pane info when runtime state is available', () => {
+    // Given: one pane has a PTY runtime info snapshot.
+    usePaneInfoStore.setState({
+      infosByPtyId: {
+        'pty-server': {
+          ptyId: 'pty-server',
+          activity: 'running',
+          foregroundCommand: 'pnpm run dev',
+          observedAt: 1000,
+        },
+      },
+      isLoading: false,
+      error: null,
+    });
+
+    // When: the workspace sidebar renders.
+    render(<WorkspacesView />);
+
+    // Then: the running command appears once as the summary label (cwd remains in the detail row).
+    expect(screen.getByText('pnpm run dev')).toBeInTheDocument();
+    expect(screen.getByLabelText('running')).toBeInTheDocument();
   });
 
   it('selects the corresponding workspace and tab from the sidebar', async () => {

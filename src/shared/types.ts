@@ -32,6 +32,17 @@ export interface Pane {
   initialCommand?: string; // runtime only; sanitizePane drops it from persistence so restored panes do not replay
 }
 
+export type PaneActivity = 'idle' | 'running';
+
+export interface PaneRuntimeInfo {
+  ptyId: string;
+  activity: PaneActivity;
+  /** Foreground command line when activity is running. */
+  foregroundCommand?: string;
+  /** Unix timestamp in milliseconds for the latest observation. */
+  observedAt: number;
+}
+
 export interface SSHHost {
   alias: string;
   hostname?: string;

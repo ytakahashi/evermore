@@ -2,22 +2,37 @@ import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { ChevronRight, Folder, Hash, Plus, Terminal, X } from 'lucide-react';
 import { countPaneLeaves, flattenLayout } from '../../../../shared/pane-layout';
 import { getPathBasename } from '../../../../shared/path-label';
-import type { Pane } from '../../../../shared/types';
+import type { Pane, PaneRuntimeInfo } from '../../../../shared/types';
+import { usePaneInfoStore } from '../../stores/paneInfoStore';
 import { useWorkspaceStore } from '../../stores/workspaceStore';
 
 function formatPaneCount(count: number): string {
   return `${count} ${count === 1 ? 'pane' : 'panes'}`;
 }
 
-function PaneSummary({ pane }: { pane: Pane }): React.JSX.Element {
-  const label = getPathBasename(pane.cwd, { emptyFallback: '(loading)' });
+function PaneSummary({ info, pane }: { info?: PaneRuntimeInfo; pane: Pane }): React.JSX.Element {
+  const isRunning = info?.activity === 'running';
+  const label =
+    isRunning && info.foregroundCommand
+      ? info.foregroundCommand
+      : getPathBasename(pane.cwd, { emptyFallback: '(loading)' });
 
   return (
     <div className="pl-6">
       <div className="border-l border-border-subtle pl-2">
         <div className="flex min-w-0 items-start gap-1.5 rounded-md px-2 py-1 text-sm text-muted hover:bg-raised/40">
           <Terminal size={13} className="mt-0.5 shrink-0 text-subtle/70" />
+          {isRunning && (
+            <span
+              aria-label="running"
+              className="mt-1.5 size-1.5 shrink-0 rounded-full bg-success"
+              title="Running"
+            />
+          )}
           <div className="min-w-0 flex-1">
+            {/* Label is the runtime summary (foregroundCommand when running, cwd basename otherwise),
+                while the detail row consistently shows the full cwd. Showing foregroundCommand again
+                in the detail row would just duplicate the label. */}
             <div className="truncate text-foreground">{label}</div>
             {pane.cwd && <div className="mt-1 truncate text-[11px] text-muted">{pane.cwd}</div>}
           </div>
@@ -29,6 +44,7 @@ function PaneSummary({ pane }: { pane: Pane }): React.JSX.Element {
 
 export function WorkspacesView(): React.JSX.Element {
   const workspaces = useWorkspaceStore((state) => state.workspaces);
+  const paneInfosByPtyId = usePaneInfoStore((state) => state.infosByPtyId);
   const activeWorkspaceId = useWorkspaceStore((state) => state.activeWorkspaceId);
   const createWorkspace = useWorkspaceStore((state) => state.createWorkspace);
   const deleteWorkspace = useWorkspaceStore((state) => state.deleteWorkspace);
@@ -244,7 +260,8 @@ export function WorkspacesView(): React.JSX.Element {
                             return null;
                           }
 
-                          return <PaneSummary key={pane.id} pane={pane} />;
+                          const info = pane.ptyId ? paneInfosByPtyId[pane.ptyId] : undefined;
+                          return <PaneSummary key={pane.id} info={info} pane={pane} />;
                         })}
                       </div>
                     </div>

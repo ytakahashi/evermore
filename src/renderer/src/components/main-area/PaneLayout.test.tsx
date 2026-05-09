@@ -1,13 +1,26 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Workspace } from '../../../../shared/types';
+import { usePaneInfoStore } from '../../stores/paneInfoStore';
 import { useWorkspaceStore } from '../../stores/workspaceStore';
 import { PaneLayout } from './PaneLayout';
 
 vi.mock('../terminal/TerminalView', () => ({
-  TerminalView: ({ cwd, isActive }: { cwd?: string; isActive?: boolean }) => (
+  TerminalView: ({
+    cwd,
+    isActive,
+    onPtyIdChange,
+  }: {
+    cwd?: string;
+    isActive?: boolean;
+    onPtyIdChange?: (ptyId: string | null) => void;
+  }) => (
     <div data-active={isActive ? 'true' : 'false'} data-testid="terminal-view">
       {cwd}
+      {/* Test-only hook to simulate the PTY id lifecycle without spinning up a real terminal. */}
+      <button data-testid="terminal-clear-pty" type="button" onClick={() => onPtyIdChange?.(null)}>
+        clear pty
+      </button>
     </div>
   ),
 }));
@@ -55,6 +68,7 @@ describe('PaneLayout', () => {
       isLoading: false,
       error: null,
     });
+    usePaneInfoStore.setState({ infosByPtyId: {}, isLoading: false, error: null });
   });
 
   afterEach(() => {
@@ -64,6 +78,7 @@ describe('PaneLayout', () => {
       isLoading: false,
       error: null,
     });
+    usePaneInfoStore.setState({ infosByPtyId: {}, isLoading: false, error: null });
     Reflect.deleteProperty(window, 'api');
     vi.useRealTimers();
   });
@@ -192,6 +207,53 @@ describe('PaneLayout', () => {
         ratio: 0.7,
       }),
     );
+  });
+
+  it('removes the pane info entry when a PTY id is cleared', () => {
+    // Given: a pane has an active PTY id and a paneInfo snapshot for it.
+    useWorkspaceStore.setState({
+      workspaces: [
+        {
+          ...workspace,
+          panes: [{ ...workspace.panes[0]!, ptyId: 'pty-1' }],
+        },
+      ],
+      activeWorkspaceId: workspace.id,
+      isLoading: false,
+      error: null,
+    });
+    usePaneInfoStore.setState({
+      infosByPtyId: {
+        'pty-1': {
+          ptyId: 'pty-1',
+          activity: 'running',
+          foregroundCommand: 'pnpm dev',
+          observedAt: 1,
+        },
+      },
+      isLoading: false,
+      error: null,
+    });
+    const currentWorkspace = useWorkspaceStore.getState().workspaces[0];
+    const currentTab = currentWorkspace?.tabs[0];
+    if (!currentWorkspace || !currentTab) {
+      throw new Error('Expected test workspace and tab.');
+    }
+    render(
+      <PaneLayout
+        isActiveTab
+        layout={currentTab.layout}
+        panes={currentWorkspace.panes}
+        tab={currentTab}
+      />,
+    );
+
+    // When: TerminalView reports the PTY id has been cleared.
+    fireEvent.click(screen.getByTestId('terminal-clear-pty'));
+
+    // Then: the renderer-side paneInfo cache no longer holds the dead PTY entry.
+    expect(usePaneInfoStore.getState().infosByPtyId).toEqual({});
+    expect(useWorkspaceStore.getState().workspaces[0]?.panes[0]?.ptyId).toBeUndefined();
   });
 
   it('does not mark panes in inactive tabs as active terminals', () => {
