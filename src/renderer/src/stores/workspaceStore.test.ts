@@ -475,6 +475,166 @@ describe('workspaceStore', () => {
     expect(workspaceApi.update).not.toHaveBeenCalled();
   });
 
+  it('selects a pane in another workspace and persists the target tab pane selection', async () => {
+    // Given: an inactive workspace has multiple tabs and panes.
+    vi.useFakeTimers();
+    const workspace2 = createWorkspace('workspace-2', '/Users/tester/project');
+    const workspace2WithPanes: Workspace = {
+      ...workspace2,
+      tabs: [
+        {
+          ...workspace2.tabs[0]!,
+          layout: {
+            type: 'split',
+            direction: 'vertical',
+            ratio: 0.5,
+            children: [
+              {
+                type: 'leaf',
+                paneId: 'workspace-2-pane-1',
+              },
+              {
+                type: 'leaf',
+                paneId: 'workspace-2-pane-2',
+              },
+            ],
+          },
+          activePaneId: 'workspace-2-pane-1',
+        },
+        {
+          id: 'workspace-2-tab-2',
+          name: 'logs',
+          layout: {
+            type: 'leaf',
+            paneId: 'workspace-2-pane-3',
+          },
+          activePaneId: 'workspace-2-pane-3',
+        },
+      ],
+      panes: [
+        ...workspace2.panes,
+        {
+          id: 'workspace-2-pane-2',
+          cwd: '/Users/tester/project',
+        },
+        {
+          id: 'workspace-2-pane-3',
+          cwd: '/Users/tester/project/logs',
+        },
+      ],
+    };
+    workspaceApi.list = vi.fn(() =>
+      Promise.resolve({ workspaces: [workspace, workspace2WithPanes], activeWorkspaceId: null }),
+    );
+    const useStore = createWorkspaceStore({ workspaceApi, debounceMs: 50, now: () => now });
+    await useStore.getState().loadWorkspaces();
+
+    // When: a sidebar-style action selects a pane in the inactive workspace.
+    useStore
+      .getState()
+      .selectWorkspacePane('workspace-2', 'workspace-2-tab-2', 'workspace-2-pane-3');
+    await vi.advanceTimersByTimeAsync(50);
+
+    // Then: the target workspace, tab, and pane become active and the tab choice is persisted.
+    expect(useStore.getState().activeWorkspaceId).toBe('workspace-2');
+    expect(selectActiveTab(useStore.getState())?.id).toBe('workspace-2-tab-2');
+    expect(selectActivePane(useStore.getState())?.id).toBe('workspace-2-pane-3');
+    expect(workspaceApi.setActiveWorkspaceId).toHaveBeenCalledWith('workspace-2');
+    expect(workspaceApi.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 'workspace-2',
+        activeTabId: 'workspace-2-tab-2',
+        tabs: expect.arrayContaining([
+          expect.objectContaining({
+            id: 'workspace-2-tab-2',
+            activePaneId: 'workspace-2-pane-3',
+          }),
+        ]),
+      }),
+    );
+  });
+
+  it('selects a pane in the active tab without switching tabs', async () => {
+    // Given: the active tab has two panes and the first is active.
+    vi.useFakeTimers();
+    const splitWorkspace: Workspace = {
+      ...workspace,
+      tabs: [
+        {
+          ...workspace.tabs[0]!,
+          layout: {
+            type: 'split',
+            direction: 'horizontal',
+            ratio: 0.5,
+            children: [
+              {
+                type: 'leaf',
+                paneId: 'workspace-1-pane-1',
+              },
+              {
+                type: 'leaf',
+                paneId: 'pane-2',
+              },
+            ],
+          },
+          activePaneId: 'workspace-1-pane-1',
+        },
+      ],
+      panes: [
+        ...workspace.panes,
+        {
+          id: 'pane-2',
+          cwd: '/Users/tester/project',
+        },
+      ],
+    };
+    workspaceApi.list = vi.fn(() =>
+      Promise.resolve({ workspaces: [splitWorkspace], activeWorkspaceId: null }),
+    );
+    const useStore = createWorkspaceStore({ workspaceApi, debounceMs: 50, now: () => now });
+    await useStore.getState().loadWorkspaces();
+
+    // When: the second pane is selected by workspace/tab/pane id.
+    useStore.getState().selectWorkspacePane('workspace-1', 'workspace-1-tab-1', 'pane-2');
+    await vi.advanceTimersByTimeAsync(50);
+
+    // Then: only the pane selection changes on the current active tab.
+    expect(selectActiveTab(useStore.getState())?.id).toBe('workspace-1-tab-1');
+    expect(selectActivePane(useStore.getState())?.id).toBe('pane-2');
+    expect(workspaceApi.setActiveWorkspaceId).not.toHaveBeenCalled();
+    expect(workspaceApi.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        tabs: [
+          expect.objectContaining({
+            id: 'workspace-1-tab-1',
+            activePaneId: 'pane-2',
+          }),
+        ],
+      }),
+    );
+  });
+
+  it('ignores workspace pane selection when ids are stale or already active', async () => {
+    // Given: a loaded workspace store.
+    vi.useFakeTimers();
+    const useStore = createWorkspaceStore({ workspaceApi, debounceMs: 50, now: () => now });
+    await useStore.getState().loadWorkspaces();
+
+    // When: callers provide invalid ids or select the already-active pane.
+    useStore.getState().selectWorkspacePane('missing-workspace', 'workspace-1-tab-1', 'pane-1');
+    useStore.getState().selectWorkspacePane('workspace-1', 'missing-tab', 'workspace-1-pane-1');
+    useStore.getState().selectWorkspacePane('workspace-1', 'workspace-1-tab-1', 'missing-pane');
+    useStore
+      .getState()
+      .selectWorkspacePane('workspace-1', 'workspace-1-tab-1', 'workspace-1-pane-1');
+    await vi.advanceTimersByTimeAsync(50);
+
+    // Then: no state mutation or persistence is performed.
+    expect(selectActivePane(useStore.getState())?.id).toBe('workspace-1-pane-1');
+    expect(workspaceApi.setActiveWorkspaceId).not.toHaveBeenCalled();
+    expect(workspaceApi.update).not.toHaveBeenCalled();
+  });
+
   it('renames a tab with a trimmed name and ignores blank names', async () => {
     // Given: a workspace has one tab.
     vi.useFakeTimers();

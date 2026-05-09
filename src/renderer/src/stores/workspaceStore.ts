@@ -32,6 +32,7 @@ export interface WorkspaceStoreState {
   addTab: () => void;
   renameTab: (tabId: string, name: string) => void;
   openSshHostTab: (alias: string) => void;
+  selectWorkspacePane: (workspaceId: string, tabId: string, paneId: string) => void;
   selectWorkspaceTab: (workspaceId: string, tabId: string) => void;
   selectTab: (tabId: string) => void;
   closeTab: (tabId: string) => void;
@@ -493,6 +494,61 @@ export function createWorkspaceStore(
         if (shouldSwitchWorkspace) {
           // Sidebar tab selection can target an inactive workspace. `updateWorkspaceState()` only
           // preserves or initializes the active id, so switching workspace remains explicit here.
+          set({ activeWorkspaceId: updatedWorkspace.id });
+          void getWorkspaceApi().setActiveWorkspaceId(updatedWorkspace.id);
+        }
+        persistWorkspaceDebounced(updatedWorkspace.id);
+      },
+      selectWorkspacePane: (workspaceId: string, tabId: string, paneId: string): void => {
+        const workspace = get().workspaces.find(
+          (currentWorkspace) => currentWorkspace.id === workspaceId,
+        );
+        if (!workspace) {
+          return;
+        }
+
+        const selectedTab = workspace.tabs.find((tab) => tab.id === tabId);
+        if (!selectedTab) {
+          return;
+        }
+
+        if (
+          !collectPaneIds(selectedTab.layout).includes(paneId) ||
+          !workspace.panes.some((pane) => pane.id === paneId)
+        ) {
+          return;
+        }
+
+        const shouldSwitchWorkspace = get().activeWorkspaceId !== workspace.id;
+        const shouldSelectTab = workspace.activeTabId !== selectedTab.id;
+        const shouldSelectPane = selectedTab.activePaneId !== paneId;
+
+        if (!shouldSwitchWorkspace && !shouldSelectTab && !shouldSelectPane) {
+          return;
+        }
+
+        if (!shouldSelectTab && !shouldSelectPane) {
+          set({ activeWorkspaceId: workspace.id });
+          void getWorkspaceApi().setActiveWorkspaceId(workspace.id);
+          // Workspace switches but the target tab/pane already match: skip workspace-store update,
+          // which avoids invalidating React identity for the panes/tabs of the (previously inactive) workspace.
+          return;
+        }
+
+        const updatedWorkspace = updateWorkspaceState(
+          replaceTab(
+            {
+              ...workspace,
+              activeTabId: selectedTab.id,
+            },
+            {
+              ...selectedTab,
+              activePaneId: paneId,
+            },
+          ),
+        );
+
+        if (shouldSwitchWorkspace) {
           set({ activeWorkspaceId: updatedWorkspace.id });
           void getWorkspaceApi().setActiveWorkspaceId(updatedWorkspace.id);
         }

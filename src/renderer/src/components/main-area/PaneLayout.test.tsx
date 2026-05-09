@@ -2,6 +2,7 @@ import { fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Workspace } from '../../../../shared/types';
 import { usePaneInfoStore } from '../../stores/paneInfoStore';
+import { useUiStore } from '../../stores/uiStore';
 import { useWorkspaceStore } from '../../stores/workspaceStore';
 import { PaneLayout } from './PaneLayout';
 
@@ -69,6 +70,7 @@ describe('PaneLayout', () => {
       error: null,
     });
     usePaneInfoStore.setState({ infosByPtyId: {}, isLoading: false, error: null });
+    useUiStore.setState({ fullscreenPaneId: null });
   });
 
   afterEach(() => {
@@ -79,6 +81,7 @@ describe('PaneLayout', () => {
       error: null,
     });
     usePaneInfoStore.setState({ infosByPtyId: {}, isLoading: false, error: null });
+    useUiStore.setState({ fullscreenPaneId: null });
     Reflect.deleteProperty(window, 'api');
     vi.useRealTimers();
   });
@@ -104,6 +107,7 @@ describe('PaneLayout', () => {
     // Then: one terminal is shown with the pane cwd.
     expect(screen.getByTestId('terminal-view')).toHaveTextContent('/Users/tester');
     expect(screen.getByTestId('terminal-view')).toHaveAttribute('data-active', 'true');
+    expect(screen.getByRole('button', { name: 'Maximize pane' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Split pane vertically' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Split pane horizontally' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Close pane' })).toBeDisabled();
@@ -275,5 +279,141 @@ describe('PaneLayout', () => {
 
     // Then: its terminal is not eligible for focus.
     expect(screen.getByTestId('terminal-view')).toHaveAttribute('data-active', 'false');
+  });
+
+  it('maximizes the selected pane without unmounting sibling terminals', () => {
+    // Given: the current tab has a split layout and pane-2 is fullscreen.
+    const splitWorkspace: Workspace = {
+      ...workspace,
+      tabs: [
+        {
+          ...workspace.tabs[0]!,
+          layout: {
+            type: 'split',
+            direction: 'vertical',
+            ratio: 0.5,
+            children: [
+              {
+                type: 'leaf',
+                paneId: 'pane-1',
+              },
+              {
+                type: 'leaf',
+                paneId: 'pane-2',
+              },
+            ],
+          },
+          activePaneId: 'pane-2',
+        },
+      ],
+      panes: [
+        {
+          id: 'pane-1',
+          cwd: '/Users/tester/one',
+        },
+        {
+          id: 'pane-2',
+          cwd: '/Users/tester/two',
+        },
+      ],
+    };
+    useWorkspaceStore.setState({
+      workspaces: [splitWorkspace],
+      activeWorkspaceId: splitWorkspace.id,
+      isLoading: false,
+      error: null,
+    });
+    useUiStore.getState().setFullscreenPaneId('pane-2');
+    const currentTab = splitWorkspace.tabs[0];
+    if (!currentTab) {
+      throw new Error('Expected test tab.');
+    }
+
+    // When: the layout renders in fullscreen mode.
+    render(
+      <PaneLayout
+        isActiveTab
+        layout={currentTab.layout}
+        panes={splitWorkspace.panes}
+        tab={currentTab}
+      />,
+    );
+
+    // Then: both terminal components stay mounted, but only the fullscreen pane occupies the area.
+    expect(screen.getAllByTestId('terminal-view')).toHaveLength(2);
+    const fullscreenSection = screen.getByText('/Users/tester/two').closest('section');
+    const hiddenSection = screen.getByText('/Users/tester/one').closest('section');
+    expect(fullscreenSection).toHaveStyle({
+      height: '100%',
+      left: '0%',
+      top: '0%',
+      width: '100%',
+    });
+    expect(hiddenSection).toHaveClass('invisible', 'pointer-events-none');
+    expect(
+      screen.queryByRole('separator', { name: 'Resize vertical split' }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Exit fullscreen (⌘Esc)' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Split pane vertically' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Close pane' })).not.toBeInTheDocument();
+  });
+
+  it('ignores stale fullscreen pane ids that are not in the rendered tab layout', () => {
+    // Given: a split layout is rendered while fullscreen state points at a missing pane.
+    useWorkspaceStore.getState().splitPane('pane-1', 'vertical');
+    useUiStore.getState().setFullscreenPaneId('missing-pane');
+    const splitWorkspace = useWorkspaceStore.getState().workspaces[0];
+    const splitTab = splitWorkspace?.tabs[0];
+    if (!splitWorkspace || !splitTab) {
+      throw new Error('Expected split workspace and tab.');
+    }
+
+    // When: the layout renders.
+    render(
+      <PaneLayout
+        isActiveTab
+        layout={splitTab.layout}
+        panes={splitWorkspace.panes}
+        tab={splitTab}
+      />,
+    );
+
+    // Then: fullscreen is not applied to this tab.
+    expect(screen.getByRole('separator', { name: 'Resize vertical split' })).toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: 'Exit fullscreen (⌘Esc)' }),
+    ).not.toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: 'Maximize pane' })).toHaveLength(2);
+  });
+
+  it('toggles fullscreen from the pane toolbar and makes that pane active', () => {
+    // Given: the current tab has two panes and pane-1 is active.
+    useWorkspaceStore.getState().splitPane('pane-1', 'vertical');
+    useWorkspaceStore.getState().setActivePane('pane-1');
+    const splitWorkspace = useWorkspaceStore.getState().workspaces[0];
+    const splitTab = splitWorkspace?.tabs[0];
+    const secondPaneId = splitWorkspace?.panes.find((pane) => pane.id !== 'pane-1')?.id;
+    if (!splitWorkspace || !splitTab || !secondPaneId) {
+      throw new Error('Expected split workspace and tab.');
+    }
+
+    // When: the second pane is maximized.
+    render(
+      <PaneLayout
+        isActiveTab
+        layout={splitTab.layout}
+        panes={splitWorkspace.panes}
+        tab={splitTab}
+      />,
+    );
+    const secondMaximizeButton = screen.getAllByRole('button', { name: 'Maximize pane' })[1];
+    if (!secondMaximizeButton) {
+      throw new Error('Expected second maximize button.');
+    }
+    fireEvent.click(secondMaximizeButton);
+
+    // Then: fullscreen state points at the second pane and that pane is active in workspace state.
+    expect(useUiStore.getState().fullscreenPaneId).toBe(secondPaneId);
+    expect(useWorkspaceStore.getState().workspaces[0]?.tabs[0]?.activePaneId).toBe(secondPaneId);
   });
 });

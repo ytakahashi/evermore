@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { ChevronRight, Folder, Hash, Plus, Terminal, X } from 'lucide-react';
 import { countPaneLeaves, flattenLayout } from '../../../../shared/pane-layout';
-import { getPathBasename } from '../../../../shared/path-label';
+import { getPathBasename, getTruncatedPathLabel } from '../../../../shared/path-label';
 import type { Pane, PaneRuntimeInfo } from '../../../../shared/types';
 import { usePaneInfoStore } from '../../stores/paneInfoStore';
 import { useWorkspaceStore } from '../../stores/workspaceStore';
@@ -10,18 +10,36 @@ function formatPaneCount(count: number): string {
   return `${count} ${count === 1 ? 'pane' : 'panes'}`;
 }
 
-function PaneSummary({ info, pane }: { info?: PaneRuntimeInfo; pane: Pane }): React.JSX.Element {
+interface PaneSummaryProps {
+  info?: PaneRuntimeInfo;
+  isActivePane: boolean;
+  onClick: () => void;
+  pane: Pane;
+}
+
+function PaneSummary({ info, isActivePane, onClick, pane }: PaneSummaryProps): React.JSX.Element {
   const isRunning = info?.activity === 'running';
   const label =
     isRunning && info.foregroundCommand
       ? info.foregroundCommand
       : getPathBasename(pane.cwd, { emptyFallback: '(loading)' });
+  const cwdLabel = getTruncatedPathLabel(pane.cwd);
 
   return (
     <div className="pl-6">
-      <div className="border-l border-border-subtle pl-2">
-        <div className="flex min-w-0 items-start gap-1.5 rounded-md px-2 py-1 text-sm text-muted hover:bg-raised/40">
-          <Terminal size={13} className="mt-0.5 shrink-0 text-subtle/70" />
+      <div className="border-l border-border-subtle">
+        <button
+          aria-current={isActivePane ? 'true' : undefined}
+          className={`flex w-full min-w-0 items-start gap-1.5 rounded-md pl-3 pr-2 py-1 text-left text-sm ${
+            isActivePane ? 'bg-tab-active/80 text-foreground' : 'text-muted hover:bg-raised/40'
+          }`}
+          type="button"
+          onClick={onClick}
+        >
+          <Terminal
+            size={13}
+            className={`mt-0.5 shrink-0 ${isActivePane ? 'text-brand' : 'text-subtle/70'}`}
+          />
           {isRunning && (
             <span
               aria-label="running"
@@ -31,12 +49,18 @@ function PaneSummary({ info, pane }: { info?: PaneRuntimeInfo; pane: Pane }): Re
           )}
           <div className="min-w-0 flex-1">
             {/* Label is the runtime summary (foregroundCommand when running, cwd basename otherwise),
-                while the detail row consistently shows the full cwd. Showing foregroundCommand again
-                in the detail row would just duplicate the label. */}
-            <div className="truncate text-foreground">{label}</div>
-            {pane.cwd && <div className="mt-1 truncate text-[11px] text-muted">{pane.cwd}</div>}
+                while the detail row keeps cwd context in a shortened form. Showing foregroundCommand
+                again in the detail row would just duplicate the label. */}
+            <div className={`truncate ${isActivePane ? 'text-foreground' : 'text-muted'}`}>
+              {label}
+            </div>
+            {pane.cwd && (
+              <div className="mt-1 truncate text-[11px] text-muted" title={pane.cwd}>
+                {cwdLabel}
+              </div>
+            )}
           </div>
-        </div>
+        </button>
       </div>
     </div>
   );
@@ -49,6 +73,7 @@ export function WorkspacesView(): React.JSX.Element {
   const createWorkspace = useWorkspaceStore((state) => state.createWorkspace);
   const deleteWorkspace = useWorkspaceStore((state) => state.deleteWorkspace);
   const renameWorkspace = useWorkspaceStore((state) => state.renameWorkspace);
+  const selectWorkspacePane = useWorkspaceStore((state) => state.selectWorkspacePane);
   const selectWorkspaceTab = useWorkspaceStore((state) => state.selectWorkspaceTab);
   const setActiveWorkspace = useWorkspaceStore((state) => state.setActiveWorkspace);
 
@@ -196,7 +221,7 @@ export function WorkspacesView(): React.JSX.Element {
                 ) : (
                   <button
                     aria-current={isActive ? 'page' : undefined}
-                    className={`flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1 text-left text-sm ${
+                    className={`flex min-w-0 flex-1 items-center gap-1 rounded-md px-1 py-1 text-left text-sm ${
                       isActive ? 'bg-raised text-foreground' : 'text-muted hover:bg-raised/50'
                     }`}
                     type="button"
@@ -236,21 +261,23 @@ export function WorkspacesView(): React.JSX.Element {
 
                   return (
                     <div key={tab.id} className="space-y-0.5">
-                      <button
-                        aria-current={isActiveTab ? 'page' : undefined}
-                        className={`flex w-full items-center gap-2 rounded-md py-1 pl-8 pr-2 text-left text-sm ${
-                          isActiveTab
-                            ? 'bg-tab-active text-foreground'
-                            : 'text-muted hover:bg-raised/50'
-                        }`}
-                        type="button"
-                        onClick={() => {
-                          selectWorkspaceTab(workspace.id, tab.id);
-                        }}
-                      >
-                        <Hash size={14} className={isActiveTab ? 'text-brand' : 'text-subtle'} />
-                        <span className="truncate">{label}</span>
-                      </button>
+                      <div className="pl-3">
+                        <button
+                          aria-current={isActiveTab ? 'page' : undefined}
+                          className={`flex w-full items-center gap-1 rounded-md py-1 pl-3 pr-2 text-left text-sm ${
+                            isActiveTab
+                              ? 'bg-tab-active text-foreground'
+                              : 'text-muted hover:bg-raised/50'
+                          }`}
+                          type="button"
+                          onClick={() => {
+                            selectWorkspaceTab(workspace.id, tab.id);
+                          }}
+                        >
+                          <Hash size={14} className={isActiveTab ? 'text-brand' : 'text-subtle'} />
+                          <span className="truncate">{label}</span>
+                        </button>
+                      </div>
                       <div className="space-y-0.5">
                         {paneOrder.map(({ paneId }) => {
                           const pane = workspace.panes.find(
@@ -261,7 +288,18 @@ export function WorkspacesView(): React.JSX.Element {
                           }
 
                           const info = pane.ptyId ? paneInfosByPtyId[pane.ptyId] : undefined;
-                          return <PaneSummary key={pane.id} info={info} pane={pane} />;
+                          const isActivePane = isActiveTab && pane.id === tab.activePaneId;
+                          return (
+                            <PaneSummary
+                              key={pane.id}
+                              info={info}
+                              isActivePane={isActivePane}
+                              pane={pane}
+                              onClick={() => {
+                                selectWorkspacePane(workspace.id, tab.id, pane.id);
+                              }}
+                            />
+                          );
                         })}
                       </div>
                     </div>

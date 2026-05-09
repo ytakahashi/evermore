@@ -4,6 +4,7 @@ import { SIDEBAR_DEFAULT_WIDTH, SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH, useUiStore
 describe('useUiStore', () => {
   afterEach(() => {
     useUiStore.setState({
+      fullscreenPaneId: null,
       sidebarView: 'workspaces',
       sidebarOpen: true,
       sidebarWidth: SIDEBAR_DEFAULT_WIDTH,
@@ -20,6 +21,19 @@ describe('useUiStore', () => {
     expect(state.sidebarView).toBe('workspaces');
     expect(state.sidebarOpen).toBe(true);
     expect(state.sidebarWidth).toBe(SIDEBAR_DEFAULT_WIDTH);
+    expect(state.fullscreenPaneId).toBeNull();
+  });
+
+  it('sets and clears the fullscreen pane id', () => {
+    // Given: no pane is fullscreen initially.
+
+    // When: callers set a fullscreen pane and then clear it.
+    useUiStore.getState().setFullscreenPaneId('pane-1');
+    expect(useUiStore.getState().fullscreenPaneId).toBe('pane-1');
+    useUiStore.getState().clearFullscreen();
+
+    // Then: fullscreen state returns to its transient default.
+    expect(useUiStore.getState().fullscreenPaneId).toBeNull();
   });
 
   it('updates the active sidebar view', () => {

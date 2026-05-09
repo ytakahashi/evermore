@@ -1,4 +1,4 @@
-import { Columns2, Rows2, X } from 'lucide-react';
+import { Columns2, Maximize, Minimize, Rows2, X } from 'lucide-react';
 import { useEffect, useRef, type CSSProperties, type RefObject } from 'react';
 import {
   countPaneLeaves,
@@ -8,6 +8,7 @@ import {
 } from '../../../../shared/pane-layout';
 import type { Pane, PaneLayout as PaneLayoutModel, Tab } from '../../../../shared/types';
 import { usePaneInfoStore } from '../../stores/paneInfoStore';
+import { useUiStore } from '../../stores/uiStore';
 import { useWorkspaceStore } from '../../stores/workspaceStore';
 import { TerminalView } from '../terminal/TerminalView';
 
@@ -17,6 +18,14 @@ interface PaneLayoutProps {
   panes: Pane[];
   tab: Tab;
 }
+
+const FULLSCREEN_PANE_RECT: PaneRect = {
+  paneId: '',
+  leftPct: 0,
+  topPct: 0,
+  widthPct: 100,
+  heightPct: 100,
+};
 
 /**
  * Renders a tab's pane layout as flat siblings under a single absolute container.
@@ -36,7 +45,12 @@ export function PaneLayout({
   tab,
 }: PaneLayoutProps): React.JSX.Element {
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const fullscreenPaneId = useUiStore((state) => state.fullscreenPaneId);
   const { panes: paneRects, splits: splitRects } = flattenLayout(layout);
+  const activeFullscreenPaneId = paneRects.some((rect) => rect.paneId === fullscreenPaneId)
+    ? fullscreenPaneId
+    : null;
+  const isFullscreenLayout = activeFullscreenPaneId !== null;
 
   return (
     <div ref={containerRef} className="relative h-full min-h-0 w-full">
@@ -48,12 +62,25 @@ export function PaneLayout({
         }
 
         return (
-          <PaneCell key={pane.id} isActiveTab={isActiveTab} pane={pane} rect={rect} tab={tab} />
+          <PaneCell
+            key={pane.id}
+            isFullscreen={activeFullscreenPaneId === pane.id}
+            isFullscreenLayout={isFullscreenLayout}
+            isActiveTab={isActiveTab}
+            pane={pane}
+            rect={
+              activeFullscreenPaneId === pane.id
+                ? { ...FULLSCREEN_PANE_RECT, paneId: pane.id }
+                : rect
+            }
+            tab={tab}
+          />
         );
       })}
-      {splitRects.map((split) => (
-        <SplitterHandle key={splitKeyFor(split.path)} containerRef={containerRef} split={split} />
-      ))}
+      {!isFullscreenLayout &&
+        splitRects.map((split) => (
+          <SplitterHandle key={splitKeyFor(split.path)} containerRef={containerRef} split={split} />
+        ))}
     </div>
   );
 }
@@ -65,6 +92,8 @@ function splitKeyFor(path: number[]): string {
 }
 
 interface PaneCellProps {
+  isFullscreen: boolean;
+  isFullscreenLayout: boolean;
   isActiveTab: boolean;
   pane: Pane;
   rect: PaneRect;
@@ -74,22 +103,31 @@ interface PaneCellProps {
 /**
  * One absolutely positioned terminal pane, including the hover toolbar and active-pane border.
  */
-function PaneCell({ isActiveTab, pane, rect, tab }: PaneCellProps): React.JSX.Element {
+function PaneCell({
+  isFullscreen,
+  isFullscreenLayout,
+  isActiveTab,
+  pane,
+  rect,
+  tab,
+}: PaneCellProps): React.JSX.Element {
   const closePane = useWorkspaceStore((state) => state.closePane);
   const setActivePane = useWorkspaceStore((state) => state.setActivePane);
   const setPanePtyId = useWorkspaceStore((state) => state.setPanePtyId);
   const splitPane = useWorkspaceStore((state) => state.splitPane);
   const updatePaneCwd = useWorkspaceStore((state) => state.updatePaneCwd);
   const removePaneInfo = usePaneInfoStore((state) => state.removeInfo);
+  const setFullscreenPaneId = useUiStore((state) => state.setFullscreenPaneId);
 
   const isActive = isActiveTab && tab.activePaneId === pane.id;
   const canClosePane = countPaneLeaves(tab.layout) > 1;
+  const isHiddenByFullscreen = isFullscreenLayout && !isFullscreen;
 
   return (
     <section
       className={`group absolute overflow-hidden border ${
         isActive ? 'border-border-pane-active/70' : 'border-border-subtle'
-      }`}
+      } ${isHiddenByFullscreen ? 'pointer-events-none invisible' : ''}`}
       style={{
         left: `${rect.leftPct}%`,
         top: `${rect.topPct}%`,
@@ -123,51 +161,75 @@ function PaneCell({ isActiveTab, pane, rect, tab }: PaneCellProps): React.JSX.El
       />
       <div className="absolute right-2 top-2 z-20 flex items-center gap-1 rounded bg-panel/90 p-1 opacity-0 shadow-sm transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
         <button
-          aria-label="Split pane vertically"
+          aria-label={isFullscreen ? 'Exit fullscreen (⌘Esc)' : 'Maximize pane'}
           className="flex size-6 items-center justify-center rounded text-subtle hover:bg-raised hover:text-foreground"
-          title="Split pane vertically"
+          title={isFullscreen ? 'Exit fullscreen (⌘Esc)' : 'Maximize pane'}
           type="button"
           onClick={(event) => {
             event.stopPropagation();
-            splitPane(pane.id, 'vertical');
+            if (!isFullscreen) {
+              setActivePane(pane.id);
+            }
+            setFullscreenPaneId(isFullscreen ? null : pane.id);
           }}
           onMouseDown={(event) => {
             event.stopPropagation();
           }}
         >
-          <Columns2 size={13} />
+          {isFullscreen ? <Minimize size={13} /> : <Maximize size={13} />}
         </button>
-        <button
-          aria-label="Split pane horizontally"
-          className="flex size-6 items-center justify-center rounded text-subtle hover:bg-raised hover:text-foreground"
-          title="Split pane horizontally"
-          type="button"
-          onClick={(event) => {
-            event.stopPropagation();
-            splitPane(pane.id, 'horizontal');
-          }}
-          onMouseDown={(event) => {
-            event.stopPropagation();
-          }}
-        >
-          <Rows2 size={13} />
-        </button>
-        <button
-          aria-label="Close pane"
-          className="flex size-6 items-center justify-center rounded text-subtle hover:bg-raised hover:text-foreground disabled:cursor-default disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-subtle"
-          disabled={!canClosePane}
-          title={canClosePane ? 'Close pane' : 'At least one pane is required'}
-          type="button"
-          onClick={(event) => {
-            event.stopPropagation();
-            closePane(pane.id);
-          }}
-          onMouseDown={(event) => {
-            event.stopPropagation();
-          }}
-        >
-          <X size={13} />
-        </button>
+        {/* Fullscreen is a focus mode. Hide structural actions here so users leave fullscreen
+            before changing the pane tree, which avoids confusing split/close outcomes. */}
+        {!isFullscreenLayout && (
+          <>
+            <button
+              aria-label="Split pane vertically"
+              className="flex size-6 items-center justify-center rounded text-subtle hover:bg-raised hover:text-foreground"
+              title="Split pane vertically"
+              type="button"
+              onClick={(event) => {
+                event.stopPropagation();
+                splitPane(pane.id, 'vertical');
+              }}
+              onMouseDown={(event) => {
+                event.stopPropagation();
+              }}
+            >
+              <Columns2 size={13} />
+            </button>
+            <button
+              aria-label="Split pane horizontally"
+              className="flex size-6 items-center justify-center rounded text-subtle hover:bg-raised hover:text-foreground"
+              title="Split pane horizontally"
+              type="button"
+              onClick={(event) => {
+                event.stopPropagation();
+                splitPane(pane.id, 'horizontal');
+              }}
+              onMouseDown={(event) => {
+                event.stopPropagation();
+              }}
+            >
+              <Rows2 size={13} />
+            </button>
+            <button
+              aria-label="Close pane"
+              className="flex size-6 items-center justify-center rounded text-subtle hover:bg-raised hover:text-foreground disabled:cursor-default disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-subtle"
+              disabled={!canClosePane}
+              title={canClosePane ? 'Close pane' : 'At least one pane is required'}
+              type="button"
+              onClick={(event) => {
+                event.stopPropagation();
+                closePane(pane.id);
+              }}
+              onMouseDown={(event) => {
+                event.stopPropagation();
+              }}
+            >
+              <X size={13} />
+            </button>
+          </>
+        )}
       </div>
     </section>
   );
