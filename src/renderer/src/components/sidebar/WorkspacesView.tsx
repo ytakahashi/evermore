@@ -27,11 +27,11 @@ function PaneSummary({ info, isActivePane, onClick, pane }: PaneSummaryProps): R
 
   return (
     <div className="pl-6">
-      <div className="border-l border-border-subtle pl-2">
+      <div className="border-l border-border-subtle">
         <button
           aria-current={isActivePane ? 'true' : undefined}
-          className={`flex w-full min-w-0 items-start gap-1.5 rounded-md px-2 py-1 text-left text-sm ${
-            isActivePane ? 'bg-tab-active text-foreground' : 'text-muted hover:bg-raised/40'
+          className={`flex w-full min-w-0 items-start gap-1.5 rounded-md pl-3 pr-2 py-1 text-left text-sm ${
+            isActivePane ? 'bg-tab-active/80 text-foreground' : 'text-muted hover:bg-raised/40'
           }`}
           type="button"
           onClick={onClick}
@@ -51,7 +51,9 @@ function PaneSummary({ info, isActivePane, onClick, pane }: PaneSummaryProps): R
             {/* Label is the runtime summary (foregroundCommand when running, cwd basename otherwise),
                 while the detail row keeps cwd context in a shortened form. Showing foregroundCommand
                 again in the detail row would just duplicate the label. */}
-            <div className="truncate text-foreground">{label}</div>
+            <div className={`truncate ${isActivePane ? 'text-foreground' : 'text-muted'}`}>
+              {label}
+            </div>
             {pane.cwd && (
               <div className="mt-1 truncate text-[11px] text-muted" title={pane.cwd}>
                 {cwdLabel}
@@ -219,7 +221,7 @@ export function WorkspacesView(): React.JSX.Element {
                 ) : (
                   <button
                     aria-current={isActive ? 'page' : undefined}
-                    className={`flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1 text-left text-sm ${
+                    className={`flex min-w-0 flex-1 items-center gap-1 rounded-md px-1 py-1 text-left text-sm ${
                       isActive ? 'bg-raised text-foreground' : 'text-muted hover:bg-raised/50'
                     }`}
                     type="button"
@@ -259,21 +261,23 @@ export function WorkspacesView(): React.JSX.Element {
 
                   return (
                     <div key={tab.id} className="space-y-0.5">
-                      <button
-                        aria-current={isActiveTab ? 'page' : undefined}
-                        className={`flex w-full items-center gap-2 rounded-md py-1 pl-8 pr-2 text-left text-sm ${
-                          isActiveTab
-                            ? 'bg-tab-active text-foreground'
-                            : 'text-muted hover:bg-raised/50'
-                        }`}
-                        type="button"
-                        onClick={() => {
-                          selectWorkspaceTab(workspace.id, tab.id);
-                        }}
-                      >
-                        <Hash size={14} className={isActiveTab ? 'text-brand' : 'text-subtle'} />
-                        <span className="truncate">{label}</span>
-                      </button>
+                      <div className="pl-3">
+                        <button
+                          aria-current={isActiveTab ? 'page' : undefined}
+                          className={`flex w-full items-center gap-1 rounded-md py-1 pl-3 pr-2 text-left text-sm ${
+                            isActiveTab
+                              ? 'bg-tab-active text-foreground'
+                              : 'text-muted hover:bg-raised/50'
+                          }`}
+                          type="button"
+                          onClick={() => {
+                            selectWorkspaceTab(workspace.id, tab.id);
+                          }}
+                        >
+                          <Hash size={14} className={isActiveTab ? 'text-brand' : 'text-subtle'} />
+                          <span className="truncate">{label}</span>
+                        </button>
+                      </div>
                       <div className="space-y-0.5">
                         {paneOrder.map(({ paneId }) => {
                           const pane = workspace.panes.find(

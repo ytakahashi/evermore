@@ -2,10 +2,11 @@
 
 Evermore is a simple terminal workspace for developers, built with Electron and React.
 
-## Implemented Features
+## Features
 
-- Workspace sidebar with persistent workspace and tab layout state
-- Split-pane terminal area backed by main-process PTY ownership
+- Workspace sidebar to manage and focus workspaces, tabs, and individual panes
+- Split-pane terminal area with pane full-screen functionality to focus on a single process
+- Persistent workspace and tab layout state backed by main-process PTY ownership
 - SSH host discovery from `~/.ssh/config`, including `Include` expansion
 - SSH host detail expansion showing resolved directives (via `ssh -G`)
 - SSH host shortcuts that open terminal tabs with `ssh <alias>`
