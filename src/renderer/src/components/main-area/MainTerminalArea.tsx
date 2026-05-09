@@ -1,7 +1,14 @@
-import { useEffect } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
+import { flattenLayout } from '../../../../shared/pane-layout';
+import { useUiStore } from '../../stores/uiStore';
 import { useWorkspaceStore } from '../../stores/workspaceStore';
 import { PaneLayout } from './PaneLayout';
 import { TabBar } from './TabBar';
+
+interface ActiveSelection {
+  tabId: string | null;
+  workspaceId: string | null;
+}
 
 export function MainTerminalArea(): React.JSX.Element {
   const workspaces = useWorkspaceStore((state) => state.workspaces);
@@ -9,10 +16,74 @@ export function MainTerminalArea(): React.JSX.Element {
   const error = useWorkspaceStore((state) => state.error);
   const isLoading = useWorkspaceStore((state) => state.isLoading);
   const loadWorkspaces = useWorkspaceStore((state) => state.loadWorkspaces);
+  const clearFullscreen = useUiStore((state) => state.clearFullscreen);
+  const fullscreenPaneId = useUiStore((state) => state.fullscreenPaneId);
+  const previousActiveSelectionRef = useRef<ActiveSelection | null>(null);
+  const activeWorkspace =
+    workspaces.find((workspace) => workspace.id === activeWorkspaceId) ?? null;
+  const activeTab =
+    activeWorkspace?.tabs.find((tab) => tab.id === activeWorkspace.activeTabId) ?? null;
+  const activeTabId = activeTab?.id ?? null;
+  const activePaneIds = useMemo(
+    () => (activeTab ? flattenLayout(activeTab.layout).panes.map((pane) => pane.paneId) : []),
+    [activeTab],
+  );
 
   useEffect(() => {
     void loadWorkspaces();
   }, [loadWorkspaces]);
+
+  useEffect(() => {
+    const previousActiveSelection = previousActiveSelectionRef.current;
+    const activeSelection = {
+      tabId: activeTabId,
+      workspaceId: activeWorkspaceId,
+    };
+    previousActiveSelectionRef.current = activeSelection;
+
+    if (!fullscreenPaneId || !previousActiveSelection) {
+      return;
+    }
+
+    if (
+      previousActiveSelection.workspaceId !== activeSelection.workspaceId ||
+      previousActiveSelection.tabId !== activeSelection.tabId
+    ) {
+      clearFullscreen();
+    }
+  }, [activeTabId, activeWorkspaceId, clearFullscreen, fullscreenPaneId]);
+
+  useEffect(() => {
+    if (!fullscreenPaneId) {
+      return;
+    }
+
+    if (!activePaneIds.includes(fullscreenPaneId)) {
+      clearFullscreen();
+    }
+  }, [activePaneIds, clearFullscreen, fullscreenPaneId]);
+
+  useEffect(() => {
+    if (!fullscreenPaneId) {
+      return;
+    }
+
+    const handleKeyDown = (event: KeyboardEvent): void => {
+      if (event.key !== 'Escape' || !event.metaKey) {
+        return;
+      }
+
+      // `useTerminal` swallows this same chord inside xterm so fullscreen can close without also
+      // sending ESC to the PTY, which would affect terminal apps such as vim.
+      event.preventDefault();
+      clearFullscreen();
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [clearFullscreen, fullscreenPaneId]);
 
   let content: React.JSX.Element;
   if (isLoading && workspaces.length === 0) {

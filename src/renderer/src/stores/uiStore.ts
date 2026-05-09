@@ -7,9 +7,12 @@ export const SIDEBAR_MAX_WIDTH = 480;
 export type SidebarView = 'workspaces' | 'connections';
 
 interface UiStoreState {
+  fullscreenPaneId: string | null;
   sidebarView: SidebarView;
   sidebarOpen: boolean;
   sidebarWidth: number; // px, always within [SIDEBAR_MIN_WIDTH, SIDEBAR_MAX_WIDTH]
+  clearFullscreen: () => void;
+  setFullscreenPaneId: (paneId: string | null) => void;
   setSidebarView: (view: SidebarView) => void;
   toggleSidebar: () => void;
   setSidebarOpen: (open: boolean) => void;
@@ -21,9 +24,16 @@ interface UiStoreState {
  * The sidebar open/close state and width are not persisted and reset to defaults on app launch.
  */
 export const useUiStore = create<UiStoreState>((set) => ({
+  fullscreenPaneId: null,
   sidebarView: 'workspaces',
   sidebarOpen: true,
   sidebarWidth: SIDEBAR_DEFAULT_WIDTH,
+  clearFullscreen: () => {
+    set({ fullscreenPaneId: null });
+  },
+  setFullscreenPaneId: (paneId) => {
+    set({ fullscreenPaneId: paneId });
+  },
   setSidebarView: (view) => {
     set({ sidebarView: view });
   },

@@ -16,6 +16,11 @@ const xtermMock = vi.hoisted(() => {
     public readonly writeln = vi.fn();
     public readonly dispose = vi.fn();
     public readonly focus = vi.fn();
+    public readonly attachCustomKeyEventHandler = vi.fn(
+      (handler: (event: KeyboardEvent) => boolean) => {
+        this.customKeyEventHandler = handler;
+      },
+    );
     public readonly inputDisposable = { dispose: vi.fn() };
     public readonly osc7Disposable = { dispose: vi.fn() };
     public readonly parser = {
@@ -27,6 +32,7 @@ const xtermMock = vi.hoisted(() => {
         return this.osc7Disposable;
       }),
     };
+    private customKeyEventHandler: ((event: KeyboardEvent) => boolean) | null = null;
     private inputListener: ((data: string) => void) | null = null;
     private osc7Listener: ((data: string) => boolean) | null = null;
 
@@ -41,6 +47,10 @@ const xtermMock = vi.hoisted(() => {
 
     public emitInput(data: string): void {
       this.inputListener?.(data);
+    }
+
+    public evaluateCustomKey(event: KeyboardEvent): boolean | null {
+      return this.customKeyEventHandler?.(event) ?? null;
     }
 
     public emitOsc7(data: string): boolean | null {
@@ -324,6 +334,31 @@ describe('useTerminal', () => {
     // Then: the existing xterm instance receives focus without recreating the PTY.
     expect(xtermMock.terminalInstances[0]?.focus).toHaveBeenCalledOnce();
     expect(ptyApi.create).toHaveBeenCalledOnce();
+  });
+
+  it('swallows Cmd+Escape before xterm writes ESC to the PTY', async () => {
+    // Given: a terminal pane has registered its custom key handler.
+    render(<TestTerminal />);
+    await waitFor(() => {
+      expect(xtermMock.terminalInstances[0]?.attachCustomKeyEventHandler).toHaveBeenCalledOnce();
+    });
+
+    // When / Then: Cmd+Escape is reserved for pane fullscreen, while plain Escape still flows.
+    expect(
+      xtermMock.terminalInstances[0]?.evaluateCustomKey(
+        new KeyboardEvent('keydown', { key: 'Escape', metaKey: true }),
+      ),
+    ).toBe(false);
+    expect(
+      xtermMock.terminalInstances[0]?.evaluateCustomKey(
+        new KeyboardEvent('keydown', { key: 'Escape', metaKey: false }),
+      ),
+    ).toBe(true);
+    expect(
+      xtermMock.terminalInstances[0]?.evaluateCustomKey(
+        new KeyboardEvent('keyup', { key: 'Escape', metaKey: true }),
+      ),
+    ).toBe(true);
   });
 
   it('cleans up the PTY and listeners when the terminal unmounts', async () => {

@@ -100,6 +100,16 @@ export function useTerminal(options: UseTerminalOptions): UseTerminalResult {
     });
     const fitAddon = new FitAddon();
 
+    // xterm writes ESC to the PTY for both `Escape` and `Cmd+Escape` because its keyboard
+    // evaluation ignores Cmd for special keys. Swallowing this chord here keeps pane fullscreen's
+    // window-level shortcut from also changing terminal app state, such as switching vim modes.
+    terminal.attachCustomKeyEventHandler((event) => {
+      if (event.type === 'keydown' && event.key === 'Escape' && event.metaKey) {
+        return false;
+      }
+
+      return true;
+    });
     terminal.loadAddon(fitAddon);
     terminal.loadAddon(new WebLinksAddon());
     terminal.open(container);
