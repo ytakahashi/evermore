@@ -1,4 +1,5 @@
 import { create, type StoreApi, type UseBoundStore } from 'zustand';
+import { getPathBasename } from '../../../shared/path-label';
 import type { Pane, PaneLayout, Tab, Workspace } from '../../../shared/types';
 
 const DEFAULT_SAVE_DEBOUNCE_MS = 300;
@@ -29,12 +30,13 @@ export interface WorkspaceStoreState {
   deleteWorkspace: (id: string) => Promise<void>;
   renameWorkspace: (id: string, name: string) => void;
   addTab: () => void;
-  renameTab: (tabId: string, title: string) => void;
+  renameTab: (tabId: string, name: string) => void;
   openSshHostTab: (alias: string) => void;
   selectWorkspaceTab: (workspaceId: string, tabId: string) => void;
   selectTab: (tabId: string) => void;
   closeTab: (tabId: string) => void;
   setActivePane: (paneId: string) => void;
+  setPanePtyId: (paneId: string, ptyId: string | null) => void;
   splitPane: (paneId: string, direction: SplitDirection) => void;
   closePane: (paneId: string) => void;
   resizeSplit: (path: number[], ratio: number) => void;
@@ -200,7 +202,7 @@ function shellQuote(value: string): string {
 interface CreateTabWithPaneOptions {
   cwd: string;
   initialCommand?: string;
-  title: string;
+  tabName: string;
 }
 
 function createTabWithPane(
@@ -214,12 +216,11 @@ function createTabWithPane(
     pane: {
       id: paneId,
       cwd: options.cwd,
-      title: options.title,
       initialCommand: options.initialCommand,
     },
     tab: {
       id: tabId,
-      title: options.title,
+      name: options.tabName,
       layout: {
         type: 'leaf',
         paneId,
@@ -404,8 +405,8 @@ export function createWorkspaceStore(
         }
 
         const cwd = activePane?.cwd ?? workspace.rootPath;
-        const title = activePane?.title ?? workspace.panes[0]?.title ?? 'zsh';
-        const { pane, tab } = createTabWithPane(createStoreId, { cwd, title });
+        const tabName = getPathBasename(cwd, { emptyFallback: 'Tab', rootFallback: 'Tab' });
+        const { pane, tab } = createTabWithPane(createStoreId, { cwd, tabName });
         const updatedWorkspace: Workspace = {
           ...workspace,
           tabs: [...workspace.tabs, tab],
@@ -415,22 +416,22 @@ export function createWorkspaceStore(
 
         get().updateWorkspace(updatedWorkspace);
       },
-      renameTab: (tabId: string, title: string): void => {
+      renameTab: (tabId: string, name: string): void => {
         const workspace = selectActiveWorkspace(get());
-        const trimmedTitle = title.trim();
-        if (!workspace || !trimmedTitle) {
+        const trimmedName = name.trim();
+        if (!workspace || !trimmedName) {
           return;
         }
 
         const tab = workspace.tabs.find((currentTab) => currentTab.id === tabId);
-        if (!tab || tab.title === trimmedTitle) {
+        if (!tab || tab.name === trimmedName) {
           return;
         }
 
         get().updateWorkspace(
           replaceTab(workspace, {
             ...tab,
-            title: trimmedTitle,
+            name: trimmedName,
           }),
         );
       },
@@ -449,7 +450,7 @@ export function createWorkspaceStore(
         const { pane, tab } = createTabWithPane(createStoreId, {
           cwd,
           initialCommand,
-          title: alias,
+          tabName: alias,
         });
 
         get().updateWorkspace({
@@ -548,6 +549,25 @@ export function createWorkspaceStore(
           }),
         );
       },
+      setPanePtyId: (paneId: string, ptyId: string | null): void => {
+        set((state) => ({
+          workspaces: state.workspaces.map((workspace) => ({
+            ...workspace,
+            panes: workspace.panes.map((pane) => {
+              if (pane.id !== paneId) {
+                return pane;
+              }
+
+              if (ptyId === null) {
+                const { ptyId: _ptyId, ...paneWithoutPtyId } = pane;
+                return paneWithoutPtyId;
+              }
+
+              return { ...pane, ptyId };
+            }),
+          })),
+        }));
+      },
       splitPane: (paneId: string, direction: SplitDirection): void => {
         const workspace = selectActiveWorkspace(get());
         const tab = selectActiveTab(get());
@@ -564,7 +584,6 @@ export function createWorkspaceStore(
         const newPane: Pane = {
           id: newPaneId,
           cwd: sourcePane.cwd,
-          title: sourcePane.title,
         };
         const updatedTab: Tab = {
           ...tab,

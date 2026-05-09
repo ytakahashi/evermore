@@ -59,6 +59,7 @@ export class PtyManager {
       proc,
       disposables: [dataDisposable, exitDisposable],
     });
+    this.callbacks.onCreate?.({ id, pid: proc.pid });
 
     return id;
   }
@@ -125,6 +126,7 @@ export class PtyManager {
       disposable.dispose();
     }
     this.ptys.delete(id);
+    this.callbacks.onDispose?.({ id });
     return record;
   }
 }

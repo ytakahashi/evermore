@@ -11,7 +11,7 @@ const workspace: Workspace = {
   tabs: [
     {
       id: 'tab-1',
-      title: 'zsh',
+      name: 'zsh',
       layout: {
         type: 'leaf',
         paneId: 'pane-1',
@@ -23,7 +23,6 @@ const workspace: Workspace = {
     {
       id: 'pane-1',
       cwd: '/Users/tester',
-      title: 'zsh',
     },
   ],
   activeTabId: 'tab-1',
@@ -84,11 +83,7 @@ describe('TabBar', () => {
 
     // Then: a second tab appears and becomes active.
     expect(useWorkspaceStore.getState().workspaces[0]?.tabs).toHaveLength(2);
-    expect(screen.getAllByRole('button', { name: 'zsh' })).toHaveLength(2);
-    expect(screen.getAllByRole('button', { name: 'zsh' })[1]).toHaveAttribute(
-      'aria-current',
-      'page',
-    );
+    expect(screen.getByRole('button', { name: 'tester' })).toHaveAttribute('aria-current', 'page');
   });
 
   it('selects and closes tabs', () => {
@@ -101,7 +96,7 @@ describe('TabBar', () => {
             workspace.tabs[0],
             {
               id: 'tab-2',
-              title: 'build',
+              name: 'build',
               layout: {
                 type: 'leaf',
                 paneId: 'pane-2',
@@ -114,7 +109,6 @@ describe('TabBar', () => {
             {
               id: 'pane-2',
               cwd: '/Users/tester',
-              title: 'build',
             },
           ],
         },
@@ -138,25 +132,25 @@ describe('TabBar', () => {
     expect(screen.getByRole('button', { name: 'Close zsh' })).toBeDisabled();
   });
 
-  it('renames a tab with Enter and persists the new title', async () => {
+  it('renames a tab with Enter and persists the new name', async () => {
     // Given: the tab bar is showing one editable tab.
     render(<TabBar />);
 
-    // When: the user enters rename mode and confirms a new title.
+    // When: the user enters rename mode and confirms a new name.
     fireEvent.doubleClick(screen.getByRole('button', { name: 'zsh' }));
     const editor = screen.getByRole('textbox', { name: 'Rename zsh' });
     fireEvent.change(editor, { target: { value: '  server  ' } });
     fireEvent.keyDown(editor, { key: 'Enter' });
     await vi.advanceTimersByTimeAsync(300);
 
-    // Then: the trimmed title replaces the tab label and is persisted.
+    // Then: the trimmed name replaces the tab label and is persisted.
     expect(screen.getByRole('button', { name: 'server' })).toHaveAttribute('aria-current', 'page');
     expect(workspaceUpdate).toHaveBeenCalledWith(
       expect.objectContaining({
         tabs: [
           expect.objectContaining({
             id: 'tab-1',
-            title: 'server',
+            name: 'server',
           }),
         ],
       }),
@@ -164,7 +158,7 @@ describe('TabBar', () => {
   });
 
   it('commits a tab rename on blur', async () => {
-    // Given: the tab title editor is open.
+    // Given: the tab name editor is open.
     render(<TabBar />);
     fireEvent.doubleClick(screen.getByRole('button', { name: 'zsh' }));
     const editor = screen.getByRole('textbox', { name: 'Rename zsh' });
@@ -181,15 +175,15 @@ describe('TabBar', () => {
         tabs: [
           expect.objectContaining({
             id: 'tab-1',
-            title: 'build',
+            name: 'build',
           }),
         ],
       }),
     );
   });
 
-  it('cancels tab rename with Escape and ignores blank titles', async () => {
-    // Given: the tab title editor is open.
+  it('cancels tab rename with Escape and ignores blank names', async () => {
+    // Given: the tab name editor is open.
     render(<TabBar />);
     fireEvent.doubleClick(screen.getByRole('button', { name: 'zsh' }));
     let editor = screen.getByRole('textbox', { name: 'Rename zsh' });
@@ -199,7 +193,7 @@ describe('TabBar', () => {
     fireEvent.keyDown(editor, { key: 'Escape' });
     await vi.advanceTimersByTimeAsync(300);
 
-    // Then: the original title stays in place and no rename is persisted.
+    // Then: the original name stays in place and no rename is persisted.
     expect(screen.getByRole('button', { name: 'zsh' })).toBeInTheDocument();
     expect(workspaceUpdate).not.toHaveBeenCalled();
 
@@ -216,7 +210,7 @@ describe('TabBar', () => {
   });
 
   it('does not commit a rename when blur fires after Escape', async () => {
-    // Given: the tab title editor is open with a modified draft.
+    // Given: the tab name editor is open with a modified draft.
     render(<TabBar />);
     fireEvent.doubleClick(screen.getByRole('button', { name: 'zsh' }));
     const editor = screen.getByRole('textbox', { name: 'Rename zsh' });
@@ -227,7 +221,7 @@ describe('TabBar', () => {
     fireEvent.blur(editor);
     await vi.advanceTimersByTimeAsync(300);
 
-    // Then: the rename is discarded and the original title is preserved.
+    // Then: the rename is discarded and the original name is preserved.
     expect(screen.getByRole('button', { name: 'zsh' })).toBeInTheDocument();
     expect(workspaceUpdate).not.toHaveBeenCalled();
   });

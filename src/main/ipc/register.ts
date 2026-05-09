@@ -1,5 +1,9 @@
 import type { BrowserWindow } from 'electron';
+import { IPC } from '../../shared/ipc-channels';
+import { PaneInfoTracker } from '../pane-info/pane-info-tracker';
+import { PtyManager } from '../pty/pty-manager';
 import { registerPtyHandlers } from './handlers/pty';
+import { registerPaneInfoHandlers } from './handlers/pane-info';
 import { registerSshHandlers } from './handlers/ssh';
 import { registerTunnelHandlers } from './handlers/tunnel';
 import { registerWorkspaceHandlers } from './handlers/workspace';
@@ -19,7 +23,45 @@ interface RegisterIpcHandlersOptions {
 export function registerIpcHandlers(options: RegisterIpcHandlersOptions): () => void {
   const sshConfigManager = new SshConfigManager();
   const sshHostResolver = new SshHostResolver();
-  const disposePtyHandlers = registerPtyHandlers({ getWindow: options.getWindow });
+  const paneInfoTracker = new PaneInfoTracker({
+    callbacks: {
+      onChanged: ({ info }) => {
+        const window = options.getWindow();
+        if (window && !window.isDestroyed()) {
+          window.webContents.send(IPC.PANE_INFO_CHANGED, info);
+        }
+      },
+    },
+  });
+  const ptyManager = new PtyManager({
+    onData: (event) => {
+      const window = options.getWindow();
+      // PTY processes are owned by main, so their callbacks can outlive a BrowserWindow. Drop
+      // late events instead of letting a closed window turn process output into an app error.
+      if (window && !window.isDestroyed()) {
+        window.webContents.send(IPC.PTY_DATA, event);
+      }
+    },
+    onExit: (event) => {
+      const window = options.getWindow();
+      // Exit notifications are best-effort UI updates; the manager has already cleaned up the
+      // process record, so there is nothing to recover if no renderer is present.
+      if (window && !window.isDestroyed()) {
+        window.webContents.send(IPC.PTY_EXIT, event);
+      }
+    },
+    onCreate: ({ id, pid }) => {
+      paneInfoTracker.register(id, pid);
+    },
+    onDispose: ({ id }) => {
+      paneInfoTracker.unregister(id);
+    },
+  });
+  const disposePtyHandlers = registerPtyHandlers({ getWindow: options.getWindow, ptyManager });
+  const disposePaneInfoHandlers = registerPaneInfoHandlers({
+    getWindow: options.getWindow,
+    paneInfoTracker,
+  });
   const disposeWorkspaceHandlers = registerWorkspaceHandlers();
   const disposeSshHandlers = registerSshHandlers({ sshConfigManager, sshHostResolver });
   const disposeTunnelHandlers = registerTunnelHandlers({
@@ -29,6 +71,7 @@ export function registerIpcHandlers(options: RegisterIpcHandlersOptions): () => 
 
   return () => {
     disposePtyHandlers();
+    disposePaneInfoHandlers();
     disposeWorkspaceHandlers();
     disposeSshHandlers();
     disposeTunnelHandlers();

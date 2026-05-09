@@ -25,9 +25,9 @@ export function TabBar(): React.JSX.Element {
     inputRef.current?.select();
   }, [editingTabId]);
 
-  const startEditing = (tabId: string, title: string): void => {
+  const startEditing = (tabId: string, name: string): void => {
     setEditingTabId(tabId);
-    setDraftTitle(title);
+    setDraftTitle(name);
   };
 
   const cancelEditing = (): void => {
@@ -78,7 +78,7 @@ export function TabBar(): React.JSX.Element {
               {isEditing ? (
                 <input
                   ref={inputRef}
-                  aria-label={`Rename ${tab.title}`}
+                  aria-label={`Rename ${tab.name}`}
                   className="mx-2 min-w-0 flex-1 rounded border border-brand/60 bg-panel px-1.5 py-0.5 text-xs text-foreground outline-none"
                   value={draftTitle}
                   onBlur={commitEditing}
@@ -96,17 +96,17 @@ export function TabBar(): React.JSX.Element {
                     selectTab(tab.id);
                   }}
                   onDoubleClick={() => {
-                    startEditing(tab.id, tab.title);
+                    startEditing(tab.id, tab.name);
                   }}
                 >
-                  <span className="block truncate">{tab.title}</span>
+                  <span className="block truncate">{tab.name}</span>
                 </button>
               )}
               <button
-                aria-label={`Close ${tab.title}`}
+                aria-label={`Close ${tab.name}`}
                 className="mr-1 flex size-6 shrink-0 items-center justify-center rounded text-subtle hover:bg-raised hover:text-foreground disabled:cursor-default disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-subtle"
                 disabled={!canCloseTabs || isEditing}
-                title={canCloseTabs ? `Close ${tab.title}` : 'At least one tab is required'}
+                title={canCloseTabs ? `Close ${tab.name}` : 'At least one tab is required'}
                 type="button"
                 onClick={() => {
                   closeTab(tab.id);

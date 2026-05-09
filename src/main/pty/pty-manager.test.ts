@@ -1,7 +1,13 @@
 import type { IPty, IPtyForkOptions, IDisposable } from 'node-pty';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { PtyManager } from './pty-manager';
-import type { PtyDataEvent, PtyExitEvent, PtySpawn } from './types';
+import type {
+  PtyCreateEvent,
+  PtyDataEvent,
+  PtyDisposeEvent,
+  PtyExitEvent,
+  PtySpawn,
+} from './types';
 
 interface FakePty extends IPty {
   emitData: (data: string) => void;
@@ -53,6 +59,8 @@ describe('PtyManager', () => {
   let spawn: ReturnType<typeof vi.fn<PtySpawn>>;
   let onData: ReturnType<typeof vi.fn<(event: PtyDataEvent) => void>>;
   let onExit: ReturnType<typeof vi.fn<(event: PtyExitEvent) => void>>;
+  let onCreate: ReturnType<typeof vi.fn<(event: PtyCreateEvent) => void>>;
+  let onDispose: ReturnType<typeof vi.fn<(event: PtyDisposeEvent) => void>>;
   let manager: PtyManager;
 
   beforeEach(() => {
@@ -60,7 +68,9 @@ describe('PtyManager', () => {
     spawn = vi.fn((_file: string, _args: string[] | string, _options: IPtyForkOptions) => fakePty);
     onData = vi.fn();
     onExit = vi.fn();
-    manager = new PtyManager({ onData, onExit }, spawn, () => '/Users/tester');
+    onCreate = vi.fn<(event: PtyCreateEvent) => void>();
+    onDispose = vi.fn<(event: PtyDisposeEvent) => void>();
+    manager = new PtyManager({ onData, onExit, onCreate, onDispose }, spawn, () => '/Users/tester');
   });
 
   it('creates a PTY and forwards process output through callbacks', () => {
@@ -82,6 +92,7 @@ describe('PtyManager', () => {
       }),
     );
     expect(onData).toHaveBeenCalledWith({ id, data: 'hello' });
+    expect(onCreate).toHaveBeenCalledWith({ id, pid: 1234 });
   });
 
   it('writes and resizes the active PTY', () => {
@@ -110,6 +121,7 @@ describe('PtyManager', () => {
     expect(fakePty.dataDisposable.dispose).toHaveBeenCalledOnce();
     expect(fakePty.exitDisposable.dispose).toHaveBeenCalledOnce();
     expect(fakePty.kill).toHaveBeenCalledOnce();
+    expect(onDispose).toHaveBeenCalledWith({ id });
     expect(fakePty.write).not.toHaveBeenCalledWith('ignored');
     expect(fakePty.resize).not.toHaveBeenCalledWith(120, 33);
   });
@@ -126,6 +138,7 @@ describe('PtyManager', () => {
     expect(onExit).toHaveBeenCalledWith({ id, code: 7 });
     expect(fakePty.dataDisposable.dispose).toHaveBeenCalledOnce();
     expect(fakePty.exitDisposable.dispose).toHaveBeenCalledOnce();
+    expect(onDispose).toHaveBeenCalledWith({ id });
     expect(fakePty.write).not.toHaveBeenCalledWith('ignored');
   });
 });

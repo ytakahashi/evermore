@@ -7,6 +7,7 @@ import {
   type SplitRect,
 } from '../../../../shared/pane-layout';
 import type { Pane, PaneLayout as PaneLayoutModel, Tab } from '../../../../shared/types';
+import { usePaneInfoStore } from '../../stores/paneInfoStore';
 import { useWorkspaceStore } from '../../stores/workspaceStore';
 import { TerminalView } from '../terminal/TerminalView';
 
@@ -76,8 +77,10 @@ interface PaneCellProps {
 function PaneCell({ isActiveTab, pane, rect, tab }: PaneCellProps): React.JSX.Element {
   const closePane = useWorkspaceStore((state) => state.closePane);
   const setActivePane = useWorkspaceStore((state) => state.setActivePane);
+  const setPanePtyId = useWorkspaceStore((state) => state.setPanePtyId);
   const splitPane = useWorkspaceStore((state) => state.splitPane);
   const updatePaneCwd = useWorkspaceStore((state) => state.updatePaneCwd);
+  const removePaneInfo = usePaneInfoStore((state) => state.removeInfo);
 
   const isActive = isActiveTab && tab.activePaneId === pane.id;
   const canClosePane = countPaneLeaves(tab.layout) > 1;
@@ -106,6 +109,16 @@ function PaneCell({ isActiveTab, pane, rect, tab }: PaneCellProps): React.JSX.El
         isActive={isActive}
         onCwdChange={(cwd) => {
           updatePaneCwd(pane.id, cwd);
+        }}
+        onPtyIdChange={(ptyId) => {
+          // The PTY id is cleared on process exit and on unmount. Drop the matching paneInfo entry
+          // here so the renderer cache does not accumulate entries for retired PTYs over a long
+          // session. Main-side `PaneInfoTracker` already removes its record via `onDispose`, but
+          // does not emit a removal event over IPC.
+          if (ptyId === null && pane.ptyId) {
+            removePaneInfo(pane.ptyId);
+          }
+          setPanePtyId(pane.id, ptyId);
         }}
       />
       <div className="absolute right-2 top-2 z-20 flex items-center gap-1 rounded bg-panel/90 p-1 opacity-0 shadow-sm transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">

@@ -1,6 +1,13 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import { IPC } from '../shared/ipc-channels';
-import type { Workspace, AppSettings, SSHHost, Tunnel, TunnelStatus } from '../shared/types';
+import type {
+  Workspace,
+  AppSettings,
+  PaneRuntimeInfo,
+  SSHHost,
+  Tunnel,
+  TunnelStatus,
+} from '../shared/types';
 import type { Api } from '../shared/api-types';
 
 // Each pane subscribes its own callback via onData/onExit. Registering a new ipcRenderer.on()
@@ -8,6 +15,7 @@ import type { Api } from '../shared/api-types';
 // ipcRenderer listener per channel dispatches to a subscriber set instead.
 const ptyDataSubscribers = new Set<(id: string, data: string) => void>();
 const ptyExitSubscribers = new Set<(id: string, code: number) => void>();
+const paneInfoChangedSubscribers = new Set<(info: PaneRuntimeInfo) => void>();
 
 ipcRenderer.on(IPC.PTY_DATA, (_: unknown, payload: { id: string; data: string }) => {
   for (const cb of ptyDataSubscribers) {
@@ -18,6 +26,12 @@ ipcRenderer.on(IPC.PTY_DATA, (_: unknown, payload: { id: string; data: string })
 ipcRenderer.on(IPC.PTY_EXIT, (_: unknown, payload: { id: string; code: number }) => {
   for (const cb of ptyExitSubscribers) {
     cb(payload.id, payload.code);
+  }
+});
+
+ipcRenderer.on(IPC.PANE_INFO_CHANGED, (_: unknown, payload: PaneRuntimeInfo) => {
+  for (const cb of paneInfoChangedSubscribers) {
+    cb(payload);
   }
 });
 
@@ -40,6 +54,19 @@ const api = {
       ptyExitSubscribers.add(cb);
       return (): void => {
         ptyExitSubscribers.delete(cb);
+      };
+    },
+  },
+  paneInfo: {
+    list: (): Promise<PaneRuntimeInfo[]> => ipcRenderer.invoke(IPC.PANE_INFO_LIST),
+    notifyCwd: (ptyId: string, cwd: string): Promise<void> =>
+      ipcRenderer.invoke(IPC.PANE_INFO_NOTIFY_CWD, { ptyId, cwd }),
+    notifyCommand: (ptyId: string, command: string): Promise<void> =>
+      ipcRenderer.invoke(IPC.PANE_INFO_NOTIFY_COMMAND, { ptyId, command }),
+    onChanged: (cb: (info: PaneRuntimeInfo) => void): (() => void) => {
+      paneInfoChangedSubscribers.add(cb);
+      return (): void => {
+        paneInfoChangedSubscribers.delete(cb);
       };
     },
   },

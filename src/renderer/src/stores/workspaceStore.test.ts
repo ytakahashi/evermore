@@ -17,7 +17,7 @@ function createWorkspace(id: string, cwd: string): Workspace {
     tabs: [
       {
         id: `${id}-tab-1`,
-        title: 'zsh',
+        name: 'zsh',
         layout: {
           type: 'leaf',
           paneId: `${id}-pane-1`,
@@ -29,7 +29,6 @@ function createWorkspace(id: string, cwd: string): Workspace {
       {
         id: `${id}-pane-1`,
         cwd,
-        title: 'zsh',
       },
     ],
     activeTabId: `${id}-tab-1`,
@@ -166,7 +165,6 @@ describe('workspaceStore', () => {
           {
             id: 'workspace-1-pane-1',
             cwd: '/Users/tester/project',
-            title: 'zsh',
           },
         ],
         updatedAt: now,
@@ -187,6 +185,23 @@ describe('workspaceStore', () => {
 
     // Then: no local mutation or persistence is performed.
     expect(selectActiveWorkspace(useStore.getState())?.updatedAt).toBe(1);
+    expect(workspaceApi.update).not.toHaveBeenCalled();
+  });
+
+  it('updates pane PTY ids without scheduling persistence', async () => {
+    // Given: a loaded workspace store.
+    vi.useFakeTimers();
+    const useStore = createWorkspaceStore({ workspaceApi, debounceMs: 50, now: () => now });
+    await useStore.getState().loadWorkspaces();
+
+    // When: a TerminalView reports its runtime PTY id and later clears it.
+    useStore.getState().setPanePtyId('workspace-1-pane-1', 'pty-1');
+    expect(selectActivePane(useStore.getState())?.ptyId).toBe('pty-1');
+    useStore.getState().setPanePtyId('workspace-1-pane-1', null);
+    await vi.advanceTimersByTimeAsync(50);
+
+    // Then: the runtime-only id updates local state without touching persisted workspace data.
+    expect(selectActivePane(useStore.getState())?.ptyId).toBeUndefined();
     expect(workspaceApi.update).not.toHaveBeenCalled();
   });
 
@@ -299,7 +314,7 @@ describe('workspaceStore', () => {
     expect(updatedWorkspace?.tabs).toHaveLength(2);
     expect(updatedWorkspace?.tabs[1]).toEqual({
       id: 'tab-2',
-      title: 'zsh',
+      name: 'tester',
       layout: {
         type: 'leaf',
         paneId: 'pane-2',
@@ -309,7 +324,6 @@ describe('workspaceStore', () => {
     expect(updatedWorkspace?.panes[1]).toEqual({
       id: 'pane-2',
       cwd: '/Users/tester',
-      title: 'zsh',
     });
   });
 
@@ -333,7 +347,7 @@ describe('workspaceStore', () => {
     expect(updatedWorkspace?.activeTabId).toBe('tab-2');
     expect(updatedWorkspace?.tabs[1]).toEqual({
       id: 'tab-2',
-      title: "dev'host",
+      name: "dev'host",
       layout: {
         type: 'leaf',
         paneId: 'pane-2',
@@ -343,7 +357,6 @@ describe('workspaceStore', () => {
     expect(updatedWorkspace?.panes[1]).toEqual({
       id: 'pane-2',
       cwd: '/Users/tester',
-      title: "dev'host",
       // POSIX single-quote escape: close, escape ', reopen.
       initialCommand: "ssh 'dev'\\''host'",
     });
@@ -358,7 +371,7 @@ describe('workspaceStore', () => {
         ...workspace.tabs,
         {
           id: 'tab-2',
-          title: 'zsh',
+          name: 'zsh',
           layout: {
             type: 'leaf',
             paneId: 'pane-2',
@@ -371,7 +384,6 @@ describe('workspaceStore', () => {
         {
           id: 'pane-2',
           cwd: '/Users/tester',
-          title: 'zsh',
         },
       ],
     };
@@ -406,7 +418,7 @@ describe('workspaceStore', () => {
         workspace2.tabs[0],
         {
           id: 'workspace-2-tab-2',
-          title: 'server',
+          name: 'server',
           layout: {
             type: 'leaf',
             paneId: 'workspace-2-pane-2',
@@ -419,7 +431,6 @@ describe('workspaceStore', () => {
         {
           id: 'workspace-2-pane-2',
           cwd: '/Users/tester/project',
-          title: 'server',
         },
       ],
     };
@@ -464,7 +475,7 @@ describe('workspaceStore', () => {
     expect(workspaceApi.update).not.toHaveBeenCalled();
   });
 
-  it('renames a tab with a trimmed title and ignores blank titles', async () => {
+  it('renames a tab with a trimmed name and ignores blank names', async () => {
     // Given: a workspace has one tab.
     vi.useFakeTimers();
     const useStore = createWorkspaceStore({ workspaceApi, debounceMs: 50, now: () => now });
@@ -474,14 +485,14 @@ describe('workspaceStore', () => {
     useStore.getState().renameTab('workspace-1-tab-1', '  server  ');
     await vi.advanceTimersByTimeAsync(50);
 
-    // Then: the tab title is trimmed locally and persisted.
-    expect(selectActiveTab(useStore.getState())?.title).toBe('server');
+    // Then: the tab name is trimmed locally and persisted.
+    expect(selectActiveTab(useStore.getState())?.name).toBe('server');
     expect(workspaceApi.update).toHaveBeenCalledWith(
       expect.objectContaining({
         tabs: [
           expect.objectContaining({
             id: 'workspace-1-tab-1',
-            title: 'server',
+            name: 'server',
           }),
         ],
       }),
@@ -493,7 +504,7 @@ describe('workspaceStore', () => {
     await vi.advanceTimersByTimeAsync(50);
 
     // Then: the blank rename is discarded.
-    expect(selectActiveTab(useStore.getState())?.title).toBe('server');
+    expect(selectActiveTab(useStore.getState())?.name).toBe('server');
     expect(workspaceApi.update).not.toHaveBeenCalled();
   });
 
@@ -538,7 +549,7 @@ describe('workspaceStore', () => {
         ...workspace.tabs,
         {
           id: 'tab-2',
-          title: 'zsh',
+          name: 'zsh',
           layout: {
             type: 'leaf',
             paneId: 'pane-2',
@@ -551,7 +562,6 @@ describe('workspaceStore', () => {
         {
           id: 'pane-2',
           cwd: '/Users/tester',
-          title: 'zsh',
         },
       ],
       activeTabId: 'workspace-1-tab-1',
@@ -609,7 +619,6 @@ describe('workspaceStore', () => {
     expect(updatedWorkspace?.panes[1]).toEqual({
       id: 'pane-2',
       cwd: '/Users/tester',
-      title: 'zsh',
     });
     expect(updatedWorkspace?.updatedAt).toBe(now);
   });
@@ -665,7 +674,7 @@ describe('workspaceStore', () => {
       tabs: [
         {
           id: 'tab-1',
-          title: 'zsh',
+          name: 'zsh',
           layout: {
             type: 'split',
             direction: 'vertical',
@@ -685,7 +694,7 @@ describe('workspaceStore', () => {
         },
         {
           id: 'tab-2',
-          title: 'zsh',
+          name: 'zsh',
           layout: {
             type: 'split',
             direction: 'horizontal',
@@ -708,22 +717,18 @@ describe('workspaceStore', () => {
         {
           id: 'pane-1',
           cwd: '/Users/tester',
-          title: 'zsh',
         },
         {
           id: 'pane-2',
           cwd: '/Users/tester',
-          title: 'zsh',
         },
         {
           id: 'pane-3',
           cwd: '/Users/tester/other',
-          title: 'zsh',
         },
         {
           id: 'pane-4',
           cwd: '/Users/tester/other',
-          title: 'zsh',
         },
       ],
       activeTabId: 'tab-1',
@@ -755,7 +760,7 @@ describe('workspaceStore', () => {
       tabs: [
         {
           id: 'tab-1',
-          title: 'zsh',
+          name: 'zsh',
           layout: {
             type: 'split',
             direction: 'vertical',
@@ -789,17 +794,14 @@ describe('workspaceStore', () => {
         {
           id: 'pane-1',
           cwd: '/Users/tester',
-          title: 'zsh',
         },
         {
           id: 'pane-2',
           cwd: '/Users/tester',
-          title: 'zsh',
         },
         {
           id: 'pane-3',
           cwd: '/Users/tester',
-          title: 'zsh',
         },
       ],
       activeTabId: 'tab-1',
