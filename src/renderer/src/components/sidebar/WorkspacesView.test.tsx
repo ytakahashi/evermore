@@ -169,8 +169,16 @@ describe('WorkspacesView', () => {
     expect(screen.getByRole('button', { name: 'server (2 panes)' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'logs (1 pane)' })).toBeInTheDocument();
     expect(screen.getByText('/Users/tester')).toBeInTheDocument();
-    expect(screen.getAllByText('/Users/tester/project')).toHaveLength(2);
-    expect(screen.getByText('/Users/tester/project/logs')).toBeInTheDocument();
+    expect(screen.getAllByText('.../tester/project')).toHaveLength(2);
+    expect(screen.getByText('.../project/logs')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /tester \/Users\/tester/ })).toHaveAttribute(
+      'aria-current',
+      'true',
+    );
+    expect(screen.getByText('.../project/logs')).toHaveAttribute(
+      'title',
+      '/Users/tester/project/logs',
+    );
   });
 
   it('shows running pane info when runtime state is available', () => {
@@ -214,6 +222,35 @@ describe('WorkspacesView', () => {
     expect(screen.getByRole('button', { name: 'logs (1 pane)' })).toHaveAttribute(
       'aria-current',
       'page',
+    );
+    expect(workspaceUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 'workspace-2',
+        activeTabId: 'workspace-2-tab-2',
+      }),
+    );
+  });
+
+  it('selects the corresponding workspace, tab, and pane from the sidebar', async () => {
+    // Given: the sidebar is showing a pane in an inactive workspace and tab.
+    render(<WorkspacesView />);
+
+    // When: the user selects the pane row rather than the tab row.
+    fireEvent.click(screen.getByRole('button', { name: /logs \.\.\.\/project\/logs/ }));
+    await vi.advanceTimersByTimeAsync(300);
+
+    // Then: the store activates that workspace, tab, and pane for the main terminal area.
+    const activeWorkspace = useWorkspaceStore
+      .getState()
+      .workspaces.find((workspace) => workspace.id === 'workspace-2');
+    expect(useWorkspaceStore.getState().activeWorkspaceId).toBe('workspace-2');
+    expect(activeWorkspace?.activeTabId).toBe('workspace-2-tab-2');
+    expect(activeWorkspace?.tabs.find((tab) => tab.id === 'workspace-2-tab-2')?.activePaneId).toBe(
+      'workspace-2-pane-3',
+    );
+    expect(screen.getByRole('button', { name: /logs \.\.\.\/project\/logs/ })).toHaveAttribute(
+      'aria-current',
+      'true',
     );
     expect(workspaceUpdate).toHaveBeenCalledWith(
       expect.objectContaining({
