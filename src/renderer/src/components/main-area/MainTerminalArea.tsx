@@ -6,6 +6,7 @@ import { PaneLayout } from './PaneLayout';
 import { TabBar } from './TabBar';
 
 interface ActiveSelection {
+  paneId: string | null;
   tabId: string | null;
   workspaceId: string | null;
 }
@@ -24,6 +25,7 @@ export function MainTerminalArea(): React.JSX.Element {
   const activeTab =
     activeWorkspace?.tabs.find((tab) => tab.id === activeWorkspace.activeTabId) ?? null;
   const activeTabId = activeTab?.id ?? null;
+  const activePaneId = activeTab?.activePaneId ?? null;
   const activePaneIds = useMemo(
     () => (activeTab ? flattenLayout(activeTab.layout).panes.map((pane) => pane.paneId) : []),
     [activeTab],
@@ -36,6 +38,7 @@ export function MainTerminalArea(): React.JSX.Element {
   useEffect(() => {
     const previousActiveSelection = previousActiveSelectionRef.current;
     const activeSelection = {
+      paneId: activePaneId,
       tabId: activeTabId,
       workspaceId: activeWorkspaceId,
     };
@@ -50,8 +53,16 @@ export function MainTerminalArea(): React.JSX.Element {
       previousActiveSelection.tabId !== activeSelection.tabId
     ) {
       clearFullscreen();
+      return;
     }
-  }, [activeTabId, activeWorkspaceId, clearFullscreen, fullscreenPaneId]);
+
+    if (
+      previousActiveSelection.paneId !== activeSelection.paneId &&
+      fullscreenPaneId !== activeSelection.paneId
+    ) {
+      clearFullscreen();
+    }
+  }, [activePaneId, activeTabId, activeWorkspaceId, clearFullscreen, fullscreenPaneId]);
 
   useEffect(() => {
     if (!fullscreenPaneId) {

@@ -118,6 +118,68 @@ describe('MainTerminalArea', () => {
     });
   });
 
+  it('clears fullscreen when a different pane in the same tab becomes active', async () => {
+    // Given: pane-1 is fullscreen in a split active tab.
+    const splitWorkspace: Workspace = {
+      ...workspace,
+      tabs: [
+        {
+          ...workspace.tabs[0]!,
+          layout: {
+            type: 'split',
+            direction: 'vertical',
+            ratio: 0.5,
+            children: [
+              {
+                type: 'leaf',
+                paneId: 'pane-1',
+              },
+              {
+                type: 'leaf',
+                paneId: 'pane-3',
+              },
+            ],
+          },
+          activePaneId: 'pane-1',
+        },
+        workspace.tabs[1]!,
+      ],
+      panes: [
+        ...workspace.panes,
+        {
+          id: 'pane-3',
+          cwd: '/Users/tester/other',
+        },
+      ],
+    };
+    useWorkspaceStore.setState({
+      workspaces: [splitWorkspace],
+    });
+    useUiStore.getState().setFullscreenPaneId('pane-1');
+    render(<MainTerminalArea />);
+
+    // When: sidebar-style selection moves active focus to pane-3 while pane-1 remains in the tab.
+    useWorkspaceStore.setState({
+      workspaces: [
+        {
+          ...splitWorkspace,
+          tabs: [
+            {
+              ...splitWorkspace.tabs[0]!,
+              activePaneId: 'pane-3',
+            },
+            splitWorkspace.tabs[1]!,
+          ],
+        },
+      ],
+    });
+
+    // Then: fullscreen is cleared so visible focus and workspace state cannot diverge.
+    await waitFor(() => {
+      expect(useUiStore.getState().fullscreenPaneId).toBeNull();
+    });
+  });
+
   it('clears fullscreen when the target pane leaves the active tab layout', async () => {
     // Given: fullscreen state points at the active tab's pane.
     useUiStore.getState().setFullscreenPaneId('pane-1');
