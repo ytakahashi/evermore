@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { homedir } from 'node:os';
 import path from 'node:path';
 import Store from 'electron-store';
-import type { Pane, Workspace } from '../../shared/types';
+import type { Pane, Tab, Workspace } from '../../shared/types';
 import type { WorkspaceStorageAdapter, WorkspaceStoreOptions } from './types';
 
 interface WorkspaceStoreSchema extends Record<string, unknown> {
@@ -40,14 +40,34 @@ class ElectronWorkspaceStorageAdapter implements WorkspaceStorageAdapter {
   }
 }
 
-function sanitizePane(pane: Pane): Pane {
-  const { ptyId: _ptyId, initialCommand: _initialCommand, ...persistedPane } = pane;
+type LegacyPane = Pane & { title?: string };
+type LegacyTab = Omit<Tab, 'name'> & { name?: string; title?: string };
+type LegacyWorkspace = Omit<Workspace, 'panes' | 'tabs'> & {
+  panes: LegacyPane[];
+  tabs: LegacyTab[];
+};
+
+function sanitizePane(pane: LegacyPane): Pane {
+  const { ptyId: _ptyId, initialCommand: _initialCommand, title: _title, ...persistedPane } = pane;
   return persistedPane;
 }
 
-function sanitizeWorkspace(workspace: Workspace): Workspace {
+function sanitizeTab(tab: LegacyTab): Tab {
+  const legacyName = typeof tab.name === 'string' ? tab.name.trim() : '';
+  const legacyTitle = typeof tab.title === 'string' ? tab.title.trim() : '';
+
+  return {
+    id: tab.id,
+    name: legacyName || legacyTitle || 'Tab',
+    layout: tab.layout,
+    activePaneId: tab.activePaneId,
+  };
+}
+
+function sanitizeWorkspace(workspace: Workspace | LegacyWorkspace): Workspace {
   return {
     ...workspace,
+    tabs: workspace.tabs.map(sanitizeTab),
     panes: workspace.panes.map(sanitizePane),
   };
 }
@@ -157,9 +177,13 @@ export class WorkspaceStore {
   }
 
   private ensureWorkspaces(): Workspace[] {
-    const workspaces = this.storage.getWorkspaces().map(sanitizeWorkspace);
+    const storedWorkspaces = this.storage.getWorkspaces() as Array<Workspace | LegacyWorkspace>;
+    const workspaces = storedWorkspaces.map(sanitizeWorkspace);
 
     if (workspaces.length > 0) {
+      if (JSON.stringify(storedWorkspaces) !== JSON.stringify(workspaces)) {
+        this.storage.setWorkspaces(workspaces);
+      }
       return workspaces;
     }
 
@@ -176,7 +200,7 @@ export class WorkspaceStore {
     const workspaceId = this.createId();
     const tabId = this.createId();
     const paneId = this.createId();
-    const title = path.basename(this.getShellPath() || '/bin/zsh');
+    const tabName = path.basename(this.getShellPath() || '/bin/zsh');
 
     return {
       id: workspaceId,
@@ -185,7 +209,7 @@ export class WorkspaceStore {
       tabs: [
         {
           id: tabId,
-          title,
+          name: tabName,
           layout: {
             type: 'leaf',
             paneId,
@@ -197,7 +221,6 @@ export class WorkspaceStore {
         {
           id: paneId,
           cwd: rootPath,
-          title,
         },
       ],
       activeTabId: tabId,

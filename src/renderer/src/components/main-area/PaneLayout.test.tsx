@@ -19,7 +19,7 @@ const workspace: Workspace = {
   tabs: [
     {
       id: 'tab-1',
-      title: 'zsh',
+      name: 'zsh',
       layout: {
         type: 'leaf',
         paneId: 'pane-1',
@@ -31,7 +31,6 @@ const workspace: Workspace = {
     {
       id: 'pane-1',
       cwd: '/Users/tester',
-      title: 'zsh',
     },
   ],
   activeTabId: 'tab-1',

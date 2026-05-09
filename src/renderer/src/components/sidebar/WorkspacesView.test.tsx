@@ -11,7 +11,7 @@ const workspace1: Workspace = {
   tabs: [
     {
       id: 'workspace-1-tab-1',
-      title: 'zsh',
+      name: 'zsh',
       layout: {
         type: 'leaf',
         paneId: 'workspace-1-pane-1',
@@ -23,7 +23,6 @@ const workspace1: Workspace = {
     {
       id: 'workspace-1-pane-1',
       cwd: '/Users/tester',
-      title: 'zsh',
     },
   ],
   activeTabId: 'workspace-1-tab-1',
@@ -38,7 +37,7 @@ const workspace2: Workspace = {
   tabs: [
     {
       id: 'workspace-2-tab-1',
-      title: 'server',
+      name: 'server',
       layout: {
         type: 'split',
         direction: 'vertical',
@@ -58,7 +57,7 @@ const workspace2: Workspace = {
     },
     {
       id: 'workspace-2-tab-2',
-      title: 'logs',
+      name: 'logs',
       layout: {
         type: 'leaf',
         paneId: 'workspace-2-pane-3',
@@ -70,17 +69,14 @@ const workspace2: Workspace = {
     {
       id: 'workspace-2-pane-1',
       cwd: '/Users/tester/project',
-      title: 'server',
     },
     {
       id: 'workspace-2-pane-2',
       cwd: '/Users/tester/project',
-      title: 'server',
     },
     {
       id: 'workspace-2-pane-3',
       cwd: '/Users/tester/project/logs',
-      title: 'logs',
     },
   ],
   activeTabId: 'workspace-2-tab-1',
@@ -95,7 +91,7 @@ const newWorkspace: Workspace = {
   tabs: [
     {
       id: 'workspace-new-tab-1',
-      title: 'zsh',
+      name: 'zsh',
       layout: {
         type: 'leaf',
         paneId: 'workspace-new-pane-1',
@@ -107,7 +103,6 @@ const newWorkspace: Workspace = {
     {
       id: 'workspace-new-pane-1',
       cwd: '/Users/tester/new',
-      title: 'zsh',
     },
   ],
   activeTabId: 'workspace-new-tab-1',
@@ -155,13 +150,13 @@ describe('WorkspacesView', () => {
     vi.useRealTimers();
   });
 
-  it('renders workspace tabs with pane counts and active state', () => {
+  it('renders workspace tabs with pane counts, pane details, and active state', () => {
     // Given: multiple workspaces and tabs are loaded.
 
     // When: the workspace sidebar renders.
     render(<WorkspacesView />);
 
-    // Then: each workspace tab is listed with a leaf-pane count.
+    // Then: each workspace tab is listed with a leaf-pane count and pane cwd details.
     expect(screen.getByRole('button', { name: 'Default' })).toHaveAttribute('aria-current', 'page');
     expect(screen.getByRole('button', { name: 'zsh (1 pane)' })).toHaveAttribute(
       'aria-current',
@@ -169,6 +164,9 @@ describe('WorkspacesView', () => {
     );
     expect(screen.getByRole('button', { name: 'server (2 panes)' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'logs (1 pane)' })).toBeInTheDocument();
+    expect(screen.getByText('/Users/tester')).toBeInTheDocument();
+    expect(screen.getAllByText('/Users/tester/project')).toHaveLength(2);
+    expect(screen.getByText('/Users/tester/project/logs')).toBeInTheDocument();
   });
 
   it('selects the corresponding workspace and tab from the sidebar', async () => {

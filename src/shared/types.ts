@@ -11,7 +11,7 @@ export interface Workspace {
 
 export interface Tab {
   id: string;
-  title: string;
+  name: string;
   layout: PaneLayout;
   activePaneId: string | null;
 }
@@ -28,7 +28,6 @@ export type PaneLayout =
 export interface Pane {
   id: string;
   cwd: string; // absolute path
-  title: string; // display name
   ptyId?: string; // runtime only
   initialCommand?: string; // runtime only; sanitizePane drops it from persistence so restored panes do not replay
 }

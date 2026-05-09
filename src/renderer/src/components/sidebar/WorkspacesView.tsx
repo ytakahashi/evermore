@@ -1,10 +1,30 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
-import { ChevronRight, Folder, Hash, Plus, X } from 'lucide-react';
-import { countPaneLeaves } from '../../../../shared/pane-layout';
+import { ChevronRight, Folder, Hash, Plus, Terminal, X } from 'lucide-react';
+import { countPaneLeaves, flattenLayout } from '../../../../shared/pane-layout';
+import { getPathBasename } from '../../../../shared/path-label';
+import type { Pane } from '../../../../shared/types';
 import { useWorkspaceStore } from '../../stores/workspaceStore';
 
 function formatPaneCount(count: number): string {
   return `${count} ${count === 1 ? 'pane' : 'panes'}`;
+}
+
+function PaneSummary({ pane }: { pane: Pane }): React.JSX.Element {
+  const label = getPathBasename(pane.cwd, { emptyFallback: '(loading)' });
+
+  return (
+    <div className="pl-6">
+      <div className="border-l border-border-subtle pl-2">
+        <div className="flex min-w-0 items-start gap-1.5 rounded-md px-2 py-1 text-sm text-muted hover:bg-raised/40">
+          <Terminal size={13} className="mt-0.5 shrink-0 text-subtle/70" />
+          <div className="min-w-0 flex-1">
+            <div className="truncate text-foreground">{label}</div>
+            {pane.cwd && <div className="mt-1 truncate text-[11px] text-muted">{pane.cwd}</div>}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 export function WorkspacesView(): React.JSX.Element {
@@ -195,25 +215,39 @@ export function WorkspacesView(): React.JSX.Element {
                 {workspace.tabs.map((tab) => {
                   const paneCount = countPaneLeaves(tab.layout);
                   const isActiveTab = isActive && tab.id === workspace.activeTabId;
-                  const label = `${tab.title} (${formatPaneCount(paneCount)})`;
+                  const label = `${tab.name} (${formatPaneCount(paneCount)})`;
+                  const paneOrder = flattenLayout(tab.layout).panes;
 
                   return (
-                    <button
-                      key={tab.id}
-                      aria-current={isActiveTab ? 'page' : undefined}
-                      className={`flex w-full items-center gap-2 rounded-md py-1 pl-8 pr-2 text-left text-sm ${
-                        isActiveTab
-                          ? 'bg-tab-active text-foreground'
-                          : 'text-muted hover:bg-raised/50'
-                      }`}
-                      type="button"
-                      onClick={() => {
-                        selectWorkspaceTab(workspace.id, tab.id);
-                      }}
-                    >
-                      <Hash size={14} className={isActiveTab ? 'text-brand' : 'text-subtle'} />
-                      <span className="truncate">{label}</span>
-                    </button>
+                    <div key={tab.id} className="space-y-0.5">
+                      <button
+                        aria-current={isActiveTab ? 'page' : undefined}
+                        className={`flex w-full items-center gap-2 rounded-md py-1 pl-8 pr-2 text-left text-sm ${
+                          isActiveTab
+                            ? 'bg-tab-active text-foreground'
+                            : 'text-muted hover:bg-raised/50'
+                        }`}
+                        type="button"
+                        onClick={() => {
+                          selectWorkspaceTab(workspace.id, tab.id);
+                        }}
+                      >
+                        <Hash size={14} className={isActiveTab ? 'text-brand' : 'text-subtle'} />
+                        <span className="truncate">{label}</span>
+                      </button>
+                      <div className="space-y-0.5">
+                        {paneOrder.map(({ paneId }) => {
+                          const pane = workspace.panes.find(
+                            (currentPane) => currentPane.id === paneId,
+                          );
+                          if (!pane) {
+                            return null;
+                          }
+
+                          return <PaneSummary key={pane.id} pane={pane} />;
+                        })}
+                      </div>
+                    </div>
                   );
                 })}
               </div>

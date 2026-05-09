@@ -13,12 +13,12 @@ const workspace1: Workspace = {
   tabs: [
     {
       id: 'workspace-1-tab-1',
-      title: 'zsh',
+      name: 'zsh',
       layout: { type: 'leaf', paneId: 'workspace-1-pane-1' },
       activePaneId: 'workspace-1-pane-1',
     },
   ],
-  panes: [{ id: 'workspace-1-pane-1', cwd: '/Users/tester', title: 'zsh' }],
+  panes: [{ id: 'workspace-1-pane-1', cwd: '/Users/tester' }],
   activeTabId: 'workspace-1-tab-1',
   createdAt: 1,
   updatedAt: 1,
@@ -31,12 +31,12 @@ const workspace2: Workspace = {
   tabs: [
     {
       id: 'workspace-2-tab-1',
-      title: 'zsh',
+      name: 'zsh',
       layout: { type: 'leaf', paneId: 'workspace-2-pane-1' },
       activePaneId: 'workspace-2-pane-1',
     },
   ],
-  panes: [{ id: 'workspace-2-pane-1', cwd: '/Users/tester/side', title: 'zsh' }],
+  panes: [{ id: 'workspace-2-pane-1', cwd: '/Users/tester/side' }],
   activeTabId: 'workspace-2-tab-1',
   createdAt: 1,
   updatedAt: 1,

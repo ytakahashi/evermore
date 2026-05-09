@@ -63,7 +63,7 @@ describe('WorkspaceStore', () => {
         tabs: [
           {
             id: 'tab-1',
-            title: 'zsh',
+            name: 'zsh',
             layout: {
               type: 'leaf',
               paneId: 'pane-1',
@@ -75,7 +75,6 @@ describe('WorkspaceStore', () => {
           {
             id: 'pane-1',
             cwd: '/Users/tester',
-            title: 'zsh',
           },
         ],
         activeTabId: 'tab-1',
@@ -147,7 +146,6 @@ describe('WorkspaceStore', () => {
     expect(storage.workspaces[0]?.panes[0]).toEqual({
       id: 'pane-1',
       cwd: '/Users/tester',
-      title: 'zsh',
     });
   });
 
@@ -239,7 +237,7 @@ describe('WorkspaceStore', () => {
     expect(store.getActiveWorkspaceId()).toBeNull();
   });
 
-  it('uses the current shell basename for initial tab and pane titles', () => {
+  it('uses the current shell basename for the initial tab name', () => {
     // Given: the platform reports a non-default shell path.
     store = new WorkspaceStore({
       createId: () => ids.shift() ?? 'fallback-id',
@@ -252,8 +250,71 @@ describe('WorkspaceStore', () => {
     // When: the default workspace is created.
     const workspace = store.list()[0];
 
-    // Then: the shell basename is used as the user-facing terminal title.
-    expect(workspace?.tabs[0]?.title).toBe('fish');
-    expect(workspace?.panes[0]?.title).toBe('fish');
+    // Then: the shell basename is used as the user-facing tab name.
+    expect(workspace?.tabs[0]?.name).toBe('fish');
+    expect(workspace?.panes[0]).toEqual({
+      id: 'pane-1',
+      cwd: '/Users/tester',
+    });
+  });
+
+  it('migrates legacy tab titles and drops legacy pane titles', () => {
+    // Given: storage contains the previous persisted shape.
+    const legacyWorkspace = {
+      id: 'legacy-workspace',
+      name: 'Legacy',
+      rootPath: '/Users/tester/legacy',
+      tabs: [
+        {
+          id: 'legacy-tab',
+          title: 'legacy-tab-title',
+          layout: {
+            type: 'leaf' as const,
+            paneId: 'legacy-pane',
+          },
+          activePaneId: 'legacy-pane',
+        },
+      ],
+      panes: [
+        {
+          id: 'legacy-pane',
+          cwd: '/Users/tester/legacy',
+          title: 'legacy-pane-title',
+        },
+      ],
+      activeTabId: 'legacy-tab',
+      createdAt: now,
+      updatedAt: now,
+    };
+    storage = new MemoryWorkspaceStorageAdapter(
+      [legacyWorkspace as unknown as Workspace],
+      'legacy-workspace',
+    );
+    store = new WorkspaceStore({
+      createId: () => ids.shift() ?? 'fallback-id',
+      getHomeDirectory: () => '/Users/tester',
+      getShellPath: () => '/bin/zsh',
+      now: () => now,
+      storage,
+    });
+
+    // When: callers load the workspace list.
+    const workspaces = store.list();
+
+    // Then: the persisted data is normalized to the current model.
+    expect(workspaces[0]?.tabs[0]).toEqual({
+      id: 'legacy-tab',
+      name: 'legacy-tab-title',
+      layout: {
+        type: 'leaf',
+        paneId: 'legacy-pane',
+      },
+      activePaneId: 'legacy-pane',
+    });
+    expect(workspaces[0]?.panes[0]).toEqual({
+      id: 'legacy-pane',
+      cwd: '/Users/tester/legacy',
+    });
+    expect(storage.workspaces).toEqual(workspaces);
   });
 });
