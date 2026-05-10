@@ -110,7 +110,7 @@ describe('SettingsStore', () => {
     expect(storage.payload).toEqual(DEFAULT_APP_SETTINGS);
   });
 
-  it('reload() re-runs migrations against the current storage payload', () => {
+  it('reload() re-reads and normalizes the current settings payload', () => {
     // Given: an external editor has written a value into the underlying storage.
     storage.payload = {
       terminal: { cursorStyle: 'block', macOptionIsMeta: false },
@@ -154,5 +154,97 @@ describe('SettingsStore', () => {
     expect(failing).toHaveBeenCalledOnce();
     expect(ok).toHaveBeenCalledOnce();
     errorSpy.mockRestore();
+  });
+
+  it('drops unknown sections while preserving valid sibling fields', () => {
+    // Given: a payload with an unknown section and valid current-shape settings.
+    storage.payload = {
+      ui: { sidebarOpen: false },
+      terminal: { fontSize: 14, cursorStyle: 'block' },
+    };
+
+    // When: the store reloads from disk.
+    const next = store.reload();
+
+    // Then: unknown sections are dropped while valid sibling values are kept.
+    expect(next.terminal.cursorStyle).toBe('block');
+    expect(next.terminal.fontSize).toBe(14);
+    expect(next).not.toHaveProperty('ui');
+  });
+
+  it('coerces invalid cursorStyle values back to the default when read from storage', () => {
+    // Given: a persisted payload with an out-of-range cursor style value.
+    storage.payload = { terminal: { cursorStyle: 'circle' } };
+
+    // When: the store reloads from disk.
+    const next = store.reload();
+
+    // Then: the default cursor style is restored.
+    expect(next.terminal.cursorStyle).toBe(DEFAULT_APP_SETTINGS.terminal.cursorStyle);
+  });
+
+  it('keeps non-default boolean values when explicitly set to false when read from storage', () => {
+    // Given: persisted boolean preferences explicitly set to false.
+    storage.payload = { terminal: { copyOnSelect: false, cursorBlink: false } };
+
+    // When: the store reloads from disk.
+    const next = store.reload();
+
+    // Then: false is preserved instead of being replaced by the true default.
+    expect(next.terminal.copyOnSelect).toBe(false);
+    expect(next.terminal.cursorBlink).toBe(false);
+  });
+
+  it('rejects non-finite pollIntervalMs and falls back to default when read from storage', () => {
+    // Given: a persisted payload with an invalid non-finite poll interval.
+    storage.payload = { paneInfo: { pollIntervalMs: Number.NaN } };
+
+    // When: the store reloads from disk.
+    const next = store.reload();
+
+    // Then: the default poll interval is used.
+    expect(next.paneInfo.pollIntervalMs).toBe(DEFAULT_APP_SETTINGS.paneInfo.pollIntervalMs);
+  });
+
+  it('preserves an explicit null hotkey to mean disabled when read from storage', () => {
+    // Given: the user has persisted a disabled global hotkey.
+    storage.payload = { shortcuts: { activateAppHotkey: null } };
+
+    // When: the store reloads from disk.
+    const next = store.reload();
+
+    // Then: the disabled state is preserved.
+    expect(next.shortcuts.activateAppHotkey).toBeNull();
+  });
+
+  it('drops non-string keybinding entries when read from storage', () => {
+    // Given: persisted keybindings contain valid and malformed entries.
+    storage.payload = {
+      shortcuts: {
+        keybindings: {
+          'workspace.next': 'Cmd+Shift+]',
+          'workspace.prev': 42,
+          'pane.split': '',
+        },
+      },
+    };
+
+    // When: the store reloads from disk.
+    const next = store.reload();
+
+    // Then: only non-empty string accelerators survive.
+    expect(next.shortcuts.keybindings).toEqual({
+      'workspace.next': 'Cmd+Shift+]',
+    });
+  });
+
+  it('ignores undefined patch fields rather than overwriting with undefined', () => {
+    // Given: a store initialized with the default poll interval.
+
+    // When: a patch carries an explicit undefined field.
+    const next = store.update({ paneInfo: { pollIntervalMs: undefined } });
+
+    // Then: the persisted value is left intact.
+    expect(next.paneInfo.pollIntervalMs).toBe(DEFAULT_APP_SETTINGS.paneInfo.pollIntervalMs);
   });
 });
