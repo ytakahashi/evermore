@@ -16,34 +16,39 @@ application is composed of three execution contexts that share a strict process 
 A `shared/` directory holds types and constants that need to be referenced from more than one
 process boundary (IPC channel names, serializable models, the typed `Api` contract).
 
+## Platform Assumptions
+
+Evermore currently targets macOS as its primary supported platform. Platform-specific behavior may
+use macOS conventions directly when doing so keeps the implementation simpler and the user
+experience clearer.
+
+Current macOS assumptions include:
+
+- Keyboard shortcuts use macOS modifier names (`Command`, `Option`, `Control`, `Shift`) instead of
+  cross-platform aliases such as `CommandOrControl`.
+- The settings shortcut follows the macOS convention of `Cmd+,`.
+- File-manager affordances may use Finder-oriented wording in the renderer UI.
+- Main-process integrations may rely on Electron/macOS behavior where documented by the relevant
+  feature.
+
+If Evermore later adds first-class Windows or Linux support, these assumptions should be revisited
+behind explicit platform adapters rather than scattered conditionals.
+
 ## Repository Layout
 
 ```text
 src/
 ├── main/         # Electron main process: app lifecycle + native services
-│   ├── index.ts          # App entry: window, IPC registration, shutdown
-│   ├── window-shortcuts.ts
-│   ├── ipc/              # IPC composition root and handlers
-│   ├── pty/              # PtyManager (node-pty)
-│   ├── tunnels/          # TunnelManager (child_process for `ssh -N`)
-│   ├── ssh-config/       # SshConfigManager + parser + SshHostResolver (ssh -G)
-│   └── workspace/        # WorkspaceStore (electron-store)
 ├── preload/      # Context bridge that exposes `window.api`
 ├── renderer/src/ # React renderer
-│   ├── main.tsx          # ReactDOM root
-│   ├── App.tsx           # Mounts AppShell + global event bridges
-│   ├── components/       # Layout, sidebar, main area, terminal
-│   ├── hooks/            # Cross-feature hooks
-│   ├── stores/           # zustand stores (workspace, ui, connections, tunnels, sshResolutions)
-│   ├── styles/
-│   └── test/
 └── shared/       # Cross-process types, constants, and pure helpers
-    ├── types.ts          # Workspace / Tab / Pane / SSHHost / Tunnel / AppSettings
-    ├── api-types.ts      # `Api` shape exposed on window.api
-    ├── ipc-channels.ts   # IPC channel name constants
-    ├── pane-layout.ts    # Pure helpers: countPaneLeaves, flattenLayout
-    └── tunnel-constants.ts
 ```
+
+Each layer's responsibilities, invariants, and allowed dependencies are described in the Main /
+Preload / Renderer / Shared sections below. Sub-directory and file naming inside each layer is
+conventional (one sub-directory per feature under `main/`, one section per UI area under
+`renderer/src/components/`, etc.) but is not part of the architectural contract — `ls src/<layer>`
+is the source of truth.
 
 Top-level dependency rules:
 
@@ -97,12 +102,11 @@ process's source.
 
 `shared/` is the contract between processes. Its responsibility is:
 
-- Define the IPC channel names (`ipc-channels.ts`) used by both `preload/` and
-  `main/ipc/handlers/*`.
-- Declare the `Api` interface (`api-types.ts`) that the preload exposes and the renderer consumes.
-- Define cross-process serializable models (`types.ts`): `Workspace`, `Tab`, `Pane`, `PaneLayout`,
-  `SSHHost`, `Tunnel`, `ForwardEntry`, `AppSettings`.
-- Hold pure helpers that are safe in any runtime (`pane-layout.ts`).
+- Define the IPC channel name constants used by both `preload/` and `main/ipc/handlers/*`.
+- Declare the `Api` interface that the preload exposes and the renderer consumes.
+- Define cross-process serializable models (workspace tree, SSH hosts, tunnels, persisted settings,
+  etc.) that round-trip through `structuredClone` / JSON without loss.
+- Hold pure helpers that are safe in any runtime.
 
 Invariants:
 
@@ -130,29 +134,24 @@ handler that bridges it to the renderer.
 
 ### Responsibilities
 
-- `index.ts` is the runtime composition root. It creates the `BrowserWindow`, attaches per-window
-  shortcut suppression, calls `registerIpcHandlers`, and disposes IPC handlers on `before-quit`.
-  Long-lived runtime state lives below it.
-- `window-shortcuts.ts` is a small, pure-ish helper that intercepts Cmd-modified renderer shortcuts
-  (reload / zoom / production DevTools) without swallowing Ctrl-modified keys, which xterm needs
-  intact for shell reverse-i-search.
-- `ipc/register.ts` is the IPC composition root. It instantiates the shared `SshConfigManager` and
-  threads it into the SSH and tunnel handlers, so both expose the same cached host list. It returns
-  a single teardown function so the app can dispose every handler and runtime resource at shutdown.
-- `ipc/handlers/<feature>.ts` files are bridges: they translate `ipcMain.handle` payloads into
-  method calls on the corresponding manager and forward manager-emitted events back to the renderer
-  via `webContents.send`. They are deliberately thin and contain no business logic.
-- `pty/`, `tunnels/`, `ssh-config/`, `workspace/` each own one runtime concern and expose a
-  serializable, dependency-injected API:
-  - `PtyManager` owns `node-pty` processes and emits `onData` / `onExit` events.
-  - `TunnelManager` owns `ssh -N <alias>` child processes, status transitions, log ring buffers, and
-    graceful SIGTERM → SIGKILL termination.
-  - `SshConfigManager` reads and caches `~/.ssh/config`, expanding `Include` directives (including
-    globs) with OpenSSH-compatible semantics. `SshHostResolver` provides on-demand `ssh -G`
-    resolution for detailed host directives, caching results in memory until `ssh:reload-hosts`
-    invalidates them.
-  - `WorkspaceStore` persists workspaces and the active workspace id in `electron-store`, sanitizing
-    runtime-only pane fields before write.
+- The composition root creates the `BrowserWindow`, registers IPC handlers, wires the `before-quit`
+  lifecycle, and disposes runtime resources at shutdown. Long-lived runtime state lives below it.
+- A small per-window helper intercepts Cmd-modified renderer shortcuts (reload / zoom / production
+  DevTools) without swallowing Ctrl-modified keys, which xterm needs intact for shell
+  reverse-i-search.
+- The IPC composition root instantiates each runtime manager once and threads it into the IPC
+  handlers that depend on it, so handlers that need the same cached state share one instance. It
+  returns a single runtime handle with a `dispose()` method so the app can dispose every handler and
+  runtime resource on app quit.
+- Per-feature IPC handlers are bridges that translate `ipcMain.handle` payloads into method calls on
+  the corresponding manager and forward manager-emitted events back to the renderer via
+  `webContents.send`. They are deliberately thin and contain no business logic.
+- Per-feature manager classes own one runtime concern each (PTY processes, SSH tunnels, SSH config
+  parsing, workspace persistence, settings persistence, pane activity polling, global hotkey, quit
+  confirmation, etc.). Each manager exposes a serializable, dependency-injected API so unit tests
+  can inject fakes (`spawn`, `now`, `getHomeDirectory`, storage adapter, etc.) without requiring a
+  real Electron window, real PTY, or real filesystem. Layer-wide invariants the managers must uphold
+  are listed below.
 
 ### Invariants
 
@@ -190,13 +189,12 @@ typed surface.
 
 ### Responsibilities
 
-- Translate the renderer's namespaced API calls (`api.pty.create`, `api.workspace.list`, …) into
-  `ipcRenderer.invoke` calls keyed by the constants in `shared/ipc-channels.ts`.
-- Multiplex `pty:data` / `pty:exit` / `tunnel:status-changed` / `tunnel:log` events by registering
-  exactly one `ipcRenderer.on` listener per channel and dispatching to a subscriber set. This avoids
-  exceeding Node's default 10-listener cap when many panes are open.
-- Declare the global `Window['api']` ambient type in `index.d.ts` so the renderer TypeScript project
-  can consume it.
+- Translate the renderer's namespaced API calls into `ipcRenderer.invoke` calls keyed by the
+  constants in `shared/ipc-channels.ts`.
+- For main-emitted events that fan out to many subscribers, register exactly one `ipcRenderer.on`
+  listener per channel and dispatch to a subscriber set. This avoids exceeding Node's default
+  10-listener cap when many panes or features subscribe to the same channel.
+- Declare the global `Window['api']` ambient type so the renderer TypeScript project can consume it.
 
 ### Invariants
 
@@ -221,38 +219,22 @@ The renderer is a single React 19 app rendered into `#root` by `main.tsx` with `
 
 ### Responsibilities and Import Restrictions
 
-- `App.tsx` mounts the layout and wires global event bridges (currently `useTunnelEventBridge`). It
-  is intentionally tiny: routing, business logic, and data fetching live elsewhere.
-- `components/layout/` (`AppShell`, `Sidebar`, `TopBar`) owns the top-level frame. Components here
-  may read from any zustand store but must not own feature-specific business logic.
-- `components/main-area/` owns the tab/pane/terminal frame: `TabBar`, `PaneLayout`,
-  `MainTerminalArea`. `PaneLayout` flattens the pane tree (see invariants below) and
-  `MainTerminalArea` keeps each workspace mounted while toggling visibility.
-- `components/sidebar/` owns the Workspaces and Connections views and their sections
-  (`SSHHostsSection`, `TunnelsSection`).
-- `components/terminal/` owns the xterm.js + PTY pairing for one pane:
-  - `TerminalView.tsx` renders the container and the inactive overlay.
-  - `useTerminal.ts` constructs the xterm instance, connects it to `window.api.pty`, and registers
-    an OSC 7 handler that emits `onCwdChange`.
-  - `osc7.ts` and `theme.ts` are pure helpers consumed by the hook.
-- `hooks/` contains cross-feature hooks reusable across pages: `useTunnelEventBridge`,
-  `useReloadConnections`, `useResizeObserver`.
+- `App.tsx` mounts the layout and wires global event bridges that subscribe to main-process
+  notifications and write them into the renderer stores. It is intentionally tiny: routing, business
+  logic, and data fetching live elsewhere.
+- `components/<area>/` directories own one top-level UI area each (layout shell, main terminal area,
+  sidebar, settings panel, terminal pairing, etc.). Components inside an area may read from any
+  zustand store but must not reach into another area's internal components or own feature-specific
+  business logic that belongs in a store or hook.
+- `hooks/` contains cross-feature hooks reusable across UI areas (event bridges from main →
+  renderer, resize observation, etc.).
 - `stores/` is the renderer's source of truth for UI and runtime mirrors of main-process state. Each
-  store is built with a `create<Store>()` factory that accepts options (API client, debounce
-  intervals, clock) so tests can inject doubles. The exported singleton (`useWorkspaceStore`, …) is
-  the production wiring; tests should call `createWorkspaceStore({ ... })` directly and avoid the
-  singleton.
-  - `workspaceStore.ts` mirrors the persisted workspace tree, debounces writes to main, and exposes
-    selectors `selectActiveWorkspace` / `selectActiveTab` / `selectActivePane`. Pure tree
-    manipulation lives in the same file as private helpers.
-  - `uiStore.ts` is purely transient renderer state (sidebar view, sidebar open/close, sidebar
-    width). The open/close flag and width are intentionally not persisted: every app launch starts
-    with the sidebar open at the default width.
-  - `connectionsStore.ts` mirrors SSH host data fetched via `window.api.ssh`.
-  - `tunnelsStore.ts` mirrors tunnel runtime state and is updated by `useTunnelEventBridge` from
-    main-process events.
-  - `sshResolutionsStore.ts` caches on-demand SSH host resolution results fetched via
-    `window.api.ssh.resolve`. It is cleared whenever SSH hosts are reloaded.
+  store is built with a `createXxxStore()` factory that accepts options (API client, debounce
+  intervals, clock) so tests can inject doubles. The exported `useXxxStore` singleton is the
+  production wiring; tests must call the factory directly to obtain an isolated store. Persisted
+  state (workspaces, app settings, etc.) lives behind a main-process IPC and is mirrored into a
+  store, while purely transient renderer state (sidebar open/close, active main-area view, etc.)
+  lives in a store only and resets on every launch.
 
 ### Invariants
 

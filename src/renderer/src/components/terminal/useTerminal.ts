@@ -3,6 +3,8 @@ import { FitAddon } from '@xterm/addon-fit';
 import { WebLinksAddon } from '@xterm/addon-web-links';
 import { Terminal } from '@xterm/xterm';
 import { useResizeObserver } from '../../hooks/useResizeObserver';
+import { DEFAULT_APP_SETTINGS } from '../../../../shared/settings-defaults';
+import { useSettingsStore } from '../../stores/settingsStore';
 import { parseOsc7Cwd } from './osc7';
 import { terminalTheme } from './theme';
 
@@ -43,6 +45,41 @@ export function useTerminal(options: UseTerminalOptions): UseTerminalResult {
   const isActiveRef = useRef(options.isActive ?? false);
   const onCwdChangeRef = useRef(options.onCwdChange);
   const onPtyIdChangeRef = useRef(options.onPtyIdChange);
+  const cursorStyle = useSettingsStore(
+    (state) => state.settings?.terminal.cursorStyle ?? DEFAULT_APP_SETTINGS.terminal.cursorStyle,
+  );
+  const cursorBlink = useSettingsStore(
+    (state) => state.settings?.terminal.cursorBlink ?? DEFAULT_APP_SETTINGS.terminal.cursorBlink,
+  );
+  const macOptionIsMeta = useSettingsStore(
+    (state) =>
+      state.settings?.terminal.macOptionIsMeta ?? DEFAULT_APP_SETTINGS.terminal.macOptionIsMeta,
+  );
+  const copyOnSelect = useSettingsStore(
+    (state) => state.settings?.terminal.copyOnSelect ?? DEFAULT_APP_SETTINGS.terminal.copyOnSelect,
+  );
+  const terminalSettingsRef = useRef({
+    cursorStyle,
+    cursorBlink,
+    macOptionIsMeta,
+  });
+
+  useEffect(() => {
+    terminalSettingsRef.current = {
+      cursorStyle,
+      cursorBlink,
+      macOptionIsMeta,
+    };
+
+    const terminal = terminalRef.current;
+    if (!terminal) {
+      return;
+    }
+
+    terminal.options.cursorStyle = cursorStyle;
+    terminal.options.cursorBlink = cursorBlink;
+    terminal.options.macOptionIsMeta = macOptionIsMeta;
+  }, [cursorStyle, cursorBlink, macOptionIsMeta]);
 
   useEffect(() => {
     isActiveRef.current = options.isActive ?? false;
@@ -90,12 +127,14 @@ export function useTerminal(options: UseTerminalOptions): UseTerminalResult {
       return;
     }
 
+    const initialTerminalSettings = terminalSettingsRef.current;
     const terminal = new Terminal({
       allowProposedApi: true,
-      cursorBlink: true,
-      cursorStyle: 'block',
+      cursorBlink: initialTerminalSettings.cursorBlink,
+      cursorStyle: initialTerminalSettings.cursorStyle,
       fontFamily: "'SF Mono', 'JetBrains Mono', Menlo, Consolas, monospace",
       fontSize: 13,
+      macOptionIsMeta: initialTerminalSettings.macOptionIsMeta,
       theme: terminalTheme,
     });
     const fitAddon = new FitAddon();
@@ -228,6 +267,29 @@ export function useTerminal(options: UseTerminalOptions): UseTerminalResult {
       fitAddonRef.current = null;
     };
   }, [fitAndResize, focusIfActive]);
+
+  useEffect(() => {
+    const terminal = terminalRef.current;
+    if (!terminal || !copyOnSelect) {
+      return;
+    }
+
+    const selectionDisposable = terminal.onSelectionChange(() => {
+      const selection = terminal.getSelection();
+      if (!selection || typeof navigator === 'undefined' || !navigator.clipboard) {
+        return;
+      }
+
+      void navigator.clipboard.writeText(selection).catch((_error: unknown) => {
+        // Clipboard writes can be rejected by browser permissions. Copy-on-select is best-effort,
+        // and the normal explicit copy shortcuts still work, so there is nothing useful to recover.
+      });
+    });
+
+    return () => {
+      selectionDisposable.dispose();
+    };
+  }, [copyOnSelect]);
 
   useEffect(() => {
     focusIfActive();

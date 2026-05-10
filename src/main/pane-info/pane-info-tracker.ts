@@ -21,7 +21,7 @@ export class PaneInfoTracker {
   private readonly callbacks: PaneInfoTrackerCallbacks;
   private readonly inspector: Pick<ProcessInspector, 'listProcesses'>;
   private readonly now: () => number;
-  private readonly pollIntervalMs: number;
+  private pollIntervalMs: number;
   private readonly processes = new Map<string, RegisteredPaneProcess>();
   private readonly runtimeInfo = new Map<string, PaneRuntimeInfo>();
   private pollTimer: ReturnType<typeof setInterval> | null = null;
@@ -96,6 +96,24 @@ export class PaneInfoTracker {
    */
   public list(): PaneRuntimeInfo[] {
     return [...this.runtimeInfo.values()];
+  }
+
+  /**
+   * Updates the process-table polling interval. Values <= 0 disable recurring polling while keeping
+   * already registered panes and their latest runtime info intact.
+   */
+  public setPollIntervalMs(pollIntervalMs: number): void {
+    const nextPollIntervalMs = Number.isFinite(pollIntervalMs) ? pollIntervalMs : 0;
+    if (this.pollIntervalMs === nextPollIntervalMs) {
+      return;
+    }
+
+    this.pollIntervalMs = nextPollIntervalMs;
+    if (this.pollTimer) {
+      clearInterval(this.pollTimer);
+      this.pollTimer = null;
+    }
+    this.ensurePolling();
   }
 
   /**

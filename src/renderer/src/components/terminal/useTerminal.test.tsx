@@ -1,6 +1,9 @@
 import { render, waitFor } from '@testing-library/react';
 import type { Mock } from 'vitest';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { DEFAULT_APP_SETTINGS } from '../../../../shared/settings-defaults';
+import type { AppSettings } from '../../../../shared/types';
+import { useSettingsStore } from '../../stores/settingsStore';
 import { useTerminal } from './useTerminal';
 
 const xtermMock = vi.hoisted(() => {
@@ -23,6 +26,12 @@ const xtermMock = vi.hoisted(() => {
     );
     public readonly inputDisposable = { dispose: vi.fn() };
     public readonly osc7Disposable = { dispose: vi.fn() };
+    public readonly selectionChangeDisposable = {
+      dispose: vi.fn(() => {
+        this.selectionChangeListener = null;
+      }),
+    };
+    public options: Record<string, unknown>;
     public readonly parser = {
       registerOscHandler: vi.fn((ident: number, listener: (data: string) => boolean) => {
         if (ident === 7) {
@@ -35,8 +44,11 @@ const xtermMock = vi.hoisted(() => {
     private customKeyEventHandler: ((event: KeyboardEvent) => boolean) | null = null;
     private inputListener: ((data: string) => void) | null = null;
     private osc7Listener: ((data: string) => boolean) | null = null;
+    private selection = '';
+    private selectionChangeListener: (() => void) | null = null;
 
-    public constructor() {
+    public constructor(options: Record<string, unknown>) {
+      this.options = { ...options };
       terminalInstances.push(this);
     }
 
@@ -47,6 +59,20 @@ const xtermMock = vi.hoisted(() => {
 
     public emitInput(data: string): void {
       this.inputListener?.(data);
+    }
+
+    public onSelectionChange(listener: () => void): { dispose: () => void } {
+      this.selectionChangeListener = listener;
+      return this.selectionChangeDisposable;
+    }
+
+    public getSelection(): string {
+      return this.selection;
+    }
+
+    public emitSelectionChange(selection: string): void {
+      this.selection = selection;
+      this.selectionChangeListener?.();
     }
 
     public evaluateCustomKey(event: KeyboardEvent): boolean | null {
@@ -132,6 +158,19 @@ describe('useTerminal', () => {
   let exitListener: ((id: string, code: number) => void) | null;
   let dataListener: ((id: string, data: string) => void) | null;
   let resizeObserverCallback: (() => void) | null;
+  let clipboardWriteText: Mock<(text: string) => Promise<void>>;
+
+  function setTerminalSettings(terminal: Partial<AppSettings['terminal']>): void {
+    useSettingsStore.setState({
+      settings: {
+        ...DEFAULT_APP_SETTINGS,
+        terminal: {
+          ...DEFAULT_APP_SETTINGS.terminal,
+          ...terminal,
+        },
+      },
+    });
+  }
 
   beforeEach(() => {
     dataCleanup = vi.fn<() => void>();
@@ -141,6 +180,18 @@ describe('useTerminal', () => {
     resizeObserverCallback = null;
     xtermMock.terminalInstances.length = 0;
     xtermMock.fitAddonInstances.length = 0;
+    useSettingsStore.setState({
+      settings: structuredClone(DEFAULT_APP_SETTINGS),
+      isLoading: false,
+      error: null,
+    });
+    clipboardWriteText = vi.fn(() => Promise.resolve());
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: {
+        writeText: clipboardWriteText,
+      },
+    });
 
     ptyApi = {
       create: vi.fn(() => Promise.resolve('pty-1')),
@@ -198,6 +249,7 @@ describe('useTerminal', () => {
 
   afterEach(() => {
     Reflect.deleteProperty(window, 'api');
+    Reflect.deleteProperty(navigator, 'clipboard');
     Reflect.deleteProperty(globalThis, 'ResizeObserver');
     if (typeof document !== 'undefined') {
       Reflect.deleteProperty(document, 'fonts');
@@ -220,6 +272,83 @@ describe('useTerminal', () => {
     });
     expect(xtermMock.terminalInstances[0]?.focus).toHaveBeenCalled();
     expect(paneInfoApi.notifyCwd).toHaveBeenCalledWith('pty-1', '/Users/tester/project');
+  });
+
+  it('creates xterm with the currently loaded terminal settings', async () => {
+    // Given: settings were loaded before the terminal pane mounts.
+    setTerminalSettings({
+      cursorBlink: false,
+      cursorStyle: 'underline',
+      macOptionIsMeta: false,
+    });
+
+    // When: the terminal pane mounts.
+    render(<TestTerminal />);
+    await waitFor(() => {
+      expect(ptyApi.create).toHaveBeenCalled();
+    });
+
+    // Then: the xterm constructor receives the persisted settings.
+    expect(xtermMock.terminalInstances[0]?.options).toMatchObject({
+      cursorBlink: false,
+      cursorStyle: 'underline',
+      macOptionIsMeta: false,
+    });
+  });
+
+  it('applies terminal setting changes to the existing xterm instance without recreating the PTY', async () => {
+    // Given: a terminal pane has already created its PTY.
+    render(<TestTerminal />);
+    await waitFor(() => {
+      expect(ptyApi.create).toHaveBeenCalled();
+    });
+
+    // When: settings change while the pane is mounted.
+    setTerminalSettings({
+      cursorBlink: false,
+      cursorStyle: 'underline',
+      macOptionIsMeta: false,
+    });
+
+    // Then: live xterm options update and the running PTY is kept.
+    await waitFor(() => {
+      expect(xtermMock.terminalInstances[0]?.options).toMatchObject({
+        cursorBlink: false,
+        cursorStyle: 'underline',
+        macOptionIsMeta: false,
+      });
+    });
+    expect(ptyApi.create).toHaveBeenCalledOnce();
+    expect(ptyApi.dispose).not.toHaveBeenCalled();
+  });
+
+  it('copies terminal selection to the clipboard only while copy-on-select is enabled', async () => {
+    // Given: copy-on-select starts enabled.
+    setTerminalSettings({ copyOnSelect: true });
+    render(<TestTerminal />);
+    await waitFor(() => {
+      expect(ptyApi.create).toHaveBeenCalled();
+    });
+
+    // When: the terminal selection changes.
+    xtermMock.terminalInstances[0]?.emitSelectionChange('selected text');
+
+    // Then: the selected text is copied to the clipboard.
+    await waitFor(() => {
+      expect(clipboardWriteText).toHaveBeenCalledWith('selected text');
+    });
+
+    // When: copy-on-select is disabled and selection changes again.
+    setTerminalSettings({ copyOnSelect: false });
+    await waitFor(() => {
+      expect(
+        xtermMock.terminalInstances[0]?.selectionChangeDisposable.dispose,
+      ).toHaveBeenCalledOnce();
+    });
+    xtermMock.terminalInstances[0]?.emitSelectionChange('ignored text');
+
+    // Then: the disabled setting stops further clipboard writes.
+    expect(clipboardWriteText).toHaveBeenCalledOnce();
   });
 
   it('reports PTY id lifecycle changes', async () => {

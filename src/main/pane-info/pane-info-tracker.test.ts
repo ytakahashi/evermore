@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { PaneInfoTracker } from './pane-info-tracker';
 import type { PaneInfoChangedEvent, ProcessTableRow } from './types';
 
@@ -31,6 +31,10 @@ describe('PaneInfoTracker', () => {
       now: () => now,
       pollIntervalMs: 0,
     });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   it('registers panes with an initial idle snapshot', () => {
@@ -127,5 +131,49 @@ describe('PaneInfoTracker', () => {
 
     // Then: it no longer appears in snapshots.
     expect(tracker.list()).toEqual([]);
+  });
+
+  it('restarts recurring polling when pollIntervalMs changes', async () => {
+    // Given: a tracker with recurring polling enabled.
+    vi.useFakeTimers();
+    const listProcesses = vi.fn(() => Promise.resolve(rows));
+    tracker = new PaneInfoTracker({
+      callbacks: { onChanged },
+      inspector: { listProcesses },
+      now: () => now,
+      pollIntervalMs: 1000,
+    });
+    tracker.register('pty-1', 123);
+    await vi.runOnlyPendingTimersAsync();
+    listProcesses.mockClear();
+
+    // When: the interval is shortened and enough time elapses for one new tick.
+    tracker.setPollIntervalMs(250);
+    await vi.advanceTimersByTimeAsync(250);
+
+    // Then: polling uses the new cadence.
+    expect(listProcesses).toHaveBeenCalledOnce();
+  });
+
+  it('disables recurring polling when pollIntervalMs is non-positive', async () => {
+    // Given: a tracker with recurring polling enabled.
+    vi.useFakeTimers();
+    const listProcesses = vi.fn(() => Promise.resolve(rows));
+    tracker = new PaneInfoTracker({
+      callbacks: { onChanged },
+      inspector: { listProcesses },
+      now: () => now,
+      pollIntervalMs: 1000,
+    });
+    tracker.register('pty-1', 123);
+    await vi.runOnlyPendingTimersAsync();
+    listProcesses.mockClear();
+
+    // When: polling is disabled.
+    tracker.setPollIntervalMs(0);
+    await vi.advanceTimersByTimeAsync(5000);
+
+    // Then: no recurring polls run.
+    expect(listProcesses).not.toHaveBeenCalled();
   });
 });

@@ -4,7 +4,6 @@ import Store from 'electron-store';
 import type { SettingsUpdate } from '../../shared/api-types';
 import { cloneDefaultSettings, DEFAULT_APP_SETTINGS } from '../../shared/settings-defaults';
 import type { AppSettings } from '../../shared/types';
-import { applySettingsPatch, migrateSettings } from './migrations';
 import type { SettingsStorageAdapter, SettingsStoreOptions } from './types';
 
 /**
@@ -44,11 +43,154 @@ class ElectronSettingsStorageAdapter implements SettingsStorageAdapter {
   }
 }
 
+type CursorStyle = AppSettings['terminal']['cursorStyle'];
+type QuitConfirm = AppSettings['app']['quitConfirm'];
+
+const CURSOR_STYLES: readonly CursorStyle[] = ['block', 'bar', 'underline'];
+const QUIT_CONFIRM_VALUES: readonly QuitConfirm[] = ['always', 'never', 'running-only'];
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function pickCursorStyle(value: unknown, fallback: CursorStyle): CursorStyle {
+  return CURSOR_STYLES.includes(value as CursorStyle) ? (value as CursorStyle) : fallback;
+}
+
+function pickQuitConfirm(value: unknown, fallback: QuitConfirm): QuitConfirm {
+  return QUIT_CONFIRM_VALUES.includes(value as QuitConfirm) ? (value as QuitConfirm) : fallback;
+}
+
+function pickBoolean(value: unknown, fallback: boolean): boolean {
+  return typeof value === 'boolean' ? value : fallback;
+}
+
+function pickFiniteNumber<T extends number | undefined>(value: unknown, fallback: T): number | T {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return fallback;
+  }
+  return value;
+}
+
+function pickStringOrNull(value: unknown, fallback: string | null): string | null {
+  if (value === null) {
+    return null;
+  }
+  if (typeof value === 'string' && value.length > 0) {
+    return value;
+  }
+  return fallback;
+}
+
+function pickKeybindings(value: unknown): Record<string, string> {
+  if (!isPlainObject(value)) {
+    return {};
+  }
+
+  const result: Record<string, string> = {};
+  for (const [actionId, accelerator] of Object.entries(value)) {
+    if (typeof accelerator === 'string' && accelerator.length > 0) {
+      result[actionId] = accelerator;
+    }
+  }
+  return result;
+}
+
+function readCurrentSettings(raw: unknown): AppSettings {
+  if (!isPlainObject(raw)) {
+    return cloneDefaultSettings();
+  }
+
+  const defaults = DEFAULT_APP_SETTINGS;
+  const terminalRaw = isPlainObject(raw.terminal) ? raw.terminal : {};
+  const paneInfoRaw = isPlainObject(raw.paneInfo) ? raw.paneInfo : {};
+  const shortcutsRaw = isPlainObject(raw.shortcuts) ? raw.shortcuts : {};
+  const appRaw = isPlainObject(raw.app) ? raw.app : {};
+
+  const terminal: AppSettings['terminal'] = {
+    cursorStyle: pickCursorStyle(terminalRaw.cursorStyle, defaults.terminal.cursorStyle),
+    cursorBlink: pickBoolean(terminalRaw.cursorBlink, defaults.terminal.cursorBlink),
+    macOptionIsMeta: pickBoolean(terminalRaw.macOptionIsMeta, defaults.terminal.macOptionIsMeta),
+    copyOnSelect: pickBoolean(terminalRaw.copyOnSelect, defaults.terminal.copyOnSelect),
+  };
+  const fontSize = pickFiniteNumber(terminalRaw.fontSize, defaults.terminal.fontSize);
+  if (fontSize !== undefined) {
+    terminal.fontSize = fontSize;
+  }
+  const fontFamily =
+    typeof terminalRaw.fontFamily === 'string' && terminalRaw.fontFamily.length > 0
+      ? terminalRaw.fontFamily
+      : defaults.terminal.fontFamily;
+  if (fontFamily !== undefined) {
+    terminal.fontFamily = fontFamily;
+  }
+
+  return {
+    terminal,
+    paneInfo: {
+      pollIntervalMs: pickFiniteNumber(
+        paneInfoRaw.pollIntervalMs,
+        defaults.paneInfo.pollIntervalMs,
+      ),
+    },
+    shortcuts: {
+      activateAppHotkey: pickStringOrNull(
+        shortcutsRaw.activateAppHotkey,
+        defaults.shortcuts.activateAppHotkey,
+      ),
+      keybindings: pickKeybindings(shortcutsRaw.keybindings),
+    },
+    app: {
+      quitConfirm: pickQuitConfirm(appRaw.quitConfirm, defaults.app.quitConfirm),
+    },
+  };
+}
+
+function mergeSection<T extends Record<string, unknown>>(current: T, patch: Partial<T>): T {
+  const result = { ...current };
+  for (const [key, value] of Object.entries(patch)) {
+    if (value === undefined) {
+      continue;
+    }
+    (result as Record<string, unknown>)[key] = value;
+  }
+  return result;
+}
+
+function applySettingsPatch(current: AppSettings, patch: SettingsUpdate): AppSettings {
+  return {
+    terminal: patch.terminal
+      ? (mergeSection(
+          current.terminal as Record<string, unknown>,
+          patch.terminal as Record<string, unknown>,
+        ) as AppSettings['terminal'])
+      : current.terminal,
+    paneInfo: patch.paneInfo
+      ? (mergeSection(
+          current.paneInfo as Record<string, unknown>,
+          patch.paneInfo as Record<string, unknown>,
+        ) as AppSettings['paneInfo'])
+      : current.paneInfo,
+    shortcuts: patch.shortcuts
+      ? (mergeSection(
+          current.shortcuts as Record<string, unknown>,
+          patch.shortcuts as Record<string, unknown>,
+        ) as AppSettings['shortcuts'])
+      : current.shortcuts,
+    app: patch.app
+      ? (mergeSection(
+          current.app as Record<string, unknown>,
+          patch.app as Record<string, unknown>,
+        ) as AppSettings['app'])
+      : current.app,
+  };
+}
+
 /**
  * Persists user preferences and exposes change notifications for runtime reactors.
  *
- * The store keeps an in-memory copy of the migrated settings so reads do not re-parse storage on
- * every IPC call. Writes go through `update()` / `reset()`, which both persist and broadcast to
+ * The store keeps an in-memory copy of the current settings shape so reads do not re-parse storage
+ * on every IPC call. Writes go through `update()` / `reset()`, which both persist and broadcast to
  * subscribers (e.g. main-side reactors that need to push values into runtime services).
  */
 export class SettingsStore {
@@ -58,9 +200,9 @@ export class SettingsStore {
 
   public constructor(options: SettingsStoreOptions = {}) {
     this.storage = options.storage ?? new ElectronSettingsStorageAdapter();
-    this.settings = migrateSettings(this.storage.getSettings());
-    // Persist normalized values so a hand-edited settings.json with legacy / typoed keys gets
-    // canonicalized on first launch.
+    this.settings = readCurrentSettings(this.storage.getSettings());
+    // Persist normalized values so a hand-edited settings.json with typoed keys gets canonicalized
+    // on first launch. Legacy shape migrations are intentionally not supported.
     this.storage.setSettings(this.settings);
   }
 
@@ -76,7 +218,7 @@ export class SettingsStore {
    * patch shape. Sections not present in `patch` are preserved as-is.
    */
   public update(patch: SettingsUpdate): AppSettings {
-    const next = migrateSettings(applySettingsPatch(this.settings, patch));
+    const next = readCurrentSettings(applySettingsPatch(this.settings, patch));
     this.settings = next;
     this.storage.setSettings(next);
     this.notify();
@@ -96,10 +238,10 @@ export class SettingsStore {
    * Re-reads the settings file from disk and refreshes the in-memory cache.
    *
    * This is intended for the "Reload settings from disk" workflow where the user has edited the
-   * file directly. It also re-runs migrations so legacy / typoed keys get normalized.
+   * file directly. It re-reads the current settings shape and normalizes typoed keys.
    */
   public reload(): AppSettings {
-    this.settings = migrateSettings(this.storage.getSettings());
+    this.settings = readCurrentSettings(this.storage.getSettings());
     this.storage.setSettings(this.settings);
     this.notify();
     return this.settings;
