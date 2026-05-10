@@ -15,8 +15,12 @@ interface SidebarViewButtonProps {
 
 function SidebarViewButton({ label, view, children }: SidebarViewButtonProps): React.JSX.Element {
   const sidebarView = useUiStore((state) => state.sidebarView);
+  const activeView = useUiStore((state) => state.activeView);
   const setSidebarView = useUiStore((state) => state.setSidebarView);
-  const isActive = sidebarView === view;
+  // The Workspaces / Connections tabs are "active" only when the workspace pane is showing — when
+  // SettingsView is open we render them as inactive so the user can see at a glance that clicking
+  // either will return them to the workspace context.
+  const isActive = sidebarView === view && activeView === 'workspace';
 
   return (
     <button
@@ -34,11 +38,15 @@ function SidebarViewButton({ label, view, children }: SidebarViewButtonProps): R
 }
 
 /**
- * Bottom-navigation strip wired to {@link useUiStore} for switching the sidebar
- * between Workspaces and Connections. Settings is intentionally disabled until
- * when we implement it in a future phase.
+ * Bottom-navigation strip wired to {@link useUiStore} for switching the sidebar between Workspaces
+ * and Connections, and for toggling the SettingsView (Mac standard: clicking the gear opens
+ * settings, clicking it again is a no-op so it does not behave differently from Cmd+,).
  */
 export function SidebarBottomNav(): React.JSX.Element {
+  const activeView = useUiStore((state) => state.activeView);
+  const openSettings = useUiStore((state) => state.openSettings);
+  const isSettingsActive = activeView === 'settings';
+
   return (
     <nav className="flex items-center justify-around border-t border-border bg-panel p-1">
       <SidebarViewButton label="Workspaces" view="workspaces">
@@ -48,10 +56,12 @@ export function SidebarBottomNav(): React.JSX.Element {
         <Zap size={18} />
       </SidebarViewButton>
       <button
+        aria-current={isSettingsActive ? 'page' : undefined}
         aria-label="Settings"
-        className="rounded p-1.5 text-muted opacity-40"
-        disabled
-        title="Settings coming in a future update"
+        className={getButtonClassName(isSettingsActive)}
+        onClick={() => {
+          openSettings();
+        }}
         type="button"
       >
         <Settings size={18} />

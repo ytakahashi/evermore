@@ -735,4 +735,14 @@ export function createWorkspaceStore(
   });
 }
 
+/**
+ * App-wide singleton workspace store. The renderer treats this as the single source of truth for
+ * workspace runtime state and reads it directly from React components / hooks.
+ *
+ * **Tests must use {@link createWorkspaceStore} to construct an isolated store per test** rather
+ * than reusing this singleton, otherwise state bleeds across tests run in parallel and stale
+ * subscriptions can fire after a test completes. The factory is also the right entry point if the
+ * renderer later wraps stores in a React Context provider; the singleton is then created from
+ * `createWorkspaceStore()` once at the provider boundary instead of at module load.
+ */
 export const useWorkspaceStore = createWorkspaceStore();

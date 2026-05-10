@@ -2,8 +2,10 @@ import type { BrowserWindow } from 'electron';
 import { IPC } from '../../shared/ipc-channels';
 import { PaneInfoTracker } from '../pane-info/pane-info-tracker';
 import { PtyManager } from '../pty/pty-manager';
+import { SettingsStore } from '../settings/settings-store';
 import { registerPtyHandlers } from './handlers/pty';
 import { registerPaneInfoHandlers } from './handlers/pane-info';
+import { registerSettingsHandlers } from './handlers/settings';
 import { registerSshHandlers } from './handlers/ssh';
 import { registerTunnelHandlers } from './handlers/tunnel';
 import { registerWorkspaceHandlers } from './handlers/workspace';
@@ -12,6 +14,7 @@ import { SshHostResolver } from '../ssh-config/host-resolver';
 
 interface RegisterIpcHandlersOptions {
   getWindow: () => BrowserWindow | null;
+  settingsStore?: SettingsStore;
 }
 
 /**
@@ -21,6 +24,7 @@ interface RegisterIpcHandlersOptions {
  * long-lived main-process services, such as PTYs, continue to be owned outside any one window.
  */
 export function registerIpcHandlers(options: RegisterIpcHandlersOptions): () => void {
+  const settingsStore = options.settingsStore ?? new SettingsStore();
   const sshConfigManager = new SshConfigManager();
   const sshHostResolver = new SshHostResolver();
   const paneInfoTracker = new PaneInfoTracker({
@@ -64,6 +68,7 @@ export function registerIpcHandlers(options: RegisterIpcHandlersOptions): () => 
   });
   const disposeWorkspaceHandlers = registerWorkspaceHandlers();
   const disposeSshHandlers = registerSshHandlers({ sshConfigManager, sshHostResolver });
+  const disposeSettingsHandlers = registerSettingsHandlers({ settingsStore });
   const disposeTunnelHandlers = registerTunnelHandlers({
     getWindow: options.getWindow,
     sshConfigManager,
@@ -74,6 +79,7 @@ export function registerIpcHandlers(options: RegisterIpcHandlersOptions): () => 
     disposePaneInfoHandlers();
     disposeWorkspaceHandlers();
     disposeSshHandlers();
+    disposeSettingsHandlers();
     disposeTunnelHandlers();
   };
 }

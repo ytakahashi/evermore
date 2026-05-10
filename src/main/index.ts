@@ -4,12 +4,14 @@ import { fileURLToPath } from 'node:url';
 import { electronApp, is } from '@electron-toolkit/utils';
 import icon from '../../resources/icon.png?asset';
 import { registerIpcHandlers } from './ipc/register';
+import { SettingsStore } from './settings/settings-store';
 import { attachWindowShortcuts } from './window-shortcuts';
 
 const _filename = fileURLToPath(import.meta.url);
 const _dirname = dirname(_filename);
 let mainWindow: BrowserWindow | null = null;
 let disposeIpcHandlers: (() => void) | null = null;
+let settingsStore: SettingsStore | null = null;
 
 function createWindow(): void {
   // Create the browser window.
@@ -67,8 +69,10 @@ app.whenReady().then(() => {
     attachWindowShortcuts(window);
   });
 
+  settingsStore = new SettingsStore();
   disposeIpcHandlers = registerIpcHandlers({
     getWindow: () => mainWindow,
+    settingsStore,
   });
 
   createWindow();
@@ -83,6 +87,7 @@ app.whenReady().then(() => {
 app.on('before-quit', () => {
   disposeIpcHandlers?.();
   disposeIpcHandlers = null;
+  settingsStore = null;
 });
 
 // Quit when all windows are closed, except on macOS. There, it's common

@@ -128,4 +128,11 @@ export function createTunnelsStore(
   }));
 }
 
+/**
+ * App-wide singleton tunnels store.
+ *
+ * **Tests must use {@link createTunnelsStore} to construct an isolated store per test** rather
+ * than reusing this singleton (state bleeds across parallel tests and stale subscriptions can
+ * outlive a test). See `workspaceStore.useWorkspaceStore` for the broader rationale.
+ */
 export const useTunnelsStore = createTunnelsStore();

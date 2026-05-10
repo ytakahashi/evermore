@@ -107,6 +107,10 @@ export function createSshResolutionsStore(
 }
 
 /**
- * Hook to access the global SSH resolutions store.
+ * App-wide singleton SSH resolutions store.
+ *
+ * **Tests must use {@link createSshResolutionsStore} to construct an isolated store per test**
+ * rather than reusing this singleton. See `workspaceStore.useWorkspaceStore` for the broader
+ * rationale.
  */
 export const useSshResolutionsStore = createSshResolutionsStore();

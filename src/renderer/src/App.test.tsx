@@ -2,8 +2,11 @@ import { render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import App from './App';
 import type { Workspace } from '../../shared/types';
+import { DEFAULT_APP_SETTINGS } from '../../shared/settings-defaults';
 import { usePaneInfoStore } from './stores/paneInfoStore';
+import { useSettingsStore } from './stores/settingsStore';
 import { useTunnelsStore } from './stores/tunnelsStore';
+import { useUiStore } from './stores/uiStore';
 
 vi.mock('./components/terminal/TerminalView', () => ({
   TerminalView: () => <div>Terminal View</div>,
@@ -64,7 +67,14 @@ describe('App', () => {
           onStatusChanged: vi.fn(() => vi.fn()),
           onLog: vi.fn(() => vi.fn()),
         },
-        settings: {},
+        settings: {
+          get: vi.fn(() => Promise.resolve(structuredClone(DEFAULT_APP_SETTINGS))),
+          update: vi.fn(() => Promise.resolve(structuredClone(DEFAULT_APP_SETTINGS))),
+          reset: vi.fn(() => Promise.resolve(structuredClone(DEFAULT_APP_SETTINGS))),
+          reload: vi.fn(() => Promise.resolve(structuredClone(DEFAULT_APP_SETTINGS))),
+          openFile: vi.fn(() => Promise.resolve()),
+          getFilePath: vi.fn(() => Promise.resolve('/tmp/evermore/settings.json')),
+        },
       } as unknown as Window['api'],
     });
   });
@@ -72,6 +82,8 @@ describe('App', () => {
   afterEach(() => {
     useTunnelsStore.setState({ tunnels: [], isLoading: false, error: null });
     usePaneInfoStore.setState({ infosByPtyId: {}, isLoading: false, error: null });
+    useSettingsStore.setState({ settings: null, isLoading: false, error: null });
+    useUiStore.setState({ activeView: 'workspace' });
     Reflect.deleteProperty(window, 'api');
   });
 

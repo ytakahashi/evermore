@@ -6,28 +6,44 @@ export const SIDEBAR_MAX_WIDTH = 480;
 
 export type SidebarView = 'workspaces' | 'connections';
 
+/**
+ * What is rendered in the main pane area.
+ *
+ * `'workspace'` keeps the existing terminal grid visible; `'settings'` reveals the SettingsView
+ * while keeping the workspace tree mounted (display:none) so PTY processes survive the round-trip.
+ */
+export type ActiveView = 'workspace' | 'settings';
+
 interface UiStoreState {
   fullscreenPaneId: string | null;
   sidebarView: SidebarView;
   sidebarOpen: boolean;
   sidebarWidth: number; // px, always within [SIDEBAR_MIN_WIDTH, SIDEBAR_MAX_WIDTH]
+  activeView: ActiveView;
   clearFullscreen: () => void;
   setFullscreenPaneId: (paneId: string | null) => void;
   setSidebarView: (view: SidebarView) => void;
   toggleSidebar: () => void;
   setSidebarOpen: (open: boolean) => void;
   setSidebarWidth: (width: number) => void;
+  setActiveView: (view: ActiveView) => void;
+  /** Switches the main pane to the SettingsView. Idempotent; no-op when already active. */
+  openSettings: () => void;
+  /** Returns the main pane to the workspace view. Idempotent; no-op when already active. */
+  closeSettings: () => void;
 }
 
 /**
- * Stores transient renderer-only UI state (sidebar view, sidebar open/close, sidebar width).
- * The sidebar open/close state and width are not persisted and reset to defaults on app launch.
+ * Stores transient renderer-only UI state (sidebar view, sidebar open/close, sidebar width,
+ * active main-area view). Nothing in this store is persisted to disk: persisted preferences live
+ * in `useSettingsStore` and are written through the main-process settings file.
  */
-export const useUiStore = create<UiStoreState>((set) => ({
+export const useUiStore = create<UiStoreState>((set, get) => ({
   fullscreenPaneId: null,
   sidebarView: 'workspaces',
   sidebarOpen: true,
   sidebarWidth: SIDEBAR_DEFAULT_WIDTH,
+  activeView: 'workspace',
   clearFullscreen: () => {
     set({ fullscreenPaneId: null });
   },
@@ -35,7 +51,13 @@ export const useUiStore = create<UiStoreState>((set) => ({
     set({ fullscreenPaneId: paneId });
   },
   setSidebarView: (view) => {
-    set({ sidebarView: view });
+    // Workspaces / Connections are "main-area context" controls; clicking either while the
+    // SettingsView is up should bring the user back to the workspace pane so the click feels like
+    // it actually changed what they see. Settings stays reachable via the gear button or Cmd+,.
+    set((state) => ({
+      sidebarView: view,
+      activeView: state.activeView === 'settings' ? 'workspace' : state.activeView,
+    }));
   },
   toggleSidebar: () => {
     set((state) => ({ sidebarOpen: !state.sidebarOpen }));
@@ -52,5 +74,18 @@ export const useUiStore = create<UiStoreState>((set) => ({
         sidebarWidth: Math.min(Math.max(width, SIDEBAR_MIN_WIDTH), SIDEBAR_MAX_WIDTH),
       };
     });
+  },
+  setActiveView: (view) => {
+    set({ activeView: view });
+  },
+  openSettings: () => {
+    if (get().activeView !== 'settings') {
+      set({ activeView: 'settings' });
+    }
+  },
+  closeSettings: () => {
+    if (get().activeView !== 'workspace') {
+      set({ activeView: 'workspace' });
+    }
   },
 }));

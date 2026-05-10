@@ -54,6 +54,28 @@ export interface Api {
   };
   settings: {
     get: () => Promise<AppSettings>;
-    update: (settings: Partial<AppSettings>) => Promise<void>;
+    /**
+     * Persists a partial settings update and returns the resulting full settings object.
+     *
+     * Returning the post-write state lets the main process clamp / fall back values it could not
+     * accept (for example, hotkey accelerators that fail to register globally), and lets the
+     * renderer detect those differences without a separate round-trip.
+     */
+    update: (settings: SettingsUpdate) => Promise<AppSettings>;
+    reset: () => Promise<AppSettings>;
+    /** Re-reads the settings file from disk and returns the normalized settings object. */
+    reload: () => Promise<AppSettings>;
+    /** Opens the settings file in the OS default file manager (Finder on macOS). */
+    openFile: () => Promise<void>;
+    /** Returns the absolute path to the persisted settings file. */
+    getFilePath: () => Promise<string>;
   };
 }
+
+/**
+ * Partial settings patch accepted by `Api.settings.update`. Each section is independently
+ * optional, but a section, when present, must supply the partial subset of its fields.
+ */
+export type SettingsUpdate = {
+  [Section in keyof AppSettings]?: Partial<AppSettings[Section]>;
+};

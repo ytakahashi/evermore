@@ -72,4 +72,10 @@ export function createPaneInfoStore(
   }));
 }
 
+/**
+ * App-wide singleton pane info store.
+ *
+ * **Tests must use {@link createPaneInfoStore} to construct an isolated store per test** rather
+ * than reusing this singleton. See `workspaceStore.useWorkspaceStore` for the broader rationale.
+ */
 export const usePaneInfoStore = createPaneInfoStore();

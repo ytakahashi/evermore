@@ -75,15 +75,42 @@ export interface ForwardEntry {
   hostPort?: number;
 }
 
+/**
+ * Application-wide user preferences persisted by the main process.
+ *
+ * Persisted to `~/.config/evermore/settings.json` so users can hand-edit it.
+ * Renderer-only transient UI state (sidebar open/close, sidebar width, fullscreen pane id)
+ * lives in `useUiStore` and is intentionally not part of `AppSettings`.
+ */
 export interface AppSettings {
-  ui: {
-    sidebarOpen: boolean;
-    sidebarWidth: number;
-    sidebarView: 'workspaces' | 'connections';
-  };
   terminal: {
-    fontSize: number;
-    fontFamily: string;
     cursorStyle: 'block' | 'bar' | 'underline';
+    cursorBlink: boolean;
+    macOptionIsMeta: boolean;
+    copyOnSelect: boolean;
+    /** Reserved for future Terminal section UI; persisted but not yet exposed as a control. */
+    fontSize?: number;
+    /** Reserved for future Terminal section UI; persisted but not yet exposed as a control. */
+    fontFamily?: string;
+  };
+  paneInfo: {
+    /** ps polling interval in ms; values <= 0 disable polling. */
+    pollIntervalMs: number;
+  };
+  shortcuts: {
+    /**
+     * Toggles the global hotkey that brings the Evermore window to the front. `null` means the
+     * hotkey is disabled. Stored as a parsed Electron Accelerator string.
+     */
+    activateAppHotkey: string | null;
+    /**
+     * Action id -> Accelerator. The bindings are persisted only; the runtime that reads them and
+     * binds the actual key handlers is not yet implemented, so editing this map currently has no
+     * effect on the running app.
+     */
+    keybindings: Record<string, string>;
+  };
+  app: {
+    quitConfirm: 'always' | 'never' | 'running-only';
   };
 }
