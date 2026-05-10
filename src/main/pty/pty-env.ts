@@ -1,9 +1,19 @@
 /**
- * Builds a `process.env` object for `node-pty` that makes UTF-8 the default for child CLIs.
+ * Builds a `process.env` object for `node-pty` so the spawned shell behaves like one launched
+ * from iTerm2 or Terminal.app — UTF-8 by default, and PATH built from the user's rc files instead
+ * of from however Evermore happened to be launched.
  *
- * When Evermore is launched from the macOS dock or another GUI path, the main process often
- * inherits a minimal environment (no `LANG`, or `LC_ALL=C` from a parent). Git, `less`, and other
- * tools then treat the session as non-UTF-8 and print non-ASCII as literal byte escapes.
+ * Two adjustments matter:
+ *
+ * - PATH is reset to a launchd-like minimum on POSIX. Login shells re-run `/etc/zprofile`
+ *   (`path_helper` on macOS) and `~/.zshrc`, both of which prepend entries to PATH. If we forward
+ *   Electron's PATH (already populated by the launching shell when running `pnpm dev`, by GUI
+ *   launchctl defaults, etc.), those entries get prepended a second time and the spawned PATH
+ *   diverges from a normal terminal session. Resetting gives the rc files a clean slate.
+ *
+ * - LANG / LC_CTYPE are forced to UTF-8 when the parent did not set a UTF-8 locale. GUI launches
+ *   often inherit a minimal environment (no `LANG`, or `LC_ALL=C`), which makes git, `less`, and
+ *   other tools render multibyte text as literal byte escapes.
  */
 export function buildPtyProcessEnv(
   base: NodeJS.ProcessEnv,
@@ -14,6 +24,14 @@ export function buildPtyProcessEnv(
     if (typeof value === 'string') {
       env[key] = value;
     }
+  }
+
+  if (process.platform !== 'win32') {
+    // Setting (instead of deleting) avoids the trailing-colon trap when an early rc file does
+    // `export PATH="$HOME/bin:$PATH"` against an unset PATH — that would inject `.` into PATH.
+    // The minimum here matches what launchd hands a freshly launched login shell on macOS; on
+    // Linux the same value is a safe baseline that /etc/profile.d/* and rc files extend.
+    env['PATH'] = '/usr/bin:/bin:/usr/sbin:/sbin';
   }
 
   if (env['LC_ALL'] === 'C' || env['LC_ALL'] === 'POSIX') {
@@ -36,6 +54,8 @@ export function buildPtyProcessEnv(
   }
 
   if (extras) {
+    // Applied last so a caller (pane-level overrides) can still supply a specific PATH or locale
+    // for that PTY without us clobbering it.
     Object.assign(env, extras);
   }
 

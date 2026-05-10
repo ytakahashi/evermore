@@ -83,7 +83,7 @@ describe('PtyManager', () => {
     // Then: creation options are normalized and output is tagged with the runtime id.
     expect(spawn).toHaveBeenCalledWith(
       '/bin/zsh',
-      [],
+      ['-l'],
       expect.objectContaining({
         cols: 100,
         cwd: '/Users/tester',

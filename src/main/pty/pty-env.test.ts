@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildPtyProcessEnv } from './pty-locale';
+import { buildPtyProcessEnv } from './pty-env';
 
 describe('buildPtyProcessEnv', () => {
   it('adds UTF-8 LANG/LC_CTYPE when no UTF-8 locale is present', () => {
@@ -76,4 +76,33 @@ describe('buildPtyProcessEnv', () => {
     // Then: their setting survives.
     expect(env['LESSCHARSET']).toBe('iso8859');
   });
+
+  it.skipIf(process.platform === 'win32')(
+    'resets PATH so the login shell rebuilds it from rc files instead of inheriting Electron PATH',
+    () => {
+      // Given: an Electron PATH already enriched by the launching shell (`pnpm dev`, etc.).
+      const env = buildPtyProcessEnv({
+        PATH: '/Users/me/.zinit/bin:/opt/homebrew/bin:/usr/bin:/bin',
+        LANG: 'en_US.UTF-8',
+      });
+
+      // Then: PATH is reduced to the launchd-like minimum so /etc/zprofile and ~/.zshrc are not
+      // stacked on top of an already-customized PATH.
+      expect(env['PATH']).toBe('/usr/bin:/bin:/usr/sbin:/sbin');
+    },
+  );
+
+  it.skipIf(process.platform === 'win32')(
+    'lets caller extras override the PATH reset for pane-level customization',
+    () => {
+      // Given: a caller that wants the PTY to start with a specific PATH (e.g. a pinned toolchain).
+      const env = buildPtyProcessEnv(
+        { PATH: '/Users/me/.zinit/bin:/usr/bin', LANG: 'en_US.UTF-8' },
+        { PATH: '/opt/special/bin:/usr/bin' },
+      );
+
+      // Then: the explicit override wins over both the inherited PATH and the default reset.
+      expect(env['PATH']).toBe('/opt/special/bin:/usr/bin');
+    },
+  );
 });

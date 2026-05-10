@@ -3,7 +3,7 @@ import { existsSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import * as nodePty from 'node-pty';
 import type { IDisposable, IPty } from 'node-pty';
-import { buildPtyProcessEnv } from './pty-locale';
+import { buildPtyProcessEnv } from './pty-env';
 import type { PtyCreateOptions, PtyManagerCallbacks, PtySpawn } from './types';
 
 interface PtyRecord {
@@ -33,7 +33,15 @@ export class PtyManager {
   public create(options: PtyCreateOptions): string {
     const id = randomUUID();
     const shell = options.shell ?? process.env['SHELL'] ?? '/bin/zsh';
-    const proc = this.spawn(shell, [], {
+    // Start the shell as a login shell so macOS's `/etc/zprofile` runs `path_helper`, populating
+    // PATH from `/etc/paths` and `/etc/paths.d/*` (Homebrew, cryptex, MacPorts, etc.). Without
+    // `-l` the spawned PATH would diverge from what the user sees in iTerm2 or Terminal.app.
+    //
+    // `-l` is understood by zsh, bash, and fish, which covers the realistic SHELL values on macOS.
+    // If a user runs an exotic shell that rejects `-l`, this would need to branch on the shell
+    // name. Login mode also runs `~/.zprofile`; any TTY-unsafe output there can leak into the
+    // initial pane render, but in practice profile files are quiet.
+    const proc = this.spawn(shell, ['-l'], {
       name: 'xterm-256color',
       cols: options.cols ?? 80,
       rows: options.rows ?? 24,
