@@ -1,17 +1,26 @@
-import { app, shell, BrowserWindow } from 'electron';
+import { app, dialog, shell, BrowserWindow, type MessageBoxOptions } from 'electron';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { electronApp, is } from '@electron-toolkit/utils';
 import icon from '../../resources/icon.png?asset';
-import { registerIpcHandlers } from './ipc/register';
+import { DEFAULT_APP_SETTINGS } from '../shared/settings-defaults';
+import { registerIpcHandlers, type RegisteredIpcHandlers } from './ipc/register';
+import { QuitConfirmationController } from './quit-confirmation';
 import { SettingsStore } from './settings/settings-store';
 import { attachWindowShortcuts } from './window-shortcuts';
 
 const _filename = fileURLToPath(import.meta.url);
 const _dirname = dirname(_filename);
 let mainWindow: BrowserWindow | null = null;
-let disposeIpcHandlers: (() => void) | null = null;
+let ipcRuntime: RegisteredIpcHandlers | null = null;
 let settingsStore: SettingsStore | null = null;
+let quitConfirmationController: QuitConfirmationController | null = null;
+
+function cleanupRuntime(): void {
+  ipcRuntime?.dispose();
+  ipcRuntime = null;
+  settingsStore = null;
+}
 
 function createWindow(): void {
   // Create the browser window.
@@ -70,9 +79,25 @@ app.whenReady().then(() => {
   });
 
   settingsStore = new SettingsStore();
-  disposeIpcHandlers = registerIpcHandlers({
+  ipcRuntime = registerIpcHandlers({
     getWindow: () => mainWindow,
     settingsStore,
+  });
+  quitConfirmationController = new QuitConfirmationController({
+    cleanup: cleanupRuntime,
+    getSettings: () => settingsStore?.get() ?? DEFAULT_APP_SETTINGS,
+    getWindow: () => mainWindow,
+    listPaneInfo: () => ipcRuntime?.paneInfoTracker.list() ?? [],
+    requestQuit: () => {
+      app.quit();
+    },
+    showMessageBox: (window, options: MessageBoxOptions) => {
+      if (window && !window.isDestroyed()) {
+        return dialog.showMessageBox(window, options);
+      }
+
+      return dialog.showMessageBox(options);
+    },
   });
 
   createWindow();
@@ -84,10 +109,8 @@ app.whenReady().then(() => {
   });
 });
 
-app.on('before-quit', () => {
-  disposeIpcHandlers?.();
-  disposeIpcHandlers = null;
-  settingsStore = null;
+app.on('before-quit', (event) => {
+  quitConfirmationController?.handleBeforeQuit(event);
 });
 
 // Quit when all windows are closed, except on macOS. There, it's common

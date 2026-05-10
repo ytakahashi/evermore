@@ -11,7 +11,7 @@ import type { AppSettings } from './types';
  *    `'block'`. Existing persisted user values are kept as-is by migration; only new installs see
  *    the new default.
  *  - `paneInfo.pollIntervalMs` of 1500 matches `PaneInfoTracker`'s historical default.
- *  - `shortcuts.activateAppHotkey` defaults to `'CommandOrControl+Shift+,'`. The accelerator is
+ *  - `shortcuts.activateAppHotkey` defaults to `'Command+Shift+,'`. The accelerator is
  *    persisted now; the actual `globalShortcut` registration is wired up later when the Shortcuts
  *    section ships.
  *  - `app.quitConfirm` of `'running-only'` matches the documented intent. The Cmd+Q dialog is
@@ -28,7 +28,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
     pollIntervalMs: 1500,
   },
   shortcuts: {
-    activateAppHotkey: 'CommandOrControl+Shift+,',
+    activateAppHotkey: 'Command+Shift+,',
     keybindings: {},
   },
   app: {

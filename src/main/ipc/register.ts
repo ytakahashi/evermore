@@ -1,5 +1,7 @@
 import type { BrowserWindow } from 'electron';
 import { IPC } from '../../shared/ipc-channels';
+import type { AppSettings } from '../../shared/types';
+import { HotkeyManager } from '../hotkey/hotkey-manager';
 import { PaneInfoTracker } from '../pane-info/pane-info-tracker';
 import { PtyManager } from '../pty/pty-manager';
 import { SettingsStore } from '../settings/settings-store';
@@ -17,17 +19,24 @@ interface RegisterIpcHandlersOptions {
   settingsStore?: SettingsStore;
 }
 
+export interface RegisteredIpcHandlers {
+  dispose: () => void;
+  hotkeyManager: HotkeyManager;
+  paneInfoTracker: PaneInfoTracker;
+}
+
 /**
  * Registers all main-process IPC handlers and returns a teardown function for app shutdown.
  *
  * The current window is passed as a getter because macOS can destroy and recreate windows while
  * long-lived main-process services, such as PTYs, continue to be owned outside any one window.
  */
-export function registerIpcHandlers(options: RegisterIpcHandlersOptions): () => void {
+export function registerIpcHandlers(options: RegisterIpcHandlersOptions): RegisteredIpcHandlers {
   const settingsStore = options.settingsStore ?? new SettingsStore();
   const sshConfigManager = new SshConfigManager();
   const sshHostResolver = new SshHostResolver();
   const paneInfoTracker = new PaneInfoTracker({
+    pollIntervalMs: settingsStore.get().paneInfo.pollIntervalMs,
     callbacks: {
       onChanged: ({ info }) => {
         const window = options.getWindow();
@@ -37,6 +46,16 @@ export function registerIpcHandlers(options: RegisterIpcHandlersOptions): () => 
       },
     },
   });
+  const hotkeyManager = new HotkeyManager({ getWindow: options.getWindow });
+  const applyRuntimeSettings = (settings: AppSettings): AppSettings => {
+    paneInfoTracker.setPollIntervalMs(settings.paneInfo.pollIntervalMs);
+    const acceptedHotkey = hotkeyManager.set(settings.shortcuts.activateAppHotkey);
+    if (acceptedHotkey !== settings.shortcuts.activateAppHotkey) {
+      return settingsStore.update({ shortcuts: { activateAppHotkey: acceptedHotkey } });
+    }
+
+    return settings;
+  };
   const ptyManager = new PtyManager({
     onData: (event) => {
       const window = options.getWindow();
@@ -68,18 +87,25 @@ export function registerIpcHandlers(options: RegisterIpcHandlersOptions): () => 
   });
   const disposeWorkspaceHandlers = registerWorkspaceHandlers();
   const disposeSshHandlers = registerSshHandlers({ sshConfigManager, sshHostResolver });
-  const disposeSettingsHandlers = registerSettingsHandlers({ settingsStore });
+  applyRuntimeSettings(settingsStore.get());
+  const disposeSettingsHandlers = registerSettingsHandlers({ settingsStore, applyRuntimeSettings });
   const disposeTunnelHandlers = registerTunnelHandlers({
     getWindow: options.getWindow,
     sshConfigManager,
   });
 
-  return () => {
-    disposePtyHandlers();
-    disposePaneInfoHandlers();
-    disposeWorkspaceHandlers();
-    disposeSshHandlers();
-    disposeSettingsHandlers();
-    disposeTunnelHandlers();
+  return {
+    hotkeyManager,
+    paneInfoTracker,
+    dispose: () => {
+      disposePtyHandlers();
+      disposePaneInfoHandlers();
+      disposeWorkspaceHandlers();
+      disposeSshHandlers();
+      disposeSettingsHandlers();
+      disposeTunnelHandlers();
+      hotkeyManager.dispose();
+      paneInfoTracker.dispose();
+    },
   };
 }

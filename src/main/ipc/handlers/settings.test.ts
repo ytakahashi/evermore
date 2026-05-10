@@ -75,6 +75,25 @@ describe('registerSettingsHandlers', () => {
     expect(settingsStore.get().terminal.cursorStyle).toBe('block');
   });
 
+  it('returns runtime-reconciled settings after update', async () => {
+    // Given: runtime settings application falls back to a different hotkey value.
+    const applyRuntimeSettings = vi.fn((_settings: AppSettings) => {
+      settingsStore.update({ shortcuts: { activateAppHotkey: null } });
+      return settingsStore.get();
+    });
+    registerSettingsHandlers({ settingsStore, applyRuntimeSettings });
+
+    // When: the renderer invokes settings:update with a hotkey that runtime rejects.
+    const result = (await findHandler(IPC.SETTINGS_UPDATE)?.(
+      {},
+      { settings: { shortcuts: { activateAppHotkey: 'CommandOrControl+Shift+Space' } } },
+    )) as AppSettings;
+
+    // Then: the handler returns the effective persisted value, not the optimistic request.
+    expect(applyRuntimeSettings).toHaveBeenCalled();
+    expect(result.shortcuts.activateAppHotkey).toBeNull();
+  });
+
   it('ignores malformed update sections before they reach the store', async () => {
     // Given: handlers are registered and the payload does not match the section-shaped contract.
     registerSettingsHandlers({ settingsStore });

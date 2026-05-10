@@ -6,6 +6,7 @@ import { SettingsStore } from '../../settings/settings-store';
 
 interface RegisterSettingsHandlersOptions {
   settingsStore?: SettingsStore;
+  applyRuntimeSettings?: (settings: AppSettings) => AppSettings;
   /**
    * Optional override for opening the settings file. Defaults to Electron's `shell.showItemInFolder`,
    * which reveals the file in the OS file manager (Finder on macOS) instead of opening it in an
@@ -50,11 +51,13 @@ export function registerSettingsHandlers(
   const openInFileManager = options.openInFileManager ?? shell.showItemInFolder.bind(shell);
 
   ipcMain.handle(IPC.SETTINGS_GET, () => settingsStore.get());
+  const applyRuntimeSettings = options.applyRuntimeSettings ?? ((settings) => settings);
+
   ipcMain.handle(IPC.SETTINGS_UPDATE, (_event, payload: unknown) => {
-    return settingsStore.update(readSettingsUpdate(payload));
+    return applyRuntimeSettings(settingsStore.update(readSettingsUpdate(payload)));
   });
-  ipcMain.handle(IPC.SETTINGS_RESET, () => settingsStore.reset());
-  ipcMain.handle(IPC.SETTINGS_RELOAD, () => settingsStore.reload());
+  ipcMain.handle(IPC.SETTINGS_RESET, () => applyRuntimeSettings(settingsStore.reset()));
+  ipcMain.handle(IPC.SETTINGS_RELOAD, () => applyRuntimeSettings(settingsStore.reload()));
   ipcMain.handle(IPC.SETTINGS_GET_FILE_PATH, () => settingsStore.getFilePath());
   ipcMain.handle(IPC.SETTINGS_OPEN_FILE, () => {
     openInFileManager(settingsStore.getFilePath());
