@@ -71,6 +71,7 @@ describe('App', () => {
           get: vi.fn(() => Promise.resolve(structuredClone(DEFAULT_APP_SETTINGS))),
           update: vi.fn(() => Promise.resolve(structuredClone(DEFAULT_APP_SETTINGS))),
           reset: vi.fn(() => Promise.resolve(structuredClone(DEFAULT_APP_SETTINGS))),
+          reload: vi.fn(() => Promise.resolve(structuredClone(DEFAULT_APP_SETTINGS))),
           openFile: vi.fn(() => Promise.resolve()),
           getFilePath: vi.fn(() => Promise.resolve('/tmp/evermore/settings.json')),
         },

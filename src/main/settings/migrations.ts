@@ -26,8 +26,8 @@ function pickBoolean(value: unknown, fallback: boolean): boolean {
   return typeof value === 'boolean' ? value : fallback;
 }
 
-function pickPositiveNumber(value: unknown, fallback: number): number {
-  if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) {
+function pickFiniteNumber(value: unknown, fallback: number): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
     return fallback;
   }
   return value;
@@ -96,7 +96,7 @@ export function migrateSettings(raw: unknown): AppSettings {
   return {
     terminal,
     paneInfo: {
-      pollIntervalMs: pickPositiveNumber(
+      pollIntervalMs: pickFiniteNumber(
         paneInfoRaw.pollIntervalMs,
         defaults.paneInfo.pollIntervalMs,
       ),

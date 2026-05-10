@@ -58,6 +58,32 @@ describe('SettingsStore', () => {
     expect((storage.payload as AppSettings).terminal.cursorStyle).toBe('underline');
   });
 
+  it('normalizes invalid update values before persisting', () => {
+    // Given: a malformed value reaches the store through an IPC boundary or future UI bug.
+
+    // When: the update is applied.
+    const next = store.update({
+      terminal: { cursorStyle: 'circle' as AppSettings['terminal']['cursorStyle'] },
+    });
+
+    // Then: the invalid value is rejected before it reaches disk.
+    expect(next.terminal.cursorStyle).toBe(DEFAULT_APP_SETTINGS.terminal.cursorStyle);
+    expect((storage.payload as AppSettings).terminal.cursorStyle).toBe(
+      DEFAULT_APP_SETTINGS.terminal.cursorStyle,
+    );
+  });
+
+  it('persists non-positive pollIntervalMs values so polling can be disabled', () => {
+    // Given: the user wants to disable pane-info polling.
+
+    // When: poll interval is set to zero.
+    const next = store.update({ paneInfo: { pollIntervalMs: 0 } });
+
+    // Then: the disable value is kept.
+    expect(next.paneInfo.pollIntervalMs).toBe(0);
+    expect((storage.payload as AppSettings).paneInfo.pollIntervalMs).toBe(0);
+  });
+
   it('notifies subscribers after a successful update', () => {
     // Given: a registered subscriber.
     const listener = vi.fn();

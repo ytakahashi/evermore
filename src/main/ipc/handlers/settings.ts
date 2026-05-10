@@ -1,6 +1,7 @@
 import { ipcMain, shell } from 'electron';
 import type { SettingsUpdate } from '../../../shared/api-types';
 import { IPC } from '../../../shared/ipc-channels';
+import type { AppSettings } from '../../../shared/types';
 import { SettingsStore } from '../../settings/settings-store';
 
 interface RegisterSettingsHandlersOptions {
@@ -11,6 +12,28 @@ interface RegisterSettingsHandlersOptions {
    * external editor that may not exist on the user's machine.
    */
   openInFileManager?: (filePath: string) => void;
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function readSectionUpdate<TSection>(value: unknown): Partial<TSection> | undefined {
+  return isPlainObject(value) ? (value as Partial<TSection>) : undefined;
+}
+
+function readSettingsUpdate(payload: unknown): SettingsUpdate {
+  const settings = isPlainObject(payload) ? payload.settings : undefined;
+  if (!isPlainObject(settings)) {
+    return {};
+  }
+
+  return {
+    terminal: readSectionUpdate<AppSettings['terminal']>(settings.terminal),
+    paneInfo: readSectionUpdate<AppSettings['paneInfo']>(settings.paneInfo),
+    shortcuts: readSectionUpdate<AppSettings['shortcuts']>(settings.shortcuts),
+    app: readSectionUpdate<AppSettings['app']>(settings.app),
+  };
 }
 
 /**
@@ -27,10 +50,11 @@ export function registerSettingsHandlers(
   const openInFileManager = options.openInFileManager ?? shell.showItemInFolder.bind(shell);
 
   ipcMain.handle(IPC.SETTINGS_GET, () => settingsStore.get());
-  ipcMain.handle(IPC.SETTINGS_UPDATE, (_event, payload: { settings: SettingsUpdate }) => {
-    return settingsStore.update(payload.settings ?? {});
+  ipcMain.handle(IPC.SETTINGS_UPDATE, (_event, payload: unknown) => {
+    return settingsStore.update(readSettingsUpdate(payload));
   });
   ipcMain.handle(IPC.SETTINGS_RESET, () => settingsStore.reset());
+  ipcMain.handle(IPC.SETTINGS_RELOAD, () => settingsStore.reload());
   ipcMain.handle(IPC.SETTINGS_GET_FILE_PATH, () => settingsStore.getFilePath());
   ipcMain.handle(IPC.SETTINGS_OPEN_FILE, () => {
     openInFileManager(settingsStore.getFilePath());
@@ -40,6 +64,7 @@ export function registerSettingsHandlers(
     ipcMain.removeHandler(IPC.SETTINGS_GET);
     ipcMain.removeHandler(IPC.SETTINGS_UPDATE);
     ipcMain.removeHandler(IPC.SETTINGS_RESET);
+    ipcMain.removeHandler(IPC.SETTINGS_RELOAD);
     ipcMain.removeHandler(IPC.SETTINGS_GET_FILE_PATH);
     ipcMain.removeHandler(IPC.SETTINGS_OPEN_FILE);
   };

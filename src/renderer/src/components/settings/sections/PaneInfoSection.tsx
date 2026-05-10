@@ -1,5 +1,8 @@
 import { SectionPlaceholder } from './SectionPlaceholder';
 
+/**
+ * Placeholder for pane activity polling settings until the live poll interval control is wired.
+ */
 export function PaneInfoSection(): React.JSX.Element {
   return (
     <SectionPlaceholder

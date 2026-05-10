@@ -14,6 +14,7 @@ import { SshHostResolver } from '../ssh-config/host-resolver';
 
 interface RegisterIpcHandlersOptions {
   getWindow: () => BrowserWindow | null;
+  settingsStore?: SettingsStore;
 }
 
 /**
@@ -23,7 +24,7 @@ interface RegisterIpcHandlersOptions {
  * long-lived main-process services, such as PTYs, continue to be owned outside any one window.
  */
 export function registerIpcHandlers(options: RegisterIpcHandlersOptions): () => void {
-  const settingsStore = new SettingsStore();
+  const settingsStore = options.settingsStore ?? new SettingsStore();
   const sshConfigManager = new SshConfigManager();
   const sshHostResolver = new SshHostResolver();
   const paneInfoTracker = new PaneInfoTracker({

@@ -1,5 +1,8 @@
 import { SectionPlaceholder } from './SectionPlaceholder';
 
+/**
+ * Placeholder for application-level settings until the Cmd+Q confirmation controls are wired.
+ */
 export function ApplicationSection(): React.JSX.Element {
   return (
     <SectionPlaceholder

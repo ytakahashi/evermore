@@ -38,6 +38,7 @@ export const IPC = {
   SETTINGS_GET: 'settings:get',
   SETTINGS_UPDATE: 'settings:update',
   SETTINGS_RESET: 'settings:reset',
+  SETTINGS_RELOAD: 'settings:reload',
   SETTINGS_OPEN_FILE: 'settings:open-file',
   SETTINGS_GET_FILE_PATH: 'settings:get-file-path',
 } as const;

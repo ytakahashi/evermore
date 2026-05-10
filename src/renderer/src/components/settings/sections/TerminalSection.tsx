@@ -1,5 +1,8 @@
 import { SectionPlaceholder } from './SectionPlaceholder';
 
+/**
+ * Placeholder for terminal behavior settings until the live xterm controls are wired.
+ */
 export function TerminalSection(): React.JSX.Element {
   return (
     <SectionPlaceholder

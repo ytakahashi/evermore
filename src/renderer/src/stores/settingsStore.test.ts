@@ -32,6 +32,7 @@ function makeSettingsApi(initial: AppSettings = structuredClone(DEFAULT_APP_SETT
       state.current = structuredClone(DEFAULT_APP_SETTINGS);
       return Promise.resolve(structuredClone(state.current));
     }),
+    reload: vi.fn(() => Promise.resolve(structuredClone(state.current))),
     openFile: vi.fn(() => Promise.resolve()),
     getFilePath: vi.fn(() => Promise.resolve('/tmp/evermore/settings.json')),
   };
@@ -136,12 +137,37 @@ describe('createSettingsStore', () => {
     expect(api.reset).toHaveBeenCalledOnce();
   });
 
+  it('reload cancels pending optimistic writes and uses the disk-confirmed settings', async () => {
+    // Given: a loaded store has a pending debounced write, but disk now contains a different value.
+    const { api, state } = makeSettingsApi();
+    const useStore = createSettingsStore({ settingsApi: api, debounceMs: 50 });
+    await useStore.getState().loadSettings();
+    const pendingFlush = useStore.getState().updateSettings({
+      terminal: { copyOnSelect: false },
+    });
+    state.current = {
+      ...state.current,
+      app: { quitConfirm: 'never' },
+    };
+
+    // When: the user reloads from disk before the debounce flushes.
+    await useStore.getState().reloadSettings();
+
+    // Then: the pending flush resolves to the reloaded settings and no stale update lands.
+    const resolved = await pendingFlush;
+    expect(resolved?.app.quitConfirm).toBe('never');
+    expect(api.update).not.toHaveBeenCalled();
+    expect(api.reload).toHaveBeenCalledOnce();
+    expect(useStore.getState().settings?.app.quitConfirm).toBe('never');
+  });
+
   it('records a load error message on failure without throwing', async () => {
     // Given: an api that fails to load.
     const failingApi: Api['settings'] = {
       get: vi.fn(() => Promise.reject(new Error('disk on fire'))),
       update: vi.fn(),
       reset: vi.fn(),
+      reload: vi.fn(),
       openFile: vi.fn(),
       getFilePath: vi.fn(),
     };

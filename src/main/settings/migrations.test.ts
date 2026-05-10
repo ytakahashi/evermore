@@ -70,10 +70,23 @@ describe('migrateSettings', () => {
     expect(migrated.terminal.cursorBlink).toBe(false);
   });
 
-  it('rejects non-positive pollIntervalMs and falls back to default', () => {
-    // Given: a payload with an invalid poll interval (zero / negative / non-finite).
+  it('preserves non-positive pollIntervalMs so polling can be disabled', () => {
+    // Given: a payload with a poll interval that intentionally disables polling.
     const payload = {
       paneInfo: { pollIntervalMs: 0 },
+    };
+
+    // When: migration runs.
+    const migrated = migrateSettings(payload);
+
+    // Then: the disable value is preserved.
+    expect(migrated.paneInfo.pollIntervalMs).toBe(0);
+  });
+
+  it('rejects non-finite pollIntervalMs and falls back to default', () => {
+    // Given: a payload with an invalid non-finite poll interval.
+    const payload = {
+      paneInfo: { pollIntervalMs: Number.NaN },
     };
 
     // When: migration runs.

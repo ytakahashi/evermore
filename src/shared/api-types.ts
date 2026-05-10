@@ -63,6 +63,8 @@ export interface Api {
      */
     update: (settings: SettingsUpdate) => Promise<AppSettings>;
     reset: () => Promise<AppSettings>;
+    /** Re-reads the settings file from disk and returns the normalized settings object. */
+    reload: () => Promise<AppSettings>;
     /** Opens the settings file in the OS default file manager (Finder on macOS). */
     openFile: () => Promise<void>;
     /** Returns the absolute path to the persisted settings file. */

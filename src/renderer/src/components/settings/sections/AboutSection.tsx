@@ -11,9 +11,11 @@ import { useSettingsStore } from '../../../stores/settingsStore';
  */
 export function AboutSection(): React.JSX.Element {
   const openSettingsFile = useSettingsStore((state) => state.openSettingsFile);
+  const reloadSettings = useSettingsStore((state) => state.reloadSettings);
   const [filePath, setFilePath] = useState<string | null>(null);
   const [filePathError, setFilePathError] = useState<string | null>(null);
   const [copyState, setCopyState] = useState<'idle' | 'copied' | 'error'>('idle');
+  const [reloadState, setReloadState] = useState<'idle' | 'reloaded'>('idle');
 
   useEffect(() => {
     let cancelled = false;
@@ -93,11 +95,30 @@ export function AboutSection(): React.JSX.Element {
           >
             Open in Finder
           </button>
+          <button
+            className="rounded border border-border px-2 py-1 text-xs hover:bg-raised disabled:opacity-50"
+            disabled={!filePath}
+            onClick={() => {
+              void reloadSettings().then(() => {
+                if (useSettingsStore.getState().error) {
+                  return;
+                }
+                setReloadState('reloaded');
+                globalThis.setTimeout(() => {
+                  setReloadState('idle');
+                }, 1500);
+              });
+            }}
+            type="button"
+          >
+            Reload from disk
+          </button>
           {copyState === 'copied' ? (
             <span className="text-xs text-muted">Copied</span>
           ) : copyState === 'error' ? (
             <span className="text-xs text-danger">Copy failed</span>
           ) : null}
+          {reloadState === 'reloaded' ? <span className="text-xs text-muted">Reloaded</span> : null}
         </div>
       </div>
     </div>

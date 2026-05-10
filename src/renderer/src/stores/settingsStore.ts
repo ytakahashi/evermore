@@ -35,6 +35,8 @@ export interface SettingsStoreState {
   updateSettings: (patch: SettingsUpdate) => Promise<AppSettings | null>;
   /** Resets settings to defaults (round-trips through the main process). */
   resetSettings: () => Promise<void>;
+  /** Reloads the settings file from disk through the main process. */
+  reloadSettings: () => Promise<void>;
   openSettingsFile: () => Promise<void>;
 }
 
@@ -174,6 +176,30 @@ export function createSettingsStore(
 
         try {
           const settings = await getSettingsApi().reset();
+          set({ settings, error: null });
+          for (const resolve of resolvers) {
+            resolve(settings);
+          }
+        } catch (error: unknown) {
+          set({ error: getErrorMessage(error) });
+          for (const resolve of resolvers) {
+            resolve(null);
+          }
+        }
+      },
+      reloadSettings: async (): Promise<void> => {
+        // A reload is a deliberate sync point after hand-editing the file. Cancel any pending
+        // optimistic write first so it cannot overwrite the external edit after reload completes.
+        if (debounceTimer) {
+          globalThis.clearTimeout(debounceTimer);
+          debounceTimer = null;
+        }
+        pendingPatch = {};
+        const resolvers = pendingResolvers;
+        pendingResolvers = [];
+
+        try {
+          const settings = await getSettingsApi().reload();
           set({ settings, error: null });
           for (const resolve of resolvers) {
             resolve(settings);

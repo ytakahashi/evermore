@@ -75,6 +75,21 @@ describe('registerSettingsHandlers', () => {
     expect(settingsStore.get().terminal.cursorStyle).toBe('block');
   });
 
+  it('ignores malformed update sections before they reach the store', async () => {
+    // Given: handlers are registered and the payload does not match the section-shaped contract.
+    registerSettingsHandlers({ settingsStore });
+
+    // When: the renderer invokes settings:update with malformed sections.
+    const result = (await findHandler(IPC.SETTINGS_UPDATE)?.(
+      {},
+      { settings: { terminal: 'not-an-object', paneInfo: { pollIntervalMs: 0 } } },
+    )) as AppSettings;
+
+    // Then: the malformed section is ignored, while valid sections still apply.
+    expect(result.terminal.cursorStyle).toBe(DEFAULT_APP_SETTINGS.terminal.cursorStyle);
+    expect(result.paneInfo.pollIntervalMs).toBe(0);
+  });
+
   it('reset returns to defaults', async () => {
     // Given: settings have drifted from defaults.
     registerSettingsHandlers({ settingsStore });
@@ -85,6 +100,23 @@ describe('registerSettingsHandlers', () => {
 
     // Then: defaults are returned.
     expect(result).toEqual(DEFAULT_APP_SETTINGS);
+  });
+
+  it('reload refreshes settings from storage', async () => {
+    // Given: storage was edited outside the app after handlers were registered.
+    registerSettingsHandlers({ settingsStore });
+    storage.payload = {
+      terminal: { cursorStyle: 'underline' },
+      paneInfo: { pollIntervalMs: 0 },
+    };
+
+    // When: the renderer invokes settings:reload.
+    const result = (await findHandler(IPC.SETTINGS_RELOAD)?.({}, {})) as AppSettings;
+
+    // Then: the store re-reads storage and normalizes missing fields.
+    expect(result.terminal.cursorStyle).toBe('underline');
+    expect(result.paneInfo.pollIntervalMs).toBe(0);
+    expect(result.terminal.copyOnSelect).toBe(DEFAULT_APP_SETTINGS.terminal.copyOnSelect);
   });
 
   it('exposes the file path for the About section', async () => {
@@ -121,6 +153,7 @@ describe('registerSettingsHandlers', () => {
     expect(ipcMainMock.removeHandler).toHaveBeenCalledWith(IPC.SETTINGS_GET);
     expect(ipcMainMock.removeHandler).toHaveBeenCalledWith(IPC.SETTINGS_UPDATE);
     expect(ipcMainMock.removeHandler).toHaveBeenCalledWith(IPC.SETTINGS_RESET);
+    expect(ipcMainMock.removeHandler).toHaveBeenCalledWith(IPC.SETTINGS_RELOAD);
     expect(ipcMainMock.removeHandler).toHaveBeenCalledWith(IPC.SETTINGS_GET_FILE_PATH);
     expect(ipcMainMock.removeHandler).toHaveBeenCalledWith(IPC.SETTINGS_OPEN_FILE);
   });

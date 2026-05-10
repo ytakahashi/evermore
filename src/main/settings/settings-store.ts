@@ -7,10 +7,6 @@ import type { AppSettings } from '../../shared/types';
 import { applySettingsPatch, migrateSettings } from './migrations';
 import type { SettingsStorageAdapter, SettingsStoreOptions } from './types';
 
-interface SettingsStoreSchema extends Record<string, unknown> {
-  settings: AppSettings;
-}
-
 /**
  * Returns the settings directory under `~/.config/evermore`. We keep this separate from
  * `~/Library/Application Support/Evermore/` (where workspaces.json lives) so that users can safely
@@ -22,26 +18,25 @@ function defaultSettingsDirectory(): string {
 }
 
 class ElectronSettingsStorageAdapter implements SettingsStorageAdapter {
-  private readonly store: Store<SettingsStoreSchema>;
+  private readonly store: Store<Record<string, unknown>>;
 
   public constructor(directory: string = defaultSettingsDirectory()) {
-    this.store = new Store<SettingsStoreSchema>({
+    this.store = new Store<Record<string, unknown>>({
       // electron-store appends `.json` automatically, so the resulting file is
-      // <directory>/settings.json
+      // <directory>/settings.json. The AppSettings object is stored at the JSON root rather than
+      // under a wrapper key so the file stays straightforward for hand-editing.
       name: 'settings',
       cwd: directory,
-      defaults: {
-        settings: cloneDefaultSettings(),
-      },
+      defaults: cloneDefaultSettings() as unknown as Record<string, unknown>,
     });
   }
 
   public getSettings(): unknown {
-    return this.store.get('settings');
+    return this.store.store;
   }
 
   public setSettings(settings: AppSettings): void {
-    this.store.set('settings', settings);
+    this.store.store = structuredClone(settings) as unknown as Record<string, unknown>;
   }
 
   public getFilePath(): string {
@@ -81,7 +76,7 @@ export class SettingsStore {
    * patch shape. Sections not present in `patch` are preserved as-is.
    */
   public update(patch: SettingsUpdate): AppSettings {
-    const next = applySettingsPatch(this.settings, patch);
+    const next = migrateSettings(applySettingsPatch(this.settings, patch));
     this.settings = next;
     this.storage.setSettings(next);
     this.notify();

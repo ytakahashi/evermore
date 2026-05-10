@@ -119,6 +119,7 @@ const api = {
     update: (settings: SettingsUpdate): Promise<AppSettings> =>
       ipcRenderer.invoke(IPC.SETTINGS_UPDATE, { settings }),
     reset: (): Promise<AppSettings> => ipcRenderer.invoke(IPC.SETTINGS_RESET),
+    reload: (): Promise<AppSettings> => ipcRenderer.invoke(IPC.SETTINGS_RELOAD),
     openFile: (): Promise<void> => ipcRenderer.invoke(IPC.SETTINGS_OPEN_FILE),
     getFilePath: (): Promise<string> => ipcRenderer.invoke(IPC.SETTINGS_GET_FILE_PATH),
   },
