@@ -8,7 +8,7 @@ import type {
   Tunnel,
   TunnelStatus,
 } from '../shared/types';
-import type { Api } from '../shared/api-types';
+import type { Api, SettingsUpdate } from '../shared/api-types';
 
 // Each pane subscribes its own callback via onData/onExit. Registering a new ipcRenderer.on()
 // per pane would exceed Node's default 10-listener limit with many open panes. A single
@@ -116,8 +116,11 @@ const api = {
   },
   settings: {
     get: (): Promise<AppSettings> => ipcRenderer.invoke(IPC.SETTINGS_GET),
-    update: (settings: Partial<AppSettings>): Promise<void> =>
+    update: (settings: SettingsUpdate): Promise<AppSettings> =>
       ipcRenderer.invoke(IPC.SETTINGS_UPDATE, { settings }),
+    reset: (): Promise<AppSettings> => ipcRenderer.invoke(IPC.SETTINGS_RESET),
+    openFile: (): Promise<void> => ipcRenderer.invoke(IPC.SETTINGS_OPEN_FILE),
+    getFilePath: (): Promise<string> => ipcRenderer.invoke(IPC.SETTINGS_GET_FILE_PATH),
   },
 } satisfies Api;
 

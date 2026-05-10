@@ -67,4 +67,11 @@ export function createConnectionsStore(
   }));
 }
 
+/**
+ * App-wide singleton connections store.
+ *
+ * **Tests must use {@link createConnectionsStore} to construct an isolated store per test** rather
+ * than reusing this singleton (state bleeds across parallel tests and stale subscriptions can
+ * outlive a test). See `workspaceStore.useWorkspaceStore` for the broader rationale.
+ */
 export const useConnectionsStore = createConnectionsStore();

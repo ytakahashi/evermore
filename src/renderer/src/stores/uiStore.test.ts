@@ -8,6 +8,7 @@ describe('useUiStore', () => {
       sidebarView: 'workspaces',
       sidebarOpen: true,
       sidebarWidth: SIDEBAR_DEFAULT_WIDTH,
+      activeView: 'workspace',
     });
   });
 
@@ -22,6 +23,52 @@ describe('useUiStore', () => {
     expect(state.sidebarOpen).toBe(true);
     expect(state.sidebarWidth).toBe(SIDEBAR_DEFAULT_WIDTH);
     expect(state.fullscreenPaneId).toBeNull();
+    expect(state.activeView).toBe('workspace');
+  });
+
+  it('opens and closes the settings view through dedicated actions', () => {
+    // Given: the workspace view is active by default.
+
+    // When: settings is opened.
+    useUiStore.getState().openSettings();
+
+    // Then: the active view flips to settings.
+    expect(useUiStore.getState().activeView).toBe('settings');
+
+    // When: openSettings is called again while already on settings.
+    useUiStore.getState().openSettings();
+
+    // Then: it remains a no-op (idempotent), matching the Mac System Settings behavior.
+    expect(useUiStore.getState().activeView).toBe('settings');
+
+    // When: settings is closed.
+    useUiStore.getState().closeSettings();
+
+    // Then: the active view returns to workspace.
+    expect(useUiStore.getState().activeView).toBe('workspace');
+  });
+
+  it('returns to workspace when the user clicks a sidebar view while settings is active', () => {
+    // Given: the user is on the SettingsView.
+    useUiStore.getState().openSettings();
+    expect(useUiStore.getState().activeView).toBe('settings');
+
+    // When: the user clicks a sidebar view button (workspaces / connections).
+    useUiStore.getState().setSidebarView('connections');
+
+    // Then: the sidebar view follows the click and the active view goes back to workspace.
+    expect(useUiStore.getState().sidebarView).toBe('connections');
+    expect(useUiStore.getState().activeView).toBe('workspace');
+  });
+
+  it('does not bounce activeView when setSidebarView is called inside the workspace view', () => {
+    // Given: the user is already on the workspace view.
+
+    // When: the user switches sidebar views (which does not affect main pane visibility).
+    useUiStore.getState().setSidebarView('connections');
+
+    // Then: activeView remains workspace (no spurious transitions).
+    expect(useUiStore.getState().activeView).toBe('workspace');
   });
 
   it('sets and clears the fullscreen pane id', () => {
