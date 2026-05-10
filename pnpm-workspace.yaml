@@ -1,5 +1,5 @@
 allowBuilds:
   electron: true
-  electron-winstaller: true
+  electron-winstaller: false
   esbuild: true
   node-pty: true
