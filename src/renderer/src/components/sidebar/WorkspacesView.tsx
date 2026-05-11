@@ -90,7 +90,29 @@ export function WorkspacesView(): React.JSX.Element {
   const renameInputRef = useRef<HTMLInputElement | null>(null);
   const renameCancelledRef = useRef(false);
 
+  // Keep tree disclosure state local to the sidebar so it never becomes persisted workspace data.
+  const [collapsedWorkspaceIds, setCollapsedWorkspaceIds] = useState<Set<string>>(() => new Set());
+
   const canDelete = workspaces.length > 1;
+
+  // Drop disclosure entries for workspaces that no longer exist so stale ids cannot leak across
+  // sessions or accidentally collapse a future workspace that happens to reuse the same id.
+  // Adjusting state during render (rather than in an effect) is recommended for syncing derived
+  // state with props/external state — see https://react.dev/learn/you-might-not-need-an-effect
+  // — and avoids an extra render after every workspace list change.
+  if (collapsedWorkspaceIds.size > 0) {
+    const validIds = new Set(workspaces.map((workspace) => workspace.id));
+    let hasStaleId = false;
+    for (const id of collapsedWorkspaceIds) {
+      if (!validIds.has(id)) {
+        hasStaleId = true;
+        break;
+      }
+    }
+    if (hasStaleId) {
+      setCollapsedWorkspaceIds((current) => new Set([...current].filter((id) => validIds.has(id))));
+    }
+  }
 
   useEffect(() => {
     if (!isCreating) return;
@@ -182,7 +204,20 @@ export function WorkspacesView(): React.JSX.Element {
   const handleDeleteWorkspace = (workspaceId: string, workspaceName: string): void => {
     if (!canDelete) return;
     if (!window.confirm(`Delete workspace "${workspaceName}"? This cannot be undone.`)) return;
+    // Collapsed-state cleanup happens via the `workspaces`-sync effect above; no manual prune here.
     void deleteWorkspace(workspaceId);
+  };
+
+  const toggleWorkspaceCollapsed = (workspaceId: string): void => {
+    setCollapsedWorkspaceIds((current) => {
+      const next = new Set(current);
+      if (next.has(workspaceId)) {
+        next.delete(workspaceId);
+      } else {
+        next.add(workspaceId);
+      }
+      return next;
+    });
   };
 
   return (
@@ -202,6 +237,7 @@ export function WorkspacesView(): React.JSX.Element {
         {workspaces.map((workspace) => {
           const isActive = workspace.id === activeWorkspaceId;
           const isEditing = workspace.id === editingWorkspaceId;
+          const isExpanded = !collapsedWorkspaceIds.has(workspace.id);
 
           return (
             <div key={workspace.id} className="space-y-0.5">
@@ -219,23 +255,38 @@ export function WorkspacesView(): React.JSX.Element {
                     onKeyDown={handleRenameKeyDown}
                   />
                 ) : (
-                  <button
-                    aria-current={isActive ? 'page' : undefined}
-                    className={`flex min-w-0 flex-1 items-center gap-1 rounded-md px-1 py-1 text-left text-sm ${
-                      isActive ? 'bg-raised text-foreground' : 'text-muted hover:bg-raised/50'
-                    }`}
-                    type="button"
-                    onClick={() => {
-                      setActiveWorkspace(workspace.id);
-                    }}
-                    onDoubleClick={() => {
-                      startRenaming(workspace.id, workspace.name);
-                    }}
-                  >
-                    <ChevronRight size={14} className="rotate-90 text-subtle" />
-                    <Folder size={14} className={isActive ? 'text-brand' : 'text-subtle'} />
-                    <span className="truncate">{workspace.name}</span>
-                  </button>
+                  <>
+                    <button
+                      aria-expanded={isExpanded}
+                      aria-label={`${isExpanded ? 'Collapse' : 'Expand'} ${workspace.name}`}
+                      className="flex size-5 shrink-0 items-center justify-center rounded text-subtle hover:bg-raised hover:text-foreground"
+                      type="button"
+                      onClick={() => {
+                        toggleWorkspaceCollapsed(workspace.id);
+                      }}
+                    >
+                      <ChevronRight
+                        size={14}
+                        className={`transition-transform ${isExpanded ? 'rotate-90' : ''}`}
+                      />
+                    </button>
+                    <button
+                      aria-current={isActive ? 'page' : undefined}
+                      className={`flex min-w-0 flex-1 items-center gap-1 rounded-md py-1 pl-1 pr-2 text-left text-sm ${
+                        isActive ? 'bg-raised text-foreground' : 'text-muted hover:bg-raised/50'
+                      }`}
+                      type="button"
+                      onClick={() => {
+                        setActiveWorkspace(workspace.id);
+                      }}
+                      onDoubleClick={() => {
+                        startRenaming(workspace.id, workspace.name);
+                      }}
+                    >
+                      <Folder size={14} className={isActive ? 'text-brand' : 'text-subtle'} />
+                      <span className="truncate">{workspace.name}</span>
+                    </button>
+                  </>
                 )}
                 <button
                   aria-label={`Delete ${workspace.name}`}
@@ -252,60 +303,65 @@ export function WorkspacesView(): React.JSX.Element {
                   <X size={12} />
                 </button>
               </div>
-              <div className="space-y-0.5">
-                {workspace.tabs.map((tab) => {
-                  const paneCount = countPaneLeaves(tab.layout);
-                  const isActiveTab = isActive && tab.id === workspace.activeTabId;
-                  const label = `${tab.name} (${formatPaneCount(paneCount)})`;
-                  const paneOrder = flattenLayout(tab.layout).panes;
+              {isExpanded && (
+                <div className="space-y-0.5">
+                  {workspace.tabs.map((tab) => {
+                    const paneCount = countPaneLeaves(tab.layout);
+                    const isActiveTab = isActive && tab.id === workspace.activeTabId;
+                    const label = `${tab.name} (${formatPaneCount(paneCount)})`;
+                    const paneOrder = flattenLayout(tab.layout).panes;
 
-                  return (
-                    <div key={tab.id} className="space-y-0.5">
-                      <div className="pl-3">
-                        <button
-                          aria-current={isActiveTab ? 'page' : undefined}
-                          className={`flex w-full items-center gap-1 rounded-md py-1 pl-3 pr-2 text-left text-sm ${
-                            isActiveTab
-                              ? 'bg-tab-active text-foreground'
-                              : 'text-muted hover:bg-raised/50'
-                          }`}
-                          type="button"
-                          onClick={() => {
-                            selectWorkspaceTab(workspace.id, tab.id);
-                          }}
-                        >
-                          <Hash size={14} className={isActiveTab ? 'text-brand' : 'text-subtle'} />
-                          <span className="truncate">{label}</span>
-                        </button>
-                      </div>
-                      <div className="space-y-0.5">
-                        {paneOrder.map(({ paneId }) => {
-                          const pane = workspace.panes.find(
-                            (currentPane) => currentPane.id === paneId,
-                          );
-                          if (!pane) {
-                            return null;
-                          }
-
-                          const info = pane.ptyId ? paneInfosByPtyId[pane.ptyId] : undefined;
-                          const isActivePane = isActiveTab && pane.id === tab.activePaneId;
-                          return (
-                            <PaneSummary
-                              key={pane.id}
-                              info={info}
-                              isActivePane={isActivePane}
-                              pane={pane}
-                              onClick={() => {
-                                selectWorkspacePane(workspace.id, tab.id, pane.id);
-                              }}
+                    return (
+                      <div key={tab.id} className="space-y-0.5">
+                        <div className="pl-3">
+                          <button
+                            aria-current={isActiveTab ? 'page' : undefined}
+                            className={`flex w-full items-center gap-1 rounded-md py-1 pl-3 pr-2 text-left text-sm ${
+                              isActiveTab
+                                ? 'bg-tab-active text-foreground'
+                                : 'text-muted hover:bg-raised/50'
+                            }`}
+                            type="button"
+                            onClick={() => {
+                              selectWorkspaceTab(workspace.id, tab.id);
+                            }}
+                          >
+                            <Hash
+                              size={14}
+                              className={isActiveTab ? 'text-brand' : 'text-subtle'}
                             />
-                          );
-                        })}
+                            <span className="truncate">{label}</span>
+                          </button>
+                        </div>
+                        <div className="space-y-0.5">
+                          {paneOrder.map(({ paneId }) => {
+                            const pane = workspace.panes.find(
+                              (currentPane) => currentPane.id === paneId,
+                            );
+                            if (!pane) {
+                              return null;
+                            }
+
+                            const info = pane.ptyId ? paneInfosByPtyId[pane.ptyId] : undefined;
+                            const isActivePane = isActiveTab && pane.id === tab.activePaneId;
+                            return (
+                              <PaneSummary
+                                key={pane.id}
+                                info={info}
+                                isActivePane={isActivePane}
+                                pane={pane}
+                                onClick={() => {
+                                  selectWorkspacePane(workspace.id, tab.id, pane.id);
+                                }}
+                              />
+                            );
+                          })}
+                        </div>
                       </div>
-                    </div>
-                  );
-                })}
-              </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           );
         })}

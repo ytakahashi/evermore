@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Workspace } from '../../../../shared/types';
 import { usePaneInfoStore } from '../../stores/paneInfoStore';
@@ -202,6 +202,119 @@ describe('WorkspacesView', () => {
     // Then: the running command appears once as the summary label (cwd remains in the detail row).
     expect(screen.getByText('pnpm run dev')).toBeInTheDocument();
     expect(screen.getByLabelText('running')).toBeInTheDocument();
+  });
+
+  it('collapses and expands workspace contents without persisting sidebar state', () => {
+    // Given: the sidebar is rendered with all workspaces expanded by default.
+    render(<WorkspacesView />);
+    expect(screen.getByRole('button', { name: 'Collapse Project' })).toHaveAttribute(
+      'aria-expanded',
+      'true',
+    );
+    expect(screen.getByRole('button', { name: 'server (2 panes)' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'logs (1 pane)' })).toBeInTheDocument();
+
+    // When: the user collapses the Project workspace from the chevron button.
+    fireEvent.click(screen.getByRole('button', { name: 'Collapse Project' }));
+
+    // Then: the workspace remains selectable, but its tabs and panes are hidden locally.
+    expect(screen.getByRole('button', { name: 'Project' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Expand Project' })).toHaveAttribute(
+      'aria-expanded',
+      'false',
+    );
+    expect(screen.queryByRole('button', { name: 'server (2 panes)' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'logs (1 pane)' })).not.toBeInTheDocument();
+    expect(screen.queryByText('.../project/logs')).not.toBeInTheDocument();
+    expect(useWorkspaceStore.getState().activeWorkspaceId).toBe('workspace-1');
+    expect(workspaceUpdate).not.toHaveBeenCalled();
+
+    // When: the user expands the same workspace again.
+    fireEvent.click(screen.getByRole('button', { name: 'Expand Project' }));
+
+    // Then: the tab and pane rows become visible again.
+    expect(screen.getByRole('button', { name: 'Collapse Project' })).toHaveAttribute(
+      'aria-expanded',
+      'true',
+    );
+    expect(screen.getByRole('button', { name: 'server (2 panes)' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'logs (1 pane)' })).toBeInTheDocument();
+  });
+
+  it('keeps other workspaces expanded when one workspace is collapsed', () => {
+    // Given: the sidebar shows multiple expanded workspaces.
+    render(<WorkspacesView />);
+
+    // When: the user collapses only the Project workspace.
+    fireEvent.click(screen.getByRole('button', { name: 'Collapse Project' }));
+
+    // Then: Project contents are hidden, while Default contents remain visible.
+    expect(screen.getByRole('button', { name: 'zsh (1 pane)' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'server (2 panes)' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'logs (1 pane)' })).not.toBeInTheDocument();
+  });
+
+  it('preserves collapsed state when a workspace is renamed', async () => {
+    // Given: the Project workspace is collapsed.
+    render(<WorkspacesView />);
+    fireEvent.click(screen.getByRole('button', { name: 'Collapse Project' }));
+
+    // When: the collapsed workspace is renamed.
+    fireEvent.doubleClick(screen.getByRole('button', { name: 'Project' }));
+    const input = screen.getByRole('textbox', { name: 'Rename Project' });
+    fireEvent.change(input, { target: { value: 'Renamed Project' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+    await vi.advanceTimersByTimeAsync(300);
+
+    // Then: the same workspace remains collapsed under its new name.
+    expect(screen.getByRole('button', { name: 'Expand Renamed Project' })).toHaveAttribute(
+      'aria-expanded',
+      'false',
+    );
+    expect(screen.queryByRole('button', { name: 'server (2 panes)' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'logs (1 pane)' })).not.toBeInTheDocument();
+  });
+
+  it('keeps the active workspace indicator when the active workspace is collapsed', () => {
+    // Given: the active workspace is visible and expanded.
+    render(<WorkspacesView />);
+    expect(screen.getByRole('button', { name: 'Default' })).toHaveAttribute('aria-current', 'page');
+
+    // When: the user collapses the active workspace.
+    fireEvent.click(screen.getByRole('button', { name: 'Collapse Default' }));
+
+    // Then: the workspace row remains active even though its contents are hidden.
+    expect(screen.getByRole('button', { name: 'Default' })).toHaveAttribute('aria-current', 'page');
+    expect(screen.queryByRole('button', { name: 'zsh (1 pane)' })).not.toBeInTheDocument();
+  });
+
+  it('forgets collapsed state when a workspace is deleted', async () => {
+    // Given: a workspace was collapsed in the current sidebar session.
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    render(<WorkspacesView />);
+    fireEvent.click(screen.getByRole('button', { name: 'Collapse Project' }));
+    expect(screen.getByRole('button', { name: 'Expand Project' })).toHaveAttribute(
+      'aria-expanded',
+      'false',
+    );
+
+    // When: that workspace is deleted from the sidebar.
+    fireEvent.click(screen.getByRole('button', { name: 'Delete Project' }));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(screen.queryByRole('button', { name: 'Project' })).not.toBeInTheDocument();
+
+    // Then: if the same id appears again later, it starts from the default expanded state.
+    act(() => {
+      useWorkspaceStore.setState({
+        workspaces: [workspace1, workspace2],
+        activeWorkspaceId: workspace1.id,
+      });
+    });
+    expect(screen.getByRole('button', { name: 'Collapse Project' })).toHaveAttribute(
+      'aria-expanded',
+      'true',
+    );
+    expect(screen.getByRole('button', { name: 'server (2 panes)' })).toBeInTheDocument();
   });
 
   it('selects the corresponding workspace and tab from the sidebar', async () => {
