@@ -302,6 +302,19 @@ describe('useTerminal', () => {
     });
   });
 
+  it('activates Unicode 11 width rules for xterm', async () => {
+    // Given: xterm.js and the Unicode addon are mocked.
+
+    // When: a terminal pane mounts.
+    render(<TestTerminal />);
+    await waitFor(() => {
+      expect(ptyApi.create).toHaveBeenCalled();
+    });
+
+    // Then: xterm uses Unicode 11 cell-width rules for CJK and other wide characters.
+    expect(xtermMock.terminalInstances[0]?.unicode.activeVersion).toBe('11');
+  });
+
   it('applies terminal setting changes to the existing xterm instance without recreating the PTY', async () => {
     // Given: a terminal pane has already created its PTY.
     render(<TestTerminal />);
