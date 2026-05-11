@@ -288,6 +288,36 @@ describe('WorkspacesView', () => {
     expect(screen.queryByRole('button', { name: 'zsh (1 pane)' })).not.toBeInTheDocument();
   });
 
+  it('creates a tab in a collapsed workspace and expands it', async () => {
+    // Given: the target workspace is collapsed in the sidebar.
+    render(<WorkspacesView />);
+    fireEvent.click(screen.getByRole('button', { name: 'Collapse Project' }));
+    expect(screen.getByRole('button', { name: 'Expand Project' })).toHaveAttribute(
+      'aria-expanded',
+      'false',
+    );
+
+    // When: the user creates a tab from the collapsed workspace row.
+    fireEvent.click(screen.getByRole('button', { name: 'New tab in Project' }));
+    await vi.advanceTimersByTimeAsync(300);
+
+    // Then: the workspace expands and the newly created tab becomes active.
+    const activeWorkspace = useWorkspaceStore
+      .getState()
+      .workspaces.find((workspace) => workspace.id === 'workspace-2');
+    expect(screen.getByRole('button', { name: 'Collapse Project' })).toHaveAttribute(
+      'aria-expanded',
+      'true',
+    );
+    expect(screen.getByRole('button', { name: 'project (1 pane)' })).toHaveAttribute(
+      'aria-current',
+      'page',
+    );
+    expect(useWorkspaceStore.getState().activeWorkspaceId).toBe('workspace-2');
+    expect(activeWorkspace?.tabs).toHaveLength(3);
+    expect(activeWorkspace?.activeTabId).toBe(activeWorkspace?.tabs[2]?.id);
+  });
+
   it('forgets collapsed state when a workspace is deleted', async () => {
     // Given: a workspace was collapsed in the current sidebar session.
     vi.spyOn(window, 'confirm').mockReturnValue(true);
@@ -369,6 +399,34 @@ describe('WorkspacesView', () => {
       expect.objectContaining({
         id: 'workspace-2',
         activeTabId: 'workspace-2-tab-2',
+      }),
+    );
+  });
+
+  it('closes a tab from the sidebar without switching inactive workspaces', async () => {
+    // Given: the sidebar shows an inactive workspace with multiple tabs.
+    render(<WorkspacesView />);
+
+    // When: the user closes one of that workspace's tabs from the sidebar.
+    fireEvent.click(screen.getByRole('button', { name: 'Close logs' }));
+    await vi.advanceTimersByTimeAsync(300);
+
+    // Then: the tab and its pane are removed while the active workspace stays unchanged.
+    const projectWorkspace = useWorkspaceStore
+      .getState()
+      .workspaces.find((workspace) => workspace.id === 'workspace-2');
+    expect(screen.queryByRole('button', { name: 'logs (1 pane)' })).not.toBeInTheDocument();
+    expect(screen.queryByText('.../project/logs')).not.toBeInTheDocument();
+    expect(useWorkspaceStore.getState().activeWorkspaceId).toBe('workspace-1');
+    expect(projectWorkspace?.tabs.map((tab) => tab.id)).toEqual(['workspace-2-tab-1']);
+    expect(projectWorkspace?.panes.map((pane) => pane.id)).toEqual([
+      'workspace-2-pane-1',
+      'workspace-2-pane-2',
+    ]);
+    expect(workspaceUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 'workspace-2',
+        tabs: [expect.objectContaining({ id: 'workspace-2-tab-1' })],
       }),
     );
   });

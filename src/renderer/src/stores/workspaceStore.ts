@@ -30,12 +30,14 @@ export interface WorkspaceStoreState {
   deleteWorkspace: (id: string) => Promise<void>;
   renameWorkspace: (id: string, name: string) => void;
   addTab: () => void;
+  addWorkspaceTab: (workspaceId: string) => void;
   renameTab: (tabId: string, name: string) => void;
   openSshHostTab: (alias: string) => void;
   selectWorkspacePane: (workspaceId: string, tabId: string, paneId: string) => void;
   selectWorkspaceTab: (workspaceId: string, tabId: string) => void;
   selectTab: (tabId: string) => void;
   closeTab: (tabId: string) => void;
+  closeWorkspaceTab: (workspaceId: string, tabId: string) => void;
   setActivePane: (paneId: string) => void;
   setPanePtyId: (paneId: string, ptyId: string | null) => void;
   splitPane: (paneId: string, direction: SplitDirection) => void;
@@ -194,6 +196,14 @@ function selectNextTabIdAfterClose(workspace: Workspace, closingTabId: string): 
   const remainingTabs = workspace.tabs.filter((tab) => tab.id !== closingTabId);
 
   return remainingTabs[Math.min(closingIndex, remainingTabs.length - 1)]?.id ?? null;
+}
+
+function findWorkspaceActivePane(workspace: Workspace): Pane | null {
+  const activeTab = workspace.tabs.find((tab) => tab.id === workspace.activeTabId);
+  const activePaneId =
+    activeTab?.activePaneId ?? (activeTab ? findFirstPaneId(activeTab.layout) : null);
+
+  return workspace.panes.find((pane) => pane.id === activePaneId) ?? null;
 }
 
 function shellQuote(value: string): string {
@@ -398,13 +408,23 @@ export function createWorkspaceStore(
         get().updateWorkspace({ ...workspace, name: trimmedName });
       },
       addTab: (): void => {
-        const state = get();
-        const workspace = selectActiveWorkspace(state);
-        const activePane = selectActivePane(state);
+        const workspace = selectActiveWorkspace(get());
         if (!workspace) {
           return;
         }
 
+        get().addWorkspaceTab(workspace.id);
+      },
+      addWorkspaceTab: (workspaceId: string): void => {
+        const shouldSwitchWorkspace = get().activeWorkspaceId !== workspaceId;
+        const workspace = get().workspaces.find(
+          (currentWorkspace) => currentWorkspace.id === workspaceId,
+        );
+        if (!workspace) {
+          return;
+        }
+
+        const activePane = findWorkspaceActivePane(workspace);
         const cwd = activePane?.cwd ?? workspace.rootPath;
         const tabName = getPathBasename(cwd, { emptyFallback: 'Tab', rootFallback: 'Tab' });
         const { pane, tab } = createTabWithPane(createStoreId, { cwd, tabName });
@@ -416,6 +436,10 @@ export function createWorkspaceStore(
         };
 
         get().updateWorkspace(updatedWorkspace);
+        if (shouldSwitchWorkspace) {
+          set({ activeWorkspaceId: workspace.id });
+          void getWorkspaceApi().setActiveWorkspaceId(workspace.id);
+        }
       },
       renameTab: (tabId: string, name: string): void => {
         const workspace = selectActiveWorkspace(get());
@@ -564,6 +588,16 @@ export function createWorkspaceStore(
       },
       closeTab: (tabId: string): void => {
         const workspace = selectActiveWorkspace(get());
+        if (!workspace) {
+          return;
+        }
+
+        get().closeWorkspaceTab(workspace.id, tabId);
+      },
+      closeWorkspaceTab: (workspaceId: string, tabId: string): void => {
+        const workspace = get().workspaces.find(
+          (currentWorkspace) => currentWorkspace.id === workspaceId,
+        );
         if (!workspace || workspace.tabs.length <= 1) {
           return;
         }

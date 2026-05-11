@@ -327,6 +327,54 @@ describe('workspaceStore', () => {
     });
   });
 
+  it('adds a tab to an inactive workspace and makes that workspace active', async () => {
+    // Given: two workspaces are loaded and the first workspace is active.
+    vi.useFakeTimers();
+    const workspace2 = createWorkspace('workspace-2', '/Users/tester/project');
+    const ids = ['tab-2', 'pane-2'];
+    workspaceApi.list = vi.fn(() =>
+      Promise.resolve({ workspaces: [workspace, workspace2], activeWorkspaceId: 'workspace-1' }),
+    );
+    const useStore = createWorkspaceStore({
+      createId: () => ids.shift() ?? 'fallback-id',
+      workspaceApi,
+      debounceMs: 50,
+      now: () => now,
+    });
+    await useStore.getState().loadWorkspaces();
+
+    // When: a tab is added to the inactive workspace from the sidebar.
+    useStore.getState().addWorkspaceTab('workspace-2');
+    await vi.advanceTimersByTimeAsync(50);
+    const updatedWorkspace = useStore
+      .getState()
+      .workspaces.find((currentWorkspace) => currentWorkspace.id === 'workspace-2');
+
+    // Then: the new tab is active and the target workspace becomes the active workspace.
+    expect(useStore.getState().activeWorkspaceId).toBe('workspace-2');
+    expect(updatedWorkspace?.activeTabId).toBe('tab-2');
+    expect(updatedWorkspace?.tabs[1]).toEqual({
+      id: 'tab-2',
+      name: 'project',
+      layout: {
+        type: 'leaf',
+        paneId: 'pane-2',
+      },
+      activePaneId: 'pane-2',
+    });
+    expect(updatedWorkspace?.panes[1]).toEqual({
+      id: 'pane-2',
+      cwd: '/Users/tester/project',
+    });
+    expect(workspaceApi.setActiveWorkspaceId).toHaveBeenCalledWith('workspace-2');
+    expect(workspaceApi.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 'workspace-2',
+        activeTabId: 'tab-2',
+      }),
+    );
+  });
+
   it('opens an SSH host in a new active tab with a quoted initial command', async () => {
     // Given: a loaded workspace with deterministic tab and pane ids.
     vi.useFakeTimers();
@@ -741,6 +789,63 @@ describe('workspaceStore', () => {
     expect(updatedWorkspace?.updatedAt).toBe(now);
     expect(updatedWorkspace?.tabs.map((tab) => tab.id)).toEqual(['workspace-1-tab-1']);
     expect(updatedWorkspace?.panes.map((pane) => pane.id)).toEqual(['workspace-1-pane-1']);
+  });
+
+  it('closes a tab in an inactive workspace without switching workspaces', async () => {
+    // Given: the second workspace has two tabs and the first workspace is active.
+    vi.useFakeTimers();
+    const workspace2 = createWorkspace('workspace-2', '/Users/tester/project');
+    const secondWorkspaceWithTabs: Workspace = {
+      ...workspace2,
+      tabs: [
+        workspace2.tabs[0]!,
+        {
+          id: 'workspace-2-tab-2',
+          name: 'logs',
+          layout: {
+            type: 'leaf',
+            paneId: 'workspace-2-pane-2',
+          },
+          activePaneId: 'workspace-2-pane-2',
+        },
+      ],
+      panes: [
+        workspace2.panes[0]!,
+        {
+          id: 'workspace-2-pane-2',
+          cwd: '/Users/tester/project/logs',
+        },
+      ],
+      activeTabId: 'workspace-2-tab-1',
+    };
+    workspaceApi.list = vi.fn(() =>
+      Promise.resolve({
+        workspaces: [workspace, secondWorkspaceWithTabs],
+        activeWorkspaceId: 'workspace-1',
+      }),
+    );
+    const useStore = createWorkspaceStore({ workspaceApi, debounceMs: 50, now: () => now });
+    await useStore.getState().loadWorkspaces();
+
+    // When: the inactive workspace's active tab is closed by workspace/tab id.
+    useStore.getState().closeWorkspaceTab('workspace-2', 'workspace-2-tab-1');
+    await vi.advanceTimersByTimeAsync(50);
+    const updatedWorkspace = useStore
+      .getState()
+      .workspaces.find((currentWorkspace) => currentWorkspace.id === 'workspace-2');
+
+    // Then: that workspace selects its remaining tab while the app stays on workspace-1.
+    expect(useStore.getState().activeWorkspaceId).toBe('workspace-1');
+    expect(updatedWorkspace?.activeTabId).toBe('workspace-2-tab-2');
+    expect(updatedWorkspace?.tabs.map((tab) => tab.id)).toEqual(['workspace-2-tab-2']);
+    expect(updatedWorkspace?.panes.map((pane) => pane.id)).toEqual(['workspace-2-pane-2']);
+    expect(workspaceApi.setActiveWorkspaceId).not.toHaveBeenCalled();
+    expect(workspaceApi.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 'workspace-2',
+        activeTabId: 'workspace-2-tab-2',
+      }),
+    );
   });
 
   it('splits a pane and makes the new pane active', async () => {
