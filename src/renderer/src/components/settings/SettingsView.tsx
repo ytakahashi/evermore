@@ -4,10 +4,17 @@ import { useUiStore } from '../../stores/uiStore';
 import { AboutSection } from './sections/AboutSection';
 import { ApplicationSection } from './sections/ApplicationSection';
 import { PaneInfoSection } from './sections/PaneInfoSection';
+import { RecommendedSetupSection } from './sections/RecommendedSetupSection';
 import { ShortcutsSection } from './sections/ShortcutsSection';
 import { TerminalSection } from './sections/TerminalSection';
 
-type SettingsSectionId = 'terminal' | 'paneInfo' | 'shortcuts' | 'application' | 'about';
+type SettingsSectionId =
+  | 'terminal'
+  | 'paneInfo'
+  | 'shortcuts'
+  | 'application'
+  | 'recommendedSetup'
+  | 'about';
 
 interface SectionDefinition {
   id: SettingsSectionId;
@@ -20,6 +27,7 @@ const SECTIONS: readonly SectionDefinition[] = [
   { id: 'paneInfo', label: 'Pane info', Component: PaneInfoSection },
   { id: 'shortcuts', label: 'Shortcuts', Component: ShortcutsSection },
   { id: 'application', label: 'Application', Component: ApplicationSection },
+  { id: 'recommendedSetup', label: 'Recommended setup', Component: RecommendedSetupSection },
   { id: 'about', label: 'About', Component: AboutSection },
 ];
 
