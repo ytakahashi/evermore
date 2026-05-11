@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, type MutableRefObject } from 'react';
 import { FitAddon } from '@xterm/addon-fit';
+import { Unicode11Addon } from '@xterm/addon-unicode11';
 import { WebLinksAddon } from '@xterm/addon-web-links';
 import { Terminal } from '@xterm/xterm';
 import { useResizeObserver } from '../../hooks/useResizeObserver';
@@ -8,7 +9,6 @@ import { useSettingsStore } from '../../stores/settingsStore';
 import { parseOsc7Cwd } from './osc7';
 import { terminalTheme } from './theme';
 
-const PTY_COLUMNS_SAFETY_MARGIN = 3;
 const BACKSPACE = '\x7f';
 const CTRL_C = '\x03';
 const CTRL_U = '\x15';
@@ -112,10 +112,10 @@ export function useTerminal(options: UseTerminalOptions): UseTerminalResult {
     if (ptyId) {
       // Use xterm's committed size after `fit()`. Calling `proposeDimensions()` again can observe
       // post-fit rounded cell metrics and produce a value that differs from the actual viewport.
-      // The PTY is kept slightly narrower than xterm so TUI apps wrap before DOM renderer
-      // overhang or CJK string-width differences can clip the rightmost cells.
-      const ptyCols = Math.max(1, terminal.cols - PTY_COLUMNS_SAFETY_MARGIN);
-      void window.api.pty.resize(ptyId, ptyCols, terminal.rows);
+      // CJK character width is handled by Unicode11Addon, so the PTY and xterm use the same column
+      // count. Mismatching them would cause shell line-wrap and cursor position calculations to
+      // diverge from xterm's display, breaking long commands and tab completion.
+      void window.api.pty.resize(ptyId, terminal.cols, terminal.rows);
     }
   }, []);
 
@@ -138,6 +138,7 @@ export function useTerminal(options: UseTerminalOptions): UseTerminalResult {
       theme: terminalTheme,
     });
     const fitAddon = new FitAddon();
+    const unicode11Addon = new Unicode11Addon();
 
     // xterm writes ESC to the PTY for both `Escape` and `Cmd+Escape` because its keyboard
     // evaluation ignores Cmd for special keys. Swallowing this chord here keeps pane fullscreen's
@@ -150,8 +151,12 @@ export function useTerminal(options: UseTerminalOptions): UseTerminalResult {
       return true;
     });
     terminal.loadAddon(fitAddon);
+    terminal.loadAddon(unicode11Addon);
     terminal.loadAddon(new WebLinksAddon());
     terminal.open(container);
+    // Activate Unicode 11 so CJK and other wide characters are measured as 2 columns. This must be
+    // set after `open()` because the terminal's unicode service is initialised during that call.
+    terminal.unicode.activeVersion = '11';
     terminalRef.current = terminal;
     fitAddonRef.current = fitAddon;
     fitAndResize();

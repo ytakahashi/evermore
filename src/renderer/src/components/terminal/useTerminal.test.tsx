@@ -41,6 +41,7 @@ const xtermMock = vi.hoisted(() => {
         return this.osc7Disposable;
       }),
     };
+    public readonly unicode = { activeVersion: '6' };
     private customKeyEventHandler: ((event: KeyboardEvent) => boolean) | null = null;
     private inputListener: ((data: string) => void) | null = null;
     private osc7Listener: ((data: string) => boolean) | null = null;
@@ -112,6 +113,10 @@ vi.mock('@xterm/addon-fit', () => ({
 
 vi.mock('@xterm/addon-web-links', () => ({
   WebLinksAddon: xtermMock.MockWebLinksAddon,
+}));
+
+vi.mock('@xterm/addon-unicode11', () => ({
+  Unicode11Addon: class MockUnicode11Addon {},
 }));
 
 interface PtyApiMock {
@@ -263,12 +268,13 @@ describe('useTerminal', () => {
     render(<TestTerminal />);
 
     // Then: the hook creates a PTY for the pane and syncs xterm dimensions to main.
+    // 132 cols and 43 rows match MockTerminal.cols/rows — the PTY receives the xterm size as-is.
     await waitFor(() => {
       expect(ptyApi.create).toHaveBeenCalledWith({
         cwd: '/Users/tester/project',
         shell: '/bin/zsh',
       });
-      expect(ptyApi.resize).toHaveBeenCalledWith('pty-1', 129, 43);
+      expect(ptyApi.resize).toHaveBeenCalledWith('pty-1', 132, 43);
     });
     expect(xtermMock.terminalInstances[0]?.focus).toHaveBeenCalled();
     expect(paneInfoApi.notifyCwd).toHaveBeenCalledWith('pty-1', '/Users/tester/project');
@@ -294,6 +300,19 @@ describe('useTerminal', () => {
       cursorStyle: 'underline',
       macOptionIsMeta: false,
     });
+  });
+
+  it('activates Unicode 11 width rules for xterm', async () => {
+    // Given: xterm.js and the Unicode addon are mocked.
+
+    // When: a terminal pane mounts.
+    render(<TestTerminal />);
+    await waitFor(() => {
+      expect(ptyApi.create).toHaveBeenCalled();
+    });
+
+    // Then: xterm uses Unicode 11 cell-width rules for CJK and other wide characters.
+    expect(xtermMock.terminalInstances[0]?.unicode.activeVersion).toBe('11');
   });
 
   it('applies terminal setting changes to the existing xterm instance without recreating the PTY', async () => {
@@ -542,9 +561,10 @@ describe('useTerminal', () => {
 
   it('resizes the PTY when the observed terminal container changes size', async () => {
     // Given: a mounted terminal with a current PTY id.
+    // 132 cols and 43 rows match MockTerminal.cols/rows — the PTY receives the xterm size as-is.
     render(<TestTerminal />);
     await waitFor(() => {
-      expect(ptyApi.resize).toHaveBeenCalledWith('pty-1', 129, 43);
+      expect(ptyApi.resize).toHaveBeenCalledWith('pty-1', 132, 43);
     });
     ptyApi.resize.mockClear();
 
@@ -552,7 +572,7 @@ describe('useTerminal', () => {
     resizeObserverCallback?.();
 
     // Then: the latest xterm dimensions are sent to the main PTY.
-    expect(ptyApi.resize).toHaveBeenCalledWith('pty-1', 129, 43);
+    expect(ptyApi.resize).toHaveBeenCalledWith('pty-1', 132, 43);
   });
 
   it('does not recreate the PTY when cwd props change after mount', async () => {
