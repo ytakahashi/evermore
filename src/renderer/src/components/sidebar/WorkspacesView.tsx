@@ -70,6 +70,8 @@ export function WorkspacesView(): React.JSX.Element {
   const workspaces = useWorkspaceStore((state) => state.workspaces);
   const paneInfosByPtyId = usePaneInfoStore((state) => state.infosByPtyId);
   const activeWorkspaceId = useWorkspaceStore((state) => state.activeWorkspaceId);
+  const addWorkspaceTab = useWorkspaceStore((state) => state.addWorkspaceTab);
+  const closeWorkspaceTab = useWorkspaceStore((state) => state.closeWorkspaceTab);
   const createWorkspace = useWorkspaceStore((state) => state.createWorkspace);
   const deleteWorkspace = useWorkspaceStore((state) => state.deleteWorkspace);
   const renameWorkspace = useWorkspaceStore((state) => state.renameWorkspace);
@@ -208,6 +210,15 @@ export function WorkspacesView(): React.JSX.Element {
     void deleteWorkspace(workspaceId);
   };
 
+  const handleCreateWorkspaceTab = (workspaceId: string): void => {
+    addWorkspaceTab(workspaceId);
+    setCollapsedWorkspaceIds((current) => {
+      const next = new Set(current);
+      next.delete(workspaceId);
+      return next;
+    });
+  };
+
   const toggleWorkspaceCollapsed = (workspaceId: string): void => {
     setCollapsedWorkspaceIds((current) => {
       const next = new Set(current);
@@ -289,6 +300,18 @@ export function WorkspacesView(): React.JSX.Element {
                   </>
                 )}
                 <button
+                  aria-label={`New tab in ${workspace.name}`}
+                  className="invisible flex size-5 shrink-0 items-center justify-center rounded text-subtle hover:bg-raised hover:text-foreground disabled:cursor-default disabled:opacity-40 group-hover:visible"
+                  disabled={isEditing}
+                  title="New tab"
+                  type="button"
+                  onClick={() => {
+                    handleCreateWorkspaceTab(workspace.id);
+                  }}
+                >
+                  <Plus size={12} />
+                </button>
+                <button
                   aria-label={`Delete ${workspace.name}`}
                   className="invisible flex size-5 shrink-0 items-center justify-center rounded text-subtle hover:bg-raised hover:text-danger disabled:cursor-default disabled:opacity-40 group-hover:visible"
                   disabled={!canDelete || isEditing}
@@ -313,25 +336,46 @@ export function WorkspacesView(): React.JSX.Element {
 
                     return (
                       <div key={tab.id} className="space-y-0.5">
-                        <div className="pl-3">
-                          <button
-                            aria-current={isActiveTab ? 'page' : undefined}
-                            className={`flex w-full items-center gap-1 rounded-md py-1 pl-3 pr-2 text-left text-sm ${
-                              isActiveTab
-                                ? 'bg-tab-active text-foreground'
-                                : 'text-muted hover:bg-raised/50'
-                            }`}
-                            type="button"
-                            onClick={() => {
-                              selectWorkspaceTab(workspace.id, tab.id);
-                            }}
-                          >
-                            <Hash
-                              size={14}
-                              className={isActiveTab ? 'text-brand' : 'text-subtle'}
-                            />
-                            <span className="truncate">{label}</span>
-                          </button>
+                        <div className="pl-6">
+                          <div className="group flex w-full items-center gap-1">
+                            <button
+                              aria-current={isActiveTab ? 'page' : undefined}
+                              className={`flex min-w-0 flex-1 items-center gap-1 rounded-md py-1 pl-3 pr-2 text-left text-sm ${
+                                isActiveTab
+                                  ? 'bg-tab-active text-foreground'
+                                  : 'text-muted hover:bg-raised/50'
+                              }`}
+                              type="button"
+                              onClick={() => {
+                                selectWorkspaceTab(workspace.id, tab.id);
+                              }}
+                            >
+                              <Hash
+                                size={14}
+                                className={isActiveTab ? 'text-brand' : 'text-subtle'}
+                              />
+                              <span className="truncate">{label}</span>
+                            </button>
+                            <button
+                              aria-label={`Close ${tab.name}`}
+                              className="invisible flex size-5 shrink-0 items-center justify-center rounded text-subtle hover:bg-raised hover:text-danger disabled:cursor-default disabled:opacity-40 group-hover:visible"
+                              // `closeWorkspaceTab` is the single source of truth for the
+                              // "at least one tab" invariant; this disabled guard is a UI hint to
+                              // avoid showing a clickable button that would silently no-op.
+                              disabled={workspace.tabs.length <= 1}
+                              title={
+                                workspace.tabs.length > 1
+                                  ? `Close ${tab.name}`
+                                  : 'At least one tab is required'
+                              }
+                              type="button"
+                              onClick={() => {
+                                closeWorkspaceTab(workspace.id, tab.id);
+                              }}
+                            >
+                              <X size={12} />
+                            </button>
+                          </div>
                         </div>
                         <div className="space-y-0.5">
                           {paneOrder.map(({ paneId }) => {
