@@ -38,7 +38,7 @@ describe('RecommendedSetupSection', () => {
     render(<RecommendedSetupSection />);
 
     // When: the user copies the SSH config snippet.
-    fireEvent.click(screen.getByTitle('Copy SSH tunnel reliability'));
+    fireEvent.click(screen.getByRole('button', { name: 'Copy SSH tunnel reliability snippet' }));
     await act(async () => {
       await Promise.resolve();
     });
@@ -57,7 +57,7 @@ describe('RecommendedSetupSection', () => {
     render(<RecommendedSetupSection />);
 
     // When: the user tries to copy a snippet.
-    fireEvent.click(screen.getByTitle('Copy OSC 7 cwd tracking'));
+    fireEvent.click(screen.getByRole('button', { name: 'Copy OSC 7 cwd tracking snippet' }));
 
     // Then: the copy failure is surfaced without persisting any setting.
     expect(screen.getByText('Copy failed')).toBeInTheDocument();

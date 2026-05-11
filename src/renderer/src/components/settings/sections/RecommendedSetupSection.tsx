@@ -12,6 +12,8 @@ interface SetupSnippet {
 
 type CopyState = 'idle' | 'copied' | 'error';
 
+// The zsh snippet walks PWD byte-by-byte so non-ASCII paths are encoded as UTF-8
+// percent bytes for `decodeURIComponent`, not as Unicode codepoints.
 const SETUP_SNIPPETS: readonly SetupSnippet[] = [
   {
     id: 'osc7',
@@ -19,14 +21,24 @@ const SETUP_SNIPPETS: readonly SetupSnippet[] = [
     target: '~/.zshrc',
     language: 'sh',
     description:
-      'Emits the current directory when your shell starts and whenever it changes, so Evermore can keep pane cwd metadata in sync.',
+      'Emits the current directory when your shell starts and whenever it changes, so Evermore can keep pane cwd metadata in sync. Targets zsh; bash/fish users need an equivalent PROMPT_COMMAND / pwd hook that prints the same OSC 7 sequence.',
     content: `function _evermore_osc7() {
-  printf '\\033]7;file://%s%s\\033\\\\' "$HOST" "\${PWD// /%20}"
+  emulate -L zsh
+  setopt no_multibyte
+  local i ch out=""
+  for (( i = 1; i <= \${#PWD}; i++ )); do
+    ch=$PWD[i]
+    case $ch in
+      [a-zA-Z0-9/._~-]) out+=$ch ;;
+      *) out+=$(printf '%%%02X' "'$ch") ;;
+    esac
+  done
+  printf '\\e]7;file://%s%s\\e\\\\' "$HOST" "$out"
 }
 
 autoload -Uz add-zsh-hook
 add-zsh-hook chpwd _evermore_osc7
-_evermore_osc7`,
+[[ -o interactive ]] && _evermore_osc7`,
   },
   {
     id: 'ssh-config',
@@ -50,7 +62,7 @@ interface CopyableSnippetProps {
 
 function CopyableSnippet({ copyState, onCopy, snippet }: CopyableSnippetProps): React.JSX.Element {
   return (
-    <article className="border-b border-border-subtle py-4">
+    <article className="border-b border-border-subtle py-4 last:border-b-0">
       <div className="mb-3">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
@@ -71,7 +83,7 @@ function CopyableSnippet({ copyState, onCopy, snippet }: CopyableSnippetProps): 
             onClick={() => {
               onCopy(snippet);
             }}
-            title={`Copy ${snippet.title}`}
+            title={`Copy ${snippet.title} snippet`}
             type="button"
           >
             {copyState === 'copied' ? <Check size={13} /> : <Copy size={13} />}
