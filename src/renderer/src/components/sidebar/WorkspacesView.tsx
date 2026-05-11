@@ -252,7 +252,7 @@ export function WorkspacesView(): React.JSX.Element {
 
           return (
             <div key={workspace.id} className="space-y-0.5">
-              <div className="group flex w-full items-center gap-1 pr-1">
+              <div className="group flex w-full items-center gap-1">
                 {isEditing ? (
                   <input
                     ref={renameInputRef}
