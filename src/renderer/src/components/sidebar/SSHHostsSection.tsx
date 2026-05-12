@@ -4,6 +4,7 @@ import type { SSHHost } from '../../../../shared/types';
 import { useReloadConnections } from '../../hooks/useReloadConnections';
 import { useConnectionsStore } from '../../stores/connectionsStore';
 import { useSshResolutionsStore } from '../../stores/sshResolutionsStore';
+import { useUiStore } from '../../stores/uiStore';
 import { useWorkspaceStore } from '../../stores/workspaceStore';
 
 function formatHostDetail(host: SSHHost): string | null {
@@ -159,7 +160,14 @@ export function SSHHostsSection(): React.JSX.Element {
   const isLoading = useConnectionsStore((state) => state.isLoading);
   const error = useConnectionsStore((state) => state.error);
   const openSshHostTab = useWorkspaceStore((state) => state.openSshHostTab);
+  const closeSettings = useUiStore((state) => state.closeSettings);
   const { isReloading, reloadConnections } = useReloadConnections();
+
+  const handleOpen = (alias: string): void => {
+    openSshHostTab(alias);
+    closeSettings();
+  };
+
   const [expandedAliases, setExpandedAliases] = useState<Set<string>>(() => new Set());
 
   const toggleExpanded = (alias: string): void => {
@@ -204,7 +212,7 @@ export function SSHHostsSection(): React.JSX.Element {
             key={`${host.alias}-${index}`}
             expanded={expandedAliases.has(host.alias)}
             host={host}
-            onOpen={openSshHostTab}
+            onOpen={handleOpen}
             onToggle={toggleExpanded}
           />
         ))}
