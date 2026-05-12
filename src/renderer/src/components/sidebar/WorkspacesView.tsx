@@ -4,6 +4,7 @@ import { countPaneLeaves, flattenLayout } from '../../../../shared/pane-layout';
 import { getPathBasename, getTruncatedPathLabel } from '../../../../shared/path-label';
 import type { Pane, PaneRuntimeInfo } from '../../../../shared/types';
 import { usePaneInfoStore } from '../../stores/paneInfoStore';
+import { useUiStore } from '../../stores/uiStore';
 import { useWorkspaceStore } from '../../stores/workspaceStore';
 
 function formatPaneCount(count: number): string {
@@ -78,6 +79,7 @@ export function WorkspacesView(): React.JSX.Element {
   const selectWorkspacePane = useWorkspaceStore((state) => state.selectWorkspacePane);
   const selectWorkspaceTab = useWorkspaceStore((state) => state.selectWorkspaceTab);
   const setActiveWorkspace = useWorkspaceStore((state) => state.setActiveWorkspace);
+  const closeSettings = useUiStore((state) => state.closeSettings);
 
   // Inline workspace creation state
   const [isCreating, setIsCreating] = useState(false);
@@ -289,6 +291,7 @@ export function WorkspacesView(): React.JSX.Element {
                       type="button"
                       onClick={() => {
                         setActiveWorkspace(workspace.id);
+                        closeSettings();
                       }}
                       onDoubleClick={() => {
                         startRenaming(workspace.id, workspace.name);
@@ -348,6 +351,7 @@ export function WorkspacesView(): React.JSX.Element {
                               type="button"
                               onClick={() => {
                                 selectWorkspaceTab(workspace.id, tab.id);
+                                closeSettings();
                               }}
                             >
                               <Hash
@@ -396,6 +400,7 @@ export function WorkspacesView(): React.JSX.Element {
                                 pane={pane}
                                 onClick={() => {
                                   selectWorkspacePane(workspace.id, tab.id, pane.id);
+                                  closeSettings();
                                 }}
                               />
                             );
