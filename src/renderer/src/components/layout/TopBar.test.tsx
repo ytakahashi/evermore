@@ -68,6 +68,7 @@ describe('TopBar', () => {
       sidebarView: 'workspaces',
       sidebarOpen: true,
       sidebarWidth: SIDEBAR_DEFAULT_WIDTH,
+      tabBarOpen: false,
     });
   });
 
@@ -96,6 +97,33 @@ describe('TopBar', () => {
     // Then: the sidebar state is set back to open.
     expect(useUiStore.getState().sidebarOpen).toBe(true);
     expect(screen.getByRole('button', { name: 'Close sidebar' })).toBeInTheDocument();
+  });
+
+  it('renders the tab bar toggle button and toggles state on click', () => {
+    // Given: the tab bar is closed by default.
+    useUiStore.setState({ tabBarOpen: false });
+
+    // When: the top bar renders.
+    render(<TopBar />);
+
+    // Then: the show tabs button is visible.
+    const toggleButton = screen.getByRole('button', { name: 'Show tabs' });
+    expect(toggleButton).toBeInTheDocument();
+    expect(toggleButton).toHaveAttribute('title', 'Show tabs');
+
+    // When: the toggle button is clicked.
+    fireEvent.click(toggleButton);
+
+    // Then: the tab bar state is set to open and the button changes.
+    expect(useUiStore.getState().tabBarOpen).toBe(true);
+    expect(screen.getByRole('button', { name: 'Hide tabs' })).toBeInTheDocument();
+
+    // When: the toggle button is clicked again.
+    fireEvent.click(screen.getByRole('button', { name: 'Hide tabs' }));
+
+    // Then: the tab bar state is set back to closed.
+    expect(useUiStore.getState().tabBarOpen).toBe(false);
+    expect(screen.getByRole('button', { name: 'Show tabs' })).toBeInTheDocument();
   });
 
   it('displays the active workspace name', () => {
