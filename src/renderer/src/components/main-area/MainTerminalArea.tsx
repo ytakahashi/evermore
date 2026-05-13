@@ -19,6 +19,7 @@ export function MainTerminalArea(): React.JSX.Element {
   const loadWorkspaces = useWorkspaceStore((state) => state.loadWorkspaces);
   const clearFullscreen = useUiStore((state) => state.clearFullscreen);
   const fullscreenPaneId = useUiStore((state) => state.fullscreenPaneId);
+  const tabBarOpen = useUiStore((state) => state.tabBarOpen);
   const previousActiveSelectionRef = useRef<ActiveSelection | null>(null);
   const activeWorkspace =
     workspaces.find((workspace) => workspace.id === activeWorkspaceId) ?? null;
@@ -152,7 +153,7 @@ export function MainTerminalArea(): React.JSX.Element {
 
   return (
     <main className="flex min-w-0 flex-1 flex-col bg-terminal">
-      <TabBar />
+      {tabBarOpen && <TabBar />}
       <div className="min-h-0 flex-1">{content}</div>
     </main>
   );

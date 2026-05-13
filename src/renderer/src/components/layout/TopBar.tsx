@@ -1,4 +1,4 @@
-import { Folder, PanelLeftClose, PanelLeftOpen } from 'lucide-react';
+import { Folder, PanelLeftClose, PanelLeftOpen, PanelTopClose, PanelTopOpen } from 'lucide-react';
 import {
   selectErrorTunnelCount,
   selectRunningTunnelCount,
@@ -57,6 +57,8 @@ export function TopBar(): React.JSX.Element {
   const errorTunnelCount = useTunnelsStore(selectErrorTunnelCount);
   const sidebarOpen = useUiStore((state) => state.sidebarOpen);
   const toggleSidebar = useUiStore((state) => state.toggleSidebar);
+  const tabBarOpen = useUiStore((state) => state.tabBarOpen);
+  const toggleTabBar = useUiStore((state) => state.toggleTabBar);
 
   return (
     <header
@@ -79,6 +81,16 @@ export function TopBar(): React.JSX.Element {
       </div>
       <div className="flex shrink-0 items-center gap-2">
         <TunnelBadge errorCount={errorTunnelCount} runningCount={runningTunnelCount} />
+        <button
+          aria-label={tabBarOpen ? 'Hide tabs' : 'Show tabs'}
+          className="flex size-6 shrink-0 items-center justify-center rounded text-muted hover:bg-raised hover:text-foreground"
+          style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+          title={tabBarOpen ? 'Hide tabs' : 'Show tabs'}
+          type="button"
+          onClick={toggleTabBar}
+        >
+          {tabBarOpen ? <PanelTopClose size={14} /> : <PanelTopOpen size={14} />}
+        </button>
       </div>
     </header>
   );
