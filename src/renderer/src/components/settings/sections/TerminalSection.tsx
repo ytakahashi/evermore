@@ -68,11 +68,9 @@ const FONT_WEIGHT_OPTIONS: ReadonlyArray<{ label: string; value: FontWeight }> =
   { label: 'Extra Light (200)', value: '200' },
   { label: 'Light (300)', value: '300' },
   { label: 'Regular (400)', value: '400' },
-  { label: 'Normal', value: 'normal' },
   { label: 'Medium (500)', value: '500' },
   { label: 'Semi-bold (600)', value: '600' },
   { label: 'Bold (700)', value: '700' },
-  { label: 'Bold', value: 'bold' },
   { label: 'Extra Bold (800)', value: '800' },
   { label: 'Black (900)', value: '900' },
 ];
@@ -146,7 +144,7 @@ export function TerminalSection(): React.JSX.Element {
           onChange={(event) => {
             updateTerminalSettings({ fontWeight: event.currentTarget.value as FontWeight });
           }}
-          value={String(terminalSettings.fontWeight)}
+          value={terminalSettings.fontWeight}
         >
           {FONT_WEIGHT_OPTIONS.map((option) => (
             <option key={option.value} value={option.value}>
@@ -167,7 +165,7 @@ export function TerminalSection(): React.JSX.Element {
           onChange={(event) => {
             updateTerminalSettings({ fontWeightBold: event.currentTarget.value as FontWeight });
           }}
-          value={String(terminalSettings.fontWeightBold)}
+          value={terminalSettings.fontWeightBold}
         >
           {FONT_WEIGHT_OPTIONS.map((option) => (
             <option key={option.value} value={option.value}>

@@ -97,8 +97,6 @@ function pickKeybindings(value: unknown): Record<string, string> {
 }
 
 const FONT_WEIGHT_STRINGS = [
-  'normal',
-  'bold',
   '100',
   '200',
   '300',
@@ -113,12 +111,23 @@ const FONT_WEIGHT_STRINGS = [
 function pickFontWeight(value: unknown, fallback: FontWeight): FontWeight {
   if (typeof value === 'string') {
     const normalized = value.trim().toLowerCase();
+    // Accept xterm-style keywords as aliases for the canonical numeric weights so a hand-edited
+    // settings.json with `"normal"` / `"bold"` round-trips to the equivalent numeric value.
+    if (normalized === 'normal') {
+      return '400';
+    }
+    if (normalized === 'bold') {
+      return '700';
+    }
     if ((FONT_WEIGHT_STRINGS as readonly string[]).includes(normalized)) {
       return normalized as FontWeight;
     }
   }
-  if (typeof value === 'number' && Number.isFinite(value) && value >= 100 && value <= 900) {
-    return value;
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    const asString = String(value);
+    if ((FONT_WEIGHT_STRINGS as readonly string[]).includes(asString)) {
+      return asString as FontWeight;
+    }
   }
   return fallback;
 }
@@ -139,7 +148,10 @@ function readCurrentSettings(raw: unknown): AppSettings {
     cursorBlink: pickBoolean(terminalRaw.cursorBlink, defaults.terminal.cursorBlink),
     macOptionIsMeta: pickBoolean(terminalRaw.macOptionIsMeta, defaults.terminal.macOptionIsMeta),
     copyOnSelect: pickBoolean(terminalRaw.copyOnSelect, defaults.terminal.copyOnSelect),
-    fontSize: Math.max(6, pickFiniteNumber(terminalRaw.fontSize, defaults.terminal.fontSize)),
+    fontSize: Math.min(
+      100,
+      Math.max(6, pickFiniteNumber(terminalRaw.fontSize, defaults.terminal.fontSize)),
+    ),
     fontFamily:
       typeof terminalRaw.fontFamily === 'string' && terminalRaw.fontFamily.length > 0
         ? terminalRaw.fontFamily

@@ -75,19 +75,7 @@ export interface ForwardEntry {
   hostPort?: number;
 }
 
-export type FontWeight =
-  | 'normal'
-  | 'bold'
-  | '100'
-  | '200'
-  | '300'
-  | '400'
-  | '500'
-  | '600'
-  | '700'
-  | '800'
-  | '900'
-  | number;
+export type FontWeight = '100' | '200' | '300' | '400' | '500' | '600' | '700' | '800' | '900';
 
 /**
  * Application-wide user preferences persisted by the main process.

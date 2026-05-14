@@ -24,8 +24,8 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
     copyOnSelect: true,
     fontSize: 13,
     fontFamily: "'SF Mono', 'JetBrains Mono', Menlo, Consolas, monospace",
-    fontWeight: 'normal',
-    fontWeightBold: 'bold',
+    fontWeight: '400',
+    fontWeightBold: '700',
   },
   paneInfo: {
     pollIntervalMs: 1500,

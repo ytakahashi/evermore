@@ -5,7 +5,6 @@ import { WebLinksAddon } from '@xterm/addon-web-links';
 import { Terminal } from '@xterm/xterm';
 import { useResizeObserver } from '../../hooks/useResizeObserver';
 import { DEFAULT_APP_SETTINGS } from '../../../../shared/settings-defaults';
-import type { FontWeight } from '../../../../shared/types';
 import { useSettingsStore } from '../../stores/settingsStore';
 import { parseOsc7Cwd } from './osc7';
 import { terminalTheme } from './theme';
@@ -129,8 +128,8 @@ export function useTerminal(options: UseTerminalOptions): UseTerminalResult {
     terminal.options.macOptionIsMeta = macOptionIsMeta;
     terminal.options.fontSize = fontSize;
     terminal.options.fontFamily = fontFamily;
-    terminal.options.fontWeight = fontWeight as FontWeight;
-    terminal.options.fontWeightBold = fontWeightBold as FontWeight;
+    terminal.options.fontWeight = fontWeight;
+    terminal.options.fontWeightBold = fontWeightBold;
 
     // Font changes affect cell dimensions, so we must re-fit
     fitAndResize();
@@ -172,8 +171,8 @@ export function useTerminal(options: UseTerminalOptions): UseTerminalResult {
       cursorStyle: initialTerminalSettings.cursorStyle,
       fontFamily: initialTerminalSettings.fontFamily,
       fontSize: initialTerminalSettings.fontSize,
-      fontWeight: initialTerminalSettings.fontWeight as FontWeight,
-      fontWeightBold: initialTerminalSettings.fontWeightBold as FontWeight,
+      fontWeight: initialTerminalSettings.fontWeight,
+      fontWeightBold: initialTerminalSettings.fontWeightBold,
       macOptionIsMeta: initialTerminalSettings.macOptionIsMeta,
       theme: terminalTheme,
     });
