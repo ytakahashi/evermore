@@ -3,7 +3,7 @@ import path from 'node:path';
 import Store from 'electron-store';
 import type { SettingsUpdate } from '../../shared/api-types';
 import { cloneDefaultSettings, DEFAULT_APP_SETTINGS } from '../../shared/settings-defaults';
-import type { AppSettings } from '../../shared/types';
+import type { AppSettings, FontWeight } from '../../shared/types';
 import type { SettingsStorageAdapter, SettingsStoreOptions } from './types';
 
 /**
@@ -96,6 +96,33 @@ function pickKeybindings(value: unknown): Record<string, string> {
   return result;
 }
 
+const FONT_WEIGHT_STRINGS = [
+  'normal',
+  'bold',
+  '100',
+  '200',
+  '300',
+  '400',
+  '500',
+  '600',
+  '700',
+  '800',
+  '900',
+] as const;
+
+function pickFontWeight(value: unknown, fallback: FontWeight): FontWeight {
+  if (typeof value === 'string') {
+    const normalized = value.trim().toLowerCase();
+    if ((FONT_WEIGHT_STRINGS as readonly string[]).includes(normalized)) {
+      return normalized as FontWeight;
+    }
+  }
+  if (typeof value === 'number' && Number.isFinite(value) && value >= 100 && value <= 900) {
+    return value;
+  }
+  return fallback;
+}
+
 function readCurrentSettings(raw: unknown): AppSettings {
   if (!isPlainObject(raw)) {
     return cloneDefaultSettings();
@@ -112,18 +139,14 @@ function readCurrentSettings(raw: unknown): AppSettings {
     cursorBlink: pickBoolean(terminalRaw.cursorBlink, defaults.terminal.cursorBlink),
     macOptionIsMeta: pickBoolean(terminalRaw.macOptionIsMeta, defaults.terminal.macOptionIsMeta),
     copyOnSelect: pickBoolean(terminalRaw.copyOnSelect, defaults.terminal.copyOnSelect),
+    fontSize: Math.max(6, pickFiniteNumber(terminalRaw.fontSize, defaults.terminal.fontSize)),
+    fontFamily:
+      typeof terminalRaw.fontFamily === 'string' && terminalRaw.fontFamily.length > 0
+        ? terminalRaw.fontFamily
+        : defaults.terminal.fontFamily,
+    fontWeight: pickFontWeight(terminalRaw.fontWeight, defaults.terminal.fontWeight),
+    fontWeightBold: pickFontWeight(terminalRaw.fontWeightBold, defaults.terminal.fontWeightBold),
   };
-  const fontSize = pickFiniteNumber(terminalRaw.fontSize, defaults.terminal.fontSize);
-  if (fontSize !== undefined) {
-    terminal.fontSize = fontSize;
-  }
-  const fontFamily =
-    typeof terminalRaw.fontFamily === 'string' && terminalRaw.fontFamily.length > 0
-      ? terminalRaw.fontFamily
-      : defaults.terminal.fontFamily;
-  if (fontFamily !== undefined) {
-    terminal.fontFamily = fontFamily;
-  }
 
   return {
     terminal,

@@ -195,6 +195,62 @@ describe('SettingsStore', () => {
     expect(next.terminal.cursorBlink).toBe(false);
   });
 
+  it('enforces a minimum font size of 6px when read from storage', () => {
+    // Given: a persisted font size below the allowed floor.
+    storage.payload = { terminal: { fontSize: 2 } };
+
+    // When: the store reloads from disk.
+    const next = store.reload();
+
+    // Then: the floor is applied.
+    expect(next.terminal.fontSize).toBe(6);
+  });
+
+  it('normalizes invalid font weight strings to defaults when read from storage', () => {
+    // Given: a persisted font weight with an invalid string format.
+    storage.payload = { terminal: { fontWeight: '100abc' } };
+
+    // When: the store reloads from disk.
+    const next = store.reload();
+
+    // Then: the default font weight is restored.
+    expect(next.terminal.fontWeight).toBe(DEFAULT_APP_SETTINGS.terminal.fontWeight);
+  });
+
+  it('normalizes font weight strings case-insensitively when read from storage', () => {
+    // Given: a hand-edited font weight keyword with whitespace and uppercase letters.
+    storage.payload = { terminal: { fontWeight: ' Bold ', fontWeightBold: ' 900 ' } };
+
+    // When: the store reloads from disk.
+    const next = store.reload();
+
+    // Then: valid string values are preserved in canonical form.
+    expect(next.terminal.fontWeight).toBe('bold');
+    expect(next.terminal.fontWeightBold).toBe('900');
+  });
+
+  it('accepts valid numeric font weights when read from storage', () => {
+    // Given: a persisted numeric font weight.
+    storage.payload = { terminal: { fontWeight: 500 } };
+
+    // When: the store reloads from disk.
+    const next = store.reload();
+
+    // Then: the numeric value is preserved.
+    expect(next.terminal.fontWeight).toBe(500);
+  });
+
+  it('rejects invalid numeric font weights when read from storage', () => {
+    // Given: a persisted numeric font weight outside the 100-900 range.
+    storage.payload = { terminal: { fontWeight: 50 } };
+
+    // When: the store reloads from disk.
+    const next = store.reload();
+
+    // Then: it falls back to default.
+    expect(next.terminal.fontWeight).toBe(DEFAULT_APP_SETTINGS.terminal.fontWeight);
+  });
+
   it('rejects non-finite pollIntervalMs and falls back to default when read from storage', () => {
     // Given: a persisted payload with an invalid non-finite poll interval.
     storage.payload = { paneInfo: { pollIntervalMs: Number.NaN } };

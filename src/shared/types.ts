@@ -75,6 +75,20 @@ export interface ForwardEntry {
   hostPort?: number;
 }
 
+export type FontWeight =
+  | 'normal'
+  | 'bold'
+  | '100'
+  | '200'
+  | '300'
+  | '400'
+  | '500'
+  | '600'
+  | '700'
+  | '800'
+  | '900'
+  | number;
+
 /**
  * Application-wide user preferences persisted by the main process.
  *
@@ -88,10 +102,10 @@ export interface AppSettings {
     cursorBlink: boolean;
     macOptionIsMeta: boolean;
     copyOnSelect: boolean;
-    /** Reserved for future Terminal section UI; persisted but not yet exposed as a control. */
-    fontSize?: number;
-    /** Reserved for future Terminal section UI; persisted but not yet exposed as a control. */
-    fontFamily?: string;
+    fontSize: number;
+    fontFamily: string;
+    fontWeight: FontWeight;
+    fontWeightBold: FontWeight;
   };
   paneInfo: {
     /** ps polling interval in ms; values <= 0 disable polling. */
