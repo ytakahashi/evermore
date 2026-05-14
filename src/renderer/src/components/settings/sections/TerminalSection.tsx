@@ -1,4 +1,4 @@
-import type { AppSettings } from '../../../../../shared/types';
+import type { AppSettings, FontWeight } from '../../../../../shared/types';
 import { DEFAULT_APP_SETTINGS } from '../../../../../shared/settings-defaults';
 import { useSettingsStore } from '../../../stores/settingsStore';
 
@@ -10,12 +10,19 @@ interface SettingRowProps {
   label: string;
 }
 
-function SettingRow({ children, description, label }: SettingRowProps): React.JSX.Element {
+function SettingRow({
+  children,
+  description,
+  label,
+  labelFor,
+}: SettingRowProps & { labelFor?: string }): React.JSX.Element {
   return (
     <div className="grid gap-3 border-b border-border-subtle py-4 sm:grid-cols-[1fr_auto]">
       <div className="min-w-0">
         <div className="flex items-center gap-2">
-          <h3 className="text-sm font-medium">{label}</h3>
+          <label className="text-sm font-medium" htmlFor={labelFor}>
+            {label}
+          </label>
           <span className="rounded bg-raised px-1.5 py-0.5 text-xs text-muted">Live</span>
         </div>
         <p className="mt-1 max-w-2xl text-xs leading-5 text-muted">{description}</p>
@@ -56,6 +63,18 @@ const CURSOR_STYLE_OPTIONS: ReadonlyArray<{ label: string; preview: string; valu
     { label: 'Underline', preview: '_', value: 'underline' },
   ];
 
+const FONT_WEIGHT_OPTIONS: ReadonlyArray<{ label: string; value: FontWeight }> = [
+  { label: 'Thin (100)', value: '100' },
+  { label: 'Extra Light (200)', value: '200' },
+  { label: 'Light (300)', value: '300' },
+  { label: 'Regular (400)', value: '400' },
+  { label: 'Medium (500)', value: '500' },
+  { label: 'Semi-bold (600)', value: '600' },
+  { label: 'Bold (700)', value: '700' },
+  { label: 'Extra Bold (800)', value: '800' },
+  { label: 'Black (900)', value: '900' },
+];
+
 /**
  * Renders live terminal behavior controls backed by the persisted settings store.
  */
@@ -76,6 +95,85 @@ export function TerminalSection(): React.JSX.Element {
           These preferences apply to existing terminal panes immediately.
         </p>
       </header>
+
+      <SettingRow
+        description="The font family used for terminal text."
+        label="Font family"
+        labelFor="terminal-font-family"
+      >
+        <input
+          className="w-full rounded border border-border bg-raised px-2 py-1 text-sm text-foreground focus:border-brand focus:outline-none sm:w-64"
+          id="terminal-font-family"
+          onChange={(event) => {
+            updateTerminalSettings({ fontFamily: event.currentTarget.value });
+          }}
+          type="text"
+          value={terminalSettings.fontFamily}
+        />
+      </SettingRow>
+
+      <SettingRow
+        description="The font size in pixels."
+        label="Font size"
+        labelFor="terminal-font-size"
+      >
+        <input
+          className="w-20 rounded border border-border bg-raised px-2 py-1 text-sm text-foreground focus:border-brand focus:outline-none"
+          id="terminal-font-size"
+          max={100}
+          min={6}
+          onChange={(event) => {
+            const val = event.currentTarget.valueAsNumber;
+            if (Number.isFinite(val) && val >= 6 && val <= 100) {
+              updateTerminalSettings({ fontSize: val });
+            }
+          }}
+          type="number"
+          value={terminalSettings.fontSize}
+        />
+      </SettingRow>
+
+      <SettingRow
+        description="The weight of normal terminal text."
+        label="Font weight"
+        labelFor="terminal-font-weight"
+      >
+        <select
+          className="rounded border border-border bg-raised px-2 py-1 text-sm text-foreground focus:border-brand focus:outline-none"
+          id="terminal-font-weight"
+          onChange={(event) => {
+            updateTerminalSettings({ fontWeight: event.currentTarget.value as FontWeight });
+          }}
+          value={terminalSettings.fontWeight}
+        >
+          {FONT_WEIGHT_OPTIONS.map((option) => (
+            <option key={option.value} value={option.value}>
+              {option.label}
+            </option>
+          ))}
+        </select>
+      </SettingRow>
+
+      <SettingRow
+        description="The weight of bold terminal text."
+        label="Bold font weight"
+        labelFor="terminal-font-weight-bold"
+      >
+        <select
+          className="rounded border border-border bg-raised px-2 py-1 text-sm text-foreground focus:border-brand focus:outline-none"
+          id="terminal-font-weight-bold"
+          onChange={(event) => {
+            updateTerminalSettings({ fontWeightBold: event.currentTarget.value as FontWeight });
+          }}
+          value={terminalSettings.fontWeightBold}
+        >
+          {FONT_WEIGHT_OPTIONS.map((option) => (
+            <option key={option.value} value={option.value}>
+              {option.label}
+            </option>
+          ))}
+        </select>
+      </SettingRow>
 
       <SettingRow
         description="Choose the cursor shape shown inside terminal panes."

@@ -341,6 +341,36 @@ describe('useTerminal', () => {
     expect(ptyApi.dispose).not.toHaveBeenCalled();
   });
 
+  it('applies font setting changes and re-fits the terminal', async () => {
+    // Given: a terminal pane is mounted.
+    render(<TestTerminal />);
+    await waitFor(() => {
+      expect(ptyApi.create).toHaveBeenCalled();
+    });
+    const initialFitCount = xtermMock.fitAddonInstances[0]?.fit.mock.calls.length ?? 0;
+
+    // When: font settings change.
+    setTerminalSettings({
+      fontSize: 16,
+      fontFamily: 'Fira Code',
+      fontWeight: '300',
+      fontWeightBold: '600',
+    });
+
+    // Then: xterm options are updated and fit is called to handle new cell dimensions.
+    await waitFor(() => {
+      expect(xtermMock.terminalInstances[0]?.options).toMatchObject({
+        fontSize: 16,
+        fontFamily: 'Fira Code',
+        fontWeight: '300',
+        fontWeightBold: '600',
+      });
+      expect(xtermMock.fitAddonInstances[0]?.fit.mock.calls.length).toBeGreaterThan(
+        initialFitCount,
+      );
+    });
+  });
+
   it('copies terminal selection to the clipboard only while copy-on-select is enabled', async () => {
     // Given: copy-on-select starts enabled.
     setTerminalSettings({ copyOnSelect: true });

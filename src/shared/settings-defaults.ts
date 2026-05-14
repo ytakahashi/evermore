@@ -22,6 +22,10 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
     cursorBlink: true,
     macOptionIsMeta: true,
     copyOnSelect: true,
+    fontSize: 13,
+    fontFamily: "'SF Mono', 'JetBrains Mono', Menlo, Consolas, monospace",
+    fontWeight: '400',
+    fontWeightBold: '700',
   },
   paneInfo: {
     pollIntervalMs: 1500,

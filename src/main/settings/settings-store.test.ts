@@ -195,6 +195,85 @@ describe('SettingsStore', () => {
     expect(next.terminal.cursorBlink).toBe(false);
   });
 
+  it('enforces a minimum font size of 6px when read from storage', () => {
+    // Given: a persisted font size below the allowed floor.
+    storage.payload = { terminal: { fontSize: 2 } };
+
+    // When: the store reloads from disk.
+    const next = store.reload();
+
+    // Then: the floor is applied.
+    expect(next.terminal.fontSize).toBe(6);
+  });
+
+  it('enforces a maximum font size of 100px when read from storage', () => {
+    // Given: a persisted font size above the allowed ceiling.
+    storage.payload = { terminal: { fontSize: 999 } };
+
+    // When: the store reloads from disk.
+    const next = store.reload();
+
+    // Then: the ceiling is applied.
+    expect(next.terminal.fontSize).toBe(100);
+  });
+
+  it('normalizes invalid font weight strings to defaults when read from storage', () => {
+    // Given: a persisted font weight with an invalid string format.
+    storage.payload = { terminal: { fontWeight: '100abc' } };
+
+    // When: the store reloads from disk.
+    const next = store.reload();
+
+    // Then: the default font weight is restored.
+    expect(next.terminal.fontWeight).toBe(DEFAULT_APP_SETTINGS.terminal.fontWeight);
+  });
+
+  it('normalizes the legacy "normal" / "bold" keywords to their numeric equivalents', () => {
+    // Given: a hand-edited font weight keyword with whitespace and uppercase letters.
+    storage.payload = { terminal: { fontWeight: ' Normal ', fontWeightBold: ' Bold ' } };
+
+    // When: the store reloads from disk.
+    const next = store.reload();
+
+    // Then: keywords are canonicalized to their numeric equivalents.
+    expect(next.terminal.fontWeight).toBe('400');
+    expect(next.terminal.fontWeightBold).toBe('700');
+  });
+
+  it('trims and preserves valid numeric font weight strings when read from storage', () => {
+    // Given: a hand-edited numeric font weight string with surrounding whitespace.
+    storage.payload = { terminal: { fontWeight: ' 300 ', fontWeightBold: ' 900 ' } };
+
+    // When: the store reloads from disk.
+    const next = store.reload();
+
+    // Then: trimmed string values are preserved.
+    expect(next.terminal.fontWeight).toBe('300');
+    expect(next.terminal.fontWeightBold).toBe('900');
+  });
+
+  it('normalizes canonical numeric font weights to strings when read from storage', () => {
+    // Given: a persisted numeric font weight matching a canonical step.
+    storage.payload = { terminal: { fontWeight: 500 } };
+
+    // When: the store reloads from disk.
+    const next = store.reload();
+
+    // Then: the numeric value is normalized to its string equivalent.
+    expect(next.terminal.fontWeight).toBe('500');
+  });
+
+  it('rejects non-canonical numeric font weights when read from storage', () => {
+    // Given: a persisted numeric font weight outside the 100/200/.../900 set.
+    storage.payload = { terminal: { fontWeight: 450 } };
+
+    // When: the store reloads from disk.
+    const next = store.reload();
+
+    // Then: it falls back to default.
+    expect(next.terminal.fontWeight).toBe(DEFAULT_APP_SETTINGS.terminal.fontWeight);
+  });
+
   it('rejects non-finite pollIntervalMs and falls back to default when read from storage', () => {
     // Given: a persisted payload with an invalid non-finite poll interval.
     storage.payload = { paneInfo: { pollIntervalMs: Number.NaN } };

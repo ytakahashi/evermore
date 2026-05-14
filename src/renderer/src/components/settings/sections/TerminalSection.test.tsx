@@ -92,4 +92,85 @@ describe('TerminalSection', () => {
       app: undefined,
     });
   });
+
+  it('updates font settings through the settings store', async () => {
+    // Given: the terminal settings section is visible.
+    render(<TerminalSection />);
+
+    // When: the user changes font family, size, and weight.
+    fireEvent.change(screen.getByLabelText(/font family/i), {
+      target: { value: 'Fira Code' },
+    });
+    fireEvent.change(screen.getByLabelText(/font size/i), {
+      target: { value: '16' },
+    });
+    fireEvent.change(screen.getByLabelText(/^font weight$/i), {
+      target: { value: '300' },
+    });
+    fireEvent.change(screen.getByLabelText(/bold font weight/i), {
+      target: { value: '600' },
+    });
+
+    // Then: the UI reflects the changes and they are persisted after debounce.
+    expect(useSettingsStore.getState().settings?.terminal.fontFamily).toBe('Fira Code');
+    expect(useSettingsStore.getState().settings?.terminal.fontSize).toBe(16);
+    expect(useSettingsStore.getState().settings?.terminal.fontWeight).toBe('300');
+    expect(useSettingsStore.getState().settings?.terminal.fontWeightBold).toBe('600');
+
+    await vi.advanceTimersByTimeAsync(350);
+    expect(settingsApi.update).toHaveBeenCalledWith({
+      terminal: {
+        fontFamily: 'Fira Code',
+        fontSize: 16,
+        fontWeight: '300',
+        fontWeightBold: '600',
+      },
+      paneInfo: undefined,
+      shortcuts: undefined,
+      app: undefined,
+    });
+  });
+
+  it('shows every persisted font weight value as a selectable option', () => {
+    // Given: settings were hand-edited to use numeric font weights not covered by keyword labels.
+    useSettingsStore.setState({
+      settings: {
+        ...DEFAULT_APP_SETTINGS,
+        terminal: {
+          ...DEFAULT_APP_SETTINGS.terminal,
+          fontWeight: '700',
+          fontWeightBold: '900',
+        },
+      },
+    });
+
+    // When: the terminal settings section is visible.
+    render(<TerminalSection />);
+
+    // Then: the select controls can represent the persisted values.
+    expect(screen.getByLabelText(/^font weight$/i)).toHaveValue('700');
+    expect(screen.getByLabelText(/bold font weight/i)).toHaveValue('900');
+  });
+
+  it('prevents saving out-of-range font sizes', async () => {
+    // Given: the terminal settings section is visible.
+    render(<TerminalSection />);
+    const initialFontSize = DEFAULT_APP_SETTINGS.terminal.fontSize;
+
+    // When: the user enters a size below the minimum.
+    fireEvent.change(screen.getByLabelText(/font size/i), {
+      target: { value: '2' },
+    });
+
+    // Then: the invalid value is rejected and not sent to the store.
+    expect(useSettingsStore.getState().settings?.terminal.fontSize).toBe(initialFontSize);
+
+    // When: the user enters a size above the maximum.
+    fireEvent.change(screen.getByLabelText(/font size/i), {
+      target: { value: '200' },
+    });
+
+    // Then: the invalid value is rejected.
+    expect(useSettingsStore.getState().settings?.terminal.fontSize).toBe(initialFontSize);
+  });
 });

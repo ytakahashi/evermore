@@ -58,40 +58,28 @@ export function useTerminal(options: UseTerminalOptions): UseTerminalResult {
   const copyOnSelect = useSettingsStore(
     (state) => state.settings?.terminal.copyOnSelect ?? DEFAULT_APP_SETTINGS.terminal.copyOnSelect,
   );
+  const fontSize = useSettingsStore(
+    (state) => state.settings?.terminal.fontSize ?? DEFAULT_APP_SETTINGS.terminal.fontSize,
+  );
+  const fontFamily = useSettingsStore(
+    (state) => state.settings?.terminal.fontFamily ?? DEFAULT_APP_SETTINGS.terminal.fontFamily,
+  );
+  const fontWeight = useSettingsStore(
+    (state) => state.settings?.terminal.fontWeight ?? DEFAULT_APP_SETTINGS.terminal.fontWeight,
+  );
+  const fontWeightBold = useSettingsStore(
+    (state) =>
+      state.settings?.terminal.fontWeightBold ?? DEFAULT_APP_SETTINGS.terminal.fontWeightBold,
+  );
   const terminalSettingsRef = useRef({
     cursorStyle,
     cursorBlink,
     macOptionIsMeta,
+    fontSize,
+    fontFamily,
+    fontWeight,
+    fontWeightBold,
   });
-
-  useEffect(() => {
-    terminalSettingsRef.current = {
-      cursorStyle,
-      cursorBlink,
-      macOptionIsMeta,
-    };
-
-    const terminal = terminalRef.current;
-    if (!terminal) {
-      return;
-    }
-
-    terminal.options.cursorStyle = cursorStyle;
-    terminal.options.cursorBlink = cursorBlink;
-    terminal.options.macOptionIsMeta = macOptionIsMeta;
-  }, [cursorStyle, cursorBlink, macOptionIsMeta]);
-
-  useEffect(() => {
-    isActiveRef.current = options.isActive ?? false;
-  }, [options.isActive]);
-
-  useEffect(() => {
-    onCwdChangeRef.current = options.onCwdChange;
-  }, [options.onCwdChange]);
-
-  useEffect(() => {
-    onPtyIdChangeRef.current = options.onPtyIdChange;
-  }, [options.onPtyIdChange]);
 
   const focusIfActive = useCallback((): void => {
     if (isActiveRef.current) {
@@ -119,6 +107,55 @@ export function useTerminal(options: UseTerminalOptions): UseTerminalResult {
     }
   }, []);
 
+  useEffect(() => {
+    terminalSettingsRef.current = {
+      cursorStyle,
+      cursorBlink,
+      macOptionIsMeta,
+      fontSize,
+      fontFamily,
+      fontWeight,
+      fontWeightBold,
+    };
+
+    const terminal = terminalRef.current;
+    if (!terminal) {
+      return;
+    }
+
+    terminal.options.cursorStyle = cursorStyle;
+    terminal.options.cursorBlink = cursorBlink;
+    terminal.options.macOptionIsMeta = macOptionIsMeta;
+    terminal.options.fontSize = fontSize;
+    terminal.options.fontFamily = fontFamily;
+    terminal.options.fontWeight = fontWeight;
+    terminal.options.fontWeightBold = fontWeightBold;
+
+    // Font changes affect cell dimensions, so we must re-fit
+    fitAndResize();
+  }, [
+    cursorStyle,
+    cursorBlink,
+    macOptionIsMeta,
+    fontSize,
+    fontFamily,
+    fontWeight,
+    fontWeightBold,
+    fitAndResize,
+  ]);
+
+  useEffect(() => {
+    isActiveRef.current = options.isActive ?? false;
+  }, [options.isActive]);
+
+  useEffect(() => {
+    onCwdChangeRef.current = options.onCwdChange;
+  }, [options.onCwdChange]);
+
+  useEffect(() => {
+    onPtyIdChangeRef.current = options.onPtyIdChange;
+  }, [options.onPtyIdChange]);
+
   useResizeObserver(containerRef, fitAndResize);
 
   useEffect(() => {
@@ -132,8 +169,10 @@ export function useTerminal(options: UseTerminalOptions): UseTerminalResult {
       allowProposedApi: true,
       cursorBlink: initialTerminalSettings.cursorBlink,
       cursorStyle: initialTerminalSettings.cursorStyle,
-      fontFamily: "'SF Mono', 'JetBrains Mono', Menlo, Consolas, monospace",
-      fontSize: 13,
+      fontFamily: initialTerminalSettings.fontFamily,
+      fontSize: initialTerminalSettings.fontSize,
+      fontWeight: initialTerminalSettings.fontWeight,
+      fontWeightBold: initialTerminalSettings.fontWeightBold,
       macOptionIsMeta: initialTerminalSettings.macOptionIsMeta,
       theme: terminalTheme,
     });
