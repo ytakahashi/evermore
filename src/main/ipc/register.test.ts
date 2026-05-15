@@ -185,6 +185,59 @@ describe('registerIpcHandlers', () => {
     });
   });
 
+  it.each([
+    { status: 'starting' as const, expected: true },
+    { status: 'running' as const, expected: true },
+    { status: 'stopped' as const, expected: false },
+    { status: 'error' as const, expected: false },
+  ])(
+    'reports hasActiveTunnelForQuitConfirm=$expected when a tunnel is $status',
+    ({ status, expected }) => {
+      // Given: TunnelManager.list() reports a single tunnel in the target status.
+      tunnelManagerMock.list.mockReturnValue([
+        {
+          alias: 'dev',
+          state: { status, recentLogs: [] },
+        },
+      ]);
+      const handlers = registerIpcHandlers({
+        getWindow: () => null,
+        settingsStore: createSettingsStore() as unknown as SettingsStore,
+      });
+
+      // When/Then: only starting/running statuses request a quit confirmation.
+      expect(handlers.hasActiveTunnelForQuitConfirm()).toBe(expected);
+    },
+  );
+
+  it('reports hasActiveTunnelForQuitConfirm=true when any tunnel is starting or running', () => {
+    // Given: a mix of stopped, error, and running tunnels in the runtime list.
+    tunnelManagerMock.list.mockReturnValue([
+      { alias: 'a', state: { status: 'stopped', recentLogs: [] } },
+      { alias: 'b', state: { status: 'error', recentLogs: [] } },
+      { alias: 'c', state: { status: 'running', recentLogs: [] } },
+    ]);
+    const handlers = registerIpcHandlers({
+      getWindow: () => null,
+      settingsStore: createSettingsStore() as unknown as SettingsStore,
+    });
+
+    // When/Then: at least one running tunnel is enough to require confirmation.
+    expect(handlers.hasActiveTunnelForQuitConfirm()).toBe(true);
+  });
+
+  it('reports hasActiveTunnelForQuitConfirm=false when no tunnels are present', () => {
+    // Given: TunnelManager.list() returns an empty runtime snapshot.
+    tunnelManagerMock.list.mockReturnValue([]);
+    const handlers = registerIpcHandlers({
+      getWindow: () => null,
+      settingsStore: createSettingsStore() as unknown as SettingsStore,
+    });
+
+    // When/Then: there is nothing to confirm against.
+    expect(handlers.hasActiveTunnelForQuitConfirm()).toBe(false);
+  });
+
   it('drops tunnel events after the current window is destroyed', () => {
     // Given: IPC runtime is registered while the current window is already destroyed.
     const window = createWindowMock(true);

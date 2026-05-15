@@ -87,6 +87,8 @@ app.whenReady().then(() => {
     cleanup: cleanupRuntime,
     getSettings: () => settingsStore?.get() ?? DEFAULT_APP_SETTINGS,
     getWindow: () => mainWindow,
+    // Fall back to `false` when ipcRuntime is unavailable so the user can still quit; we'd rather
+    // skip the confirmation than block shutdown on a missing runtime (mirrors `listPaneInfo`).
     hasActiveTunnelForQuitConfirm: () => ipcRuntime?.hasActiveTunnelForQuitConfirm() ?? false,
     listPaneInfo: () => ipcRuntime?.paneInfoTracker.list() ?? [],
     requestQuit: () => {
