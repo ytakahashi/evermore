@@ -65,6 +65,7 @@ describe('TopBar', () => {
       error: null,
     });
     useUiStore.setState({
+      windowFullScreen: false,
       sidebarView: 'workspaces',
       sidebarOpen: true,
       sidebarWidth: SIDEBAR_DEFAULT_WIDTH,
@@ -258,5 +259,16 @@ describe('TopBar', () => {
     // Then: the connections sidebar view is selected.
     expect(useUiStore.getState().sidebarView).toBe('connections');
     expect(useUiStore.getState().sidebarOpen).toBe(true);
+  });
+
+  it('does not render when the window is in fullscreen', () => {
+    // Given: the window is in fullscreen.
+    useUiStore.setState({ windowFullScreen: true });
+
+    // When: the top bar renders.
+    const { container } = render(<TopBar />);
+
+    // Then: the component returns null (empty container).
+    expect(container.firstChild).toBeNull();
   });
 });

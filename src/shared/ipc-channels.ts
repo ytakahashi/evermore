@@ -41,4 +41,8 @@ export const IPC = {
   SETTINGS_RELOAD: 'settings:reload',
   SETTINGS_OPEN_FILE: 'settings:open-file',
   SETTINGS_GET_FILE_PATH: 'settings:get-file-path',
+
+  // Window
+  WINDOW_IS_FULLSCREEN: 'window:is-fullscreen',
+  WINDOW_FULLSCREEN_CHANGED: 'window:fullscreen-changed', // main -> renderer
 } as const;

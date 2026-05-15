@@ -3,6 +3,7 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { electronApp, is } from '@electron-toolkit/utils';
 import icon from '../../resources/icon.png?asset';
+import { IPC } from '../shared/ipc-channels';
 import { DEFAULT_APP_SETTINGS } from '../shared/settings-defaults';
 import { registerIpcHandlers, type RegisteredIpcHandlers } from './ipc/register';
 import { QuitConfirmationController } from './quit-confirmation';
@@ -43,6 +44,14 @@ function createWindow(): void {
 
   window.on('ready-to-show', () => {
     window.show();
+  });
+
+  window.on('enter-full-screen', () => {
+    window.webContents.send(IPC.WINDOW_FULLSCREEN_CHANGED, true);
+  });
+
+  window.on('leave-full-screen', () => {
+    window.webContents.send(IPC.WINDOW_FULLSCREEN_CHANGED, false);
   });
 
   window.on('closed', () => {

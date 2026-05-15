@@ -75,6 +75,10 @@ describe('App', () => {
           openFile: vi.fn(() => Promise.resolve()),
           getFilePath: vi.fn(() => Promise.resolve('/tmp/evermore/settings.json')),
         },
+        window: {
+          isFullScreen: vi.fn(() => Promise.resolve(false)),
+          onFullScreenChanged: vi.fn(() => vi.fn()),
+        },
       } as unknown as Window['api'],
     });
   });

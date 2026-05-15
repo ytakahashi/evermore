@@ -70,6 +70,10 @@ export interface Api {
     /** Returns the absolute path to the persisted settings file. */
     getFilePath: () => Promise<string>;
   };
+  window: {
+    isFullScreen: () => Promise<boolean>;
+    onFullScreenChanged: (cb: (isFullScreen: boolean) => void) => () => void;
+  };
 }
 
 /**

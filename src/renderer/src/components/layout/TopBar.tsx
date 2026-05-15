@@ -51,7 +51,7 @@ function TunnelBadge({ errorCount, runningCount }: TunnelBadgeProps): React.JSX.
   );
 }
 
-export function TopBar(): React.JSX.Element {
+export function TopBar(): React.JSX.Element | null {
   const activeWorkspace = useWorkspaceStore(selectActiveWorkspace);
   const runningTunnelCount = useTunnelsStore(selectRunningTunnelCount);
   const errorTunnelCount = useTunnelsStore(selectErrorTunnelCount);
@@ -59,6 +59,11 @@ export function TopBar(): React.JSX.Element {
   const toggleSidebar = useUiStore((state) => state.toggleSidebar);
   const tabBarOpen = useUiStore((state) => state.tabBarOpen);
   const toggleTabBar = useUiStore((state) => state.toggleTabBar);
+  const windowFullScreen = useUiStore((state) => state.windowFullScreen);
+
+  if (windowFullScreen) {
+    return null;
+  }
 
   return (
     <header

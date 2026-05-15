@@ -15,6 +15,7 @@ export type SidebarView = 'workspaces' | 'connections';
 export type ActiveView = 'workspace' | 'settings';
 
 interface UiStoreState {
+  windowFullScreen: boolean;
   fullscreenPaneId: string | null;
   sidebarView: SidebarView;
   sidebarOpen: boolean;
@@ -30,6 +31,7 @@ interface UiStoreState {
   setActiveView: (view: ActiveView) => void;
   setTabBarOpen: (open: boolean) => void;
   toggleTabBar: () => void;
+  setWindowFullScreen: (isFullScreen: boolean) => void;
   /** Switches the main pane to the SettingsView. Idempotent; no-op when already active. */
   openSettings: () => void;
   /** Returns the main pane to the workspace view. Idempotent; no-op when already active. */
@@ -42,6 +44,7 @@ interface UiStoreState {
  * in `useSettingsStore` and are written through the main-process settings file.
  */
 export const useUiStore = create<UiStoreState>((set, get) => ({
+  windowFullScreen: false,
   fullscreenPaneId: null,
   sidebarView: 'workspaces',
   sidebarOpen: true,
@@ -87,6 +90,9 @@ export const useUiStore = create<UiStoreState>((set, get) => ({
   },
   toggleTabBar: () => {
     set((state) => ({ tabBarOpen: !state.tabBarOpen }));
+  },
+  setWindowFullScreen: (isFullScreen) => {
+    set({ windowFullScreen: isFullScreen });
   },
   openSettings: () => {
     if (get().activeView !== 'settings') {
