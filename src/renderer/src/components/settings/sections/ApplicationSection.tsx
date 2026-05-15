@@ -18,7 +18,7 @@ const QUIT_CONFIRM_OPTIONS: ReadonlyArray<{
     value: 'always',
   },
   {
-    description: 'Ask only when pane activity shows a running process.',
+    description: 'Ask when a terminal process or SSH tunnel is active.',
     label: 'When processes are running',
     value: 'running-only',
   },

@@ -216,6 +216,7 @@ export class TunnelManager {
 
     record.exited = true;
     this.clearTimers(record);
+    this.flushPendingLogs(record);
     this.setStatus(record, 'error', error.message);
     record.process = undefined;
     record.pid = undefined;

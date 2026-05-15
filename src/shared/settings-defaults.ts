@@ -13,8 +13,8 @@ import type { AppSettings } from './types';
  *  - `shortcuts.activateAppHotkey` defaults to `'Command+Shift+,'`. The accelerator is
  *    persisted now; the actual `globalShortcut` registration is wired up later when the Shortcuts
  *    section ships.
- *  - `app.quitConfirm` of `'running-only'` matches the documented intent. The Cmd+Q dialog is
- *    wired up later when the Application section ships.
+ *  - `app.quitConfirm` of `'running-only'` asks only when terminal activity or an SSH tunnel is
+ *    active, matching the Application section copy.
  */
 export const DEFAULT_APP_SETTINGS: AppSettings = {
   terminal: {

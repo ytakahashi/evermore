@@ -1,63 +1,22 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { BrowserWindow } from 'electron';
 import { IPC } from '../../../shared/ipc-channels';
 import type { SSHHost } from '../../../shared/types';
-import type {
-  TunnelLogEvent,
-  TunnelManagerCallbacks,
-  TunnelRuntimeState,
-  TunnelStatusChangedEvent,
-} from '../../tunnels/types';
+import type { TunnelRuntimeState } from '../../tunnels/types';
 import { registerTunnelHandlers } from './tunnel';
 
 const ipcMainMock = vi.hoisted(() => ({
   handle: vi.fn(),
   removeHandler: vi.fn(),
 }));
-const tunnelManagerMock = vi.hoisted(() => ({
-  callbacks: undefined as TunnelManagerCallbacks | undefined,
-  disposeAll: vi.fn(),
-  getRuntimeState: vi.fn(),
-  list: vi.fn(),
-  logs: vi.fn(),
-  start: vi.fn(),
-  stop: vi.fn(),
-}));
 
 vi.mock('electron', () => ({
   ipcMain: ipcMainMock,
-}));
-
-vi.mock('../../tunnels/tunnel-manager', () => ({
-  TunnelManager: vi.fn().mockImplementation(function (callbacks: TunnelManagerCallbacks) {
-    tunnelManagerMock.callbacks = callbacks;
-    return {
-      disposeAll: tunnelManagerMock.disposeAll,
-      getRuntimeState: tunnelManagerMock.getRuntimeState,
-      list: tunnelManagerMock.list,
-      logs: tunnelManagerMock.logs,
-      start: tunnelManagerMock.start,
-      stop: tunnelManagerMock.stop,
-    };
-  }),
 }));
 
 function getHandler(channel: string): ((event: unknown, payload?: unknown) => unknown) | undefined {
   return ipcMainMock.handle.mock.calls.find(
     ([registeredChannel]) => registeredChannel === channel,
   )?.[1];
-}
-
-function createWindowMock(isDestroyed = false): {
-  isDestroyed: () => boolean;
-  webContents: { send: ReturnType<typeof vi.fn> };
-} {
-  return {
-    isDestroyed: vi.fn(() => isDestroyed),
-    webContents: {
-      send: vi.fn(),
-    },
-  };
 }
 
 interface TestTunnelManager {
@@ -90,13 +49,6 @@ describe('registerTunnelHandlers', () => {
   beforeEach(() => {
     ipcMainMock.handle.mockClear();
     ipcMainMock.removeHandler.mockClear();
-    tunnelManagerMock.callbacks = undefined;
-    tunnelManagerMock.disposeAll.mockClear();
-    tunnelManagerMock.getRuntimeState.mockClear();
-    tunnelManagerMock.list.mockClear();
-    tunnelManagerMock.logs.mockClear();
-    tunnelManagerMock.start.mockClear();
-    tunnelManagerMock.stop.mockClear();
   });
 
   it('registers tunnel handlers and joins SSH config hosts with runtime state', () => {
@@ -148,7 +100,6 @@ describe('registerTunnelHandlers', () => {
 
     // When: tunnel:list is invoked.
     registerTunnelHandlers({
-      getWindow: () => null,
       sshConfigManager,
       tunnelManager,
     });
@@ -186,7 +137,6 @@ describe('registerTunnelHandlers', () => {
     // Given: tunnel handlers registered with an injected runtime manager.
     const tunnelManager = createTunnelManager();
     registerTunnelHandlers({
-      getWindow: () => null,
       sshConfigManager: {
         list: vi.fn(() => []),
       },
@@ -209,7 +159,6 @@ describe('registerTunnelHandlers', () => {
     // Given: tunnel handlers have been registered.
     const tunnelManager = createTunnelManager();
     const dispose = registerTunnelHandlers({
-      getWindow: () => null,
       sshConfigManager: {
         list: vi.fn(() => []),
       },
@@ -225,61 +174,6 @@ describe('registerTunnelHandlers', () => {
     expect(ipcMainMock.removeHandler).toHaveBeenCalledWith(IPC.TUNNEL_STOP);
     expect(ipcMainMock.removeHandler).toHaveBeenCalledWith(IPC.TUNNEL_LOGS);
     expect(tunnelManager.disposeAll).toHaveBeenCalledOnce();
-  });
-
-  it('broadcasts status and log events from the default tunnel manager callbacks', () => {
-    // Given: registering without an injected tunnel manager wires callbacks to the current window.
-    const window = createWindowMock();
-    registerTunnelHandlers({
-      getWindow: () => window as unknown as BrowserWindow,
-      sshConfigManager: {
-        list: vi.fn(() => []),
-      },
-    });
-
-    // When: runtime callbacks publish a status and a log line.
-    const statusEvent: TunnelStatusChangedEvent = {
-      alias: 'dev',
-      status: 'error',
-      error: 'bind failed',
-    };
-    const logEvent: TunnelLogEvent = {
-      alias: 'dev',
-      line: '2026-05-06T00:00:00.000Z bind failed',
-    };
-    tunnelManagerMock.callbacks?.onStatusChanged(statusEvent);
-    tunnelManagerMock.callbacks?.onLog(logEvent);
-
-    // Then: status payload is forwarded as-is and log line is adapted to the existing `data` API.
-    expect(window.webContents.send).toHaveBeenCalledWith(IPC.TUNNEL_STATUS_CHANGED, statusEvent);
-    expect(window.webContents.send).toHaveBeenCalledWith(IPC.TUNNEL_LOG, {
-      alias: 'dev',
-      data: '2026-05-06T00:00:00.000Z bind failed',
-    });
-  });
-
-  it('does not broadcast tunnel events after the window is destroyed', () => {
-    // Given: the current BrowserWindow has already been destroyed.
-    const window = createWindowMock(true);
-    registerTunnelHandlers({
-      getWindow: () => window as unknown as BrowserWindow,
-      sshConfigManager: {
-        list: vi.fn(() => []),
-      },
-    });
-
-    // When: runtime callbacks fire late.
-    tunnelManagerMock.callbacks?.onStatusChanged({
-      alias: 'dev',
-      status: 'running',
-    });
-    tunnelManagerMock.callbacks?.onLog({
-      alias: 'dev',
-      line: 'late log',
-    });
-
-    // Then: the event is dropped instead of touching a dead renderer.
-    expect(window.webContents.send).not.toHaveBeenCalled();
   });
 
   it('warns when an active runtime tunnel is no longer configured', () => {
@@ -311,7 +205,6 @@ describe('registerTunnelHandlers', () => {
 
     // When: renderer asks for the current tunnel list after config reload.
     registerTunnelHandlers({
-      getWindow: () => null,
       sshConfigManager,
       tunnelManager,
     });
