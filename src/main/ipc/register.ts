@@ -11,6 +11,7 @@ import { registerPaneInfoHandlers } from './handlers/pane-info';
 import { registerSettingsHandlers } from './handlers/settings';
 import { registerSshHandlers } from './handlers/ssh';
 import { registerTunnelHandlers } from './handlers/tunnel';
+import { registerWindowHandlers } from './handlers/window';
 import { registerWorkspaceHandlers } from './handlers/workspace';
 import { SshConfigManager } from '../ssh-config/manager';
 import { SshHostResolver } from '../ssh-config/host-resolver';
@@ -120,6 +121,9 @@ export function registerIpcHandlers(options: RegisterIpcHandlersOptions): Regist
     sshConfigManager,
     tunnelManager,
   });
+  const disposeWindowHandlers = registerWindowHandlers({
+    getWindow: options.getWindow,
+  });
 
   return {
     hasActiveTunnelForQuitConfirm: () =>
@@ -137,6 +141,7 @@ export function registerIpcHandlers(options: RegisterIpcHandlersOptions): Regist
       disposeSshHandlers();
       disposeSettingsHandlers();
       disposeTunnelHandlers();
+      disposeWindowHandlers();
       hotkeyManager.dispose();
       paneInfoTracker.dispose();
     },

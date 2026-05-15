@@ -20,6 +20,7 @@ const disposeMocks = vi.hoisted(() => ({
   settingsHandlers: vi.fn(),
   sshHandlers: vi.fn(),
   tunnelHandlers: vi.fn(),
+  windowHandlers: vi.fn(),
   workspaceHandlers: vi.fn(),
 }));
 
@@ -113,6 +114,10 @@ vi.mock('./handlers/ssh', () => ({
 
 vi.mock('./handlers/tunnel', () => ({
   registerTunnelHandlers: vi.fn(() => disposeMocks.tunnelHandlers),
+}));
+
+vi.mock('./handlers/window', () => ({
+  registerWindowHandlers: vi.fn(() => disposeMocks.windowHandlers),
 }));
 
 vi.mock('./handlers/workspace', () => ({

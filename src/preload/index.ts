@@ -123,6 +123,16 @@ const api = {
     openFile: (): Promise<void> => ipcRenderer.invoke(IPC.SETTINGS_OPEN_FILE),
     getFilePath: (): Promise<string> => ipcRenderer.invoke(IPC.SETTINGS_GET_FILE_PATH),
   },
+  window: {
+    isFullScreen: (): Promise<boolean> => ipcRenderer.invoke(IPC.WINDOW_IS_FULLSCREEN),
+    onFullScreenChanged: (cb: (isFullScreen: boolean) => void): (() => void) => {
+      const handler = (_: unknown, isFullScreen: boolean): void => cb(isFullScreen);
+      ipcRenderer.on(IPC.WINDOW_FULLSCREEN_CHANGED, handler);
+      return (): void => {
+        ipcRenderer.removeListener(IPC.WINDOW_FULLSCREEN_CHANGED, handler);
+      };
+    },
+  },
 } satisfies Api;
 
 if (process.contextIsolated) {
