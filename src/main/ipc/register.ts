@@ -124,8 +124,8 @@ export function registerIpcHandlers(options: RegisterIpcHandlersOptions): Regist
   return {
     hasActiveTunnelForQuitConfirm: () =>
       tunnelManager.list().some((runtimeEntry) => {
-        // `error` is intentionally ignored here: TunnelManager clears the child-process reference
-        // before entering that state, so there is no active SSH process left to protect.
+        // `error` is intentionally ignored here because it represents a settled tunnel failure,
+        // not an active SSH process that quit confirmation needs to protect.
         return runtimeEntry.state.status === 'starting' || runtimeEntry.state.status === 'running';
       }),
     hotkeyManager,
