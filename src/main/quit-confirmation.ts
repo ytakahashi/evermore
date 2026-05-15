@@ -9,6 +9,7 @@ interface QuitConfirmationControllerOptions {
   cleanup: () => void;
   getSettings: () => AppSettings;
   getWindow: () => BrowserWindow | null;
+  hasActiveTunnelForQuitConfirm: () => boolean;
   listPaneInfo: () => PaneRuntimeInfo[];
   requestQuit: () => void;
   showMessageBox: (
@@ -18,21 +19,60 @@ interface QuitConfirmationControllerOptions {
 }
 
 /**
- * Returns whether the current settings and pane activity require a quit confirmation prompt.
+ * Returns whether `running-only` mode has runtime activity that needs confirmation.
  */
-export function shouldConfirmQuit(
-  settings: AppSettings,
+export function isRunningOnlyConditionMet(
   paneInfo: readonly PaneRuntimeInfo[],
+  tunnelActiveForQuit: boolean,
 ): boolean {
-  if (settings.app.quitConfirm === 'never') {
-    return false;
-  }
+  return paneInfo.some((info) => info.activity === 'running') || tunnelActiveForQuit;
+}
 
-  if (settings.app.quitConfirm === 'always') {
-    return true;
-  }
-
+function hasRunningPane(paneInfo: readonly PaneRuntimeInfo[]): boolean {
   return paneInfo.some((info) => info.activity === 'running');
+}
+
+function createGenericDialogOptions(): MessageBoxOptions {
+  return {
+    type: 'warning',
+    buttons: ['Quit Evermore', 'Cancel'],
+    defaultId: 1,
+    cancelId: 1,
+    title: 'Quit Evermore?',
+    message: 'Quit Evermore?',
+    detail: 'Evermore will close.',
+    noLink: true,
+  };
+}
+
+function createRunningOnlyDialogOptions(
+  paneRunningForQuit: boolean,
+  tunnelActiveForQuit: boolean,
+): MessageBoxOptions {
+  const baseOptions = createGenericDialogOptions();
+
+  if (paneRunningForQuit && tunnelActiveForQuit) {
+    return {
+      ...baseOptions,
+      message: 'Terminal processes and SSH tunnels are still active.',
+      detail:
+        'Quitting will close Evermore, stop running terminal sessions, and close active SSH tunnels.',
+    };
+  }
+
+  if (tunnelActiveForQuit) {
+    return {
+      ...baseOptions,
+      message: 'An SSH tunnel is still active.',
+      detail: 'Quitting will close Evermore and stop any active SSH tunnels.',
+    };
+  }
+
+  return {
+    ...baseOptions,
+    message: 'A terminal process is still running.',
+    detail: 'Quitting will close Evermore and stop any running terminal sessions.',
+  };
 }
 
 /**
@@ -42,6 +82,7 @@ export class QuitConfirmationController {
   private readonly cleanup: () => void;
   private readonly getSettings: () => AppSettings;
   private readonly getWindow: () => BrowserWindow | null;
+  private readonly hasActiveTunnelForQuitConfirm: () => boolean;
   private readonly listPaneInfo: () => PaneRuntimeInfo[];
   private readonly requestQuit: () => void;
   private readonly showMessageBox: (
@@ -55,6 +96,7 @@ export class QuitConfirmationController {
     this.cleanup = options.cleanup;
     this.getSettings = options.getSettings;
     this.getWindow = options.getWindow;
+    this.hasActiveTunnelForQuitConfirm = options.hasActiveTunnelForQuitConfirm;
     this.listPaneInfo = options.listPaneInfo;
     this.requestQuit = options.requestQuit;
     this.showMessageBox = options.showMessageBox;
@@ -69,35 +111,47 @@ export class QuitConfirmationController {
       return;
     }
 
-    if (!shouldConfirmQuit(this.getSettings(), this.listPaneInfo())) {
+    if (this.promptOpen) {
+      event.preventDefault();
+      return;
+    }
+
+    const settings = this.getSettings();
+    let dialogOptions: MessageBoxOptions;
+
+    if (settings.app.quitConfirm === 'always') {
+      dialogOptions = createGenericDialogOptions();
+    } else if (settings.app.quitConfirm === 'never') {
       this.cleanup();
       return;
-    }
+    } else {
+      const paneInfo = this.listPaneInfo();
+      const tunnelActiveForQuit = this.hasActiveTunnelForQuitConfirm();
 
-    event.preventDefault();
-    if (this.promptOpen) {
-      return;
-    }
-
-    this.promptOpen = true;
-    void this.showMessageBox(this.getWindow(), {
-      type: 'warning',
-      buttons: ['Quit Evermore', 'Cancel'],
-      defaultId: 1,
-      cancelId: 1,
-      title: 'Quit Evermore?',
-      message: 'A terminal process is still running.',
-      detail: 'Quitting will close Evermore and stop any running terminal sessions.',
-      noLink: true,
-    }).then((result) => {
-      this.promptOpen = false;
-      if (result.response !== 0) {
+      if (!isRunningOnlyConditionMet(paneInfo, tunnelActiveForQuit)) {
+        this.cleanup();
         return;
       }
 
-      this.confirmedQuit = true;
-      this.cleanup();
-      this.requestQuit();
-    });
+      dialogOptions = createRunningOnlyDialogOptions(hasRunningPane(paneInfo), tunnelActiveForQuit);
+    }
+
+    event.preventDefault();
+    this.promptOpen = true;
+    void this.showMessageBox(this.getWindow(), dialogOptions)
+      .then((result) => {
+        this.promptOpen = false;
+        if (result.response !== 0) {
+          return;
+        }
+
+        this.confirmedQuit = true;
+        this.cleanup();
+        this.requestQuit();
+      })
+      .catch((_error: unknown) => {
+        // Treat dialog failures as a cancelled quit so the next before-quit can retry the prompt.
+        this.promptOpen = false;
+      });
   }
 }

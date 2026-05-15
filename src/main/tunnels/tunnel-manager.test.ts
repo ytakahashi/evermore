@@ -242,6 +242,22 @@ describe('TunnelManager', () => {
     });
   });
 
+  it('flushes pending log fragments when a process error settles state', () => {
+    // Given: ssh writes unterminated output before emitting an error event.
+    manager.start('dev');
+    spawnedProcesses[0]?.writeStderr('partial failure');
+
+    // When: child_process emits an error without a later exit event.
+    spawnedProcesses[0]?.emitError(new Error('ssh not found'));
+
+    // Then: the pending log fragment is preserved in the runtime snapshot.
+    expect(manager.logs('dev')).toEqual(['1970-01-01T00:00:00.000Z partial failure']);
+    expect(onLog).toHaveBeenLastCalledWith({
+      alias: 'dev',
+      line: '1970-01-01T00:00:00.000Z partial failure',
+    });
+  });
+
   it('ignores an exit event after a spawn error has already settled state', () => {
     // Given: a child process reports a spawn failure.
     manager.start('dev');

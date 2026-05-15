@@ -87,6 +87,7 @@ app.whenReady().then(() => {
     cleanup: cleanupRuntime,
     getSettings: () => settingsStore?.get() ?? DEFAULT_APP_SETTINGS,
     getWindow: () => mainWindow,
+    hasActiveTunnelForQuitConfirm: () => ipcRuntime?.hasActiveTunnelForQuitConfirm() ?? false,
     listPaneInfo: () => ipcRuntime?.paneInfoTracker.list() ?? [],
     requestQuit: () => {
       app.quit();

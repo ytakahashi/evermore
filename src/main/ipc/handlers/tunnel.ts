@@ -1,8 +1,8 @@
-import { ipcMain, type BrowserWindow } from 'electron';
+import { ipcMain } from 'electron';
 import { IPC } from '../../../shared/ipc-channels';
 import type { SSHHost, Tunnel } from '../../../shared/types';
 import type { SshConfigManager } from '../../ssh-config/manager';
-import { TunnelManager } from '../../tunnels/tunnel-manager';
+import type { TunnelManager } from '../../tunnels/tunnel-manager';
 
 type TunnelSshConfigManager = Pick<SshConfigManager, 'list'>;
 type TunnelRuntimeManager = Pick<
@@ -11,13 +11,8 @@ type TunnelRuntimeManager = Pick<
 >;
 
 interface RegisterTunnelHandlersOptions {
-  getWindow: () => BrowserWindow | null;
   sshConfigManager: TunnelSshConfigManager;
-  tunnelManager?: TunnelRuntimeManager;
-}
-
-function isWindowAvailable(window: BrowserWindow | null): window is BrowserWindow {
-  return window !== null && !window.isDestroyed();
+  tunnelManager: TunnelRuntimeManager;
 }
 
 function toTunnel(host: SSHHost, tunnelManager: TunnelRuntimeManager): Tunnel {
@@ -59,29 +54,7 @@ function warnAboutUnconfiguredActiveTunnels(
  * Bridges renderer tunnel requests to the main-process tunnel runtime manager.
  */
 export function registerTunnelHandlers(options: RegisterTunnelHandlersOptions): () => void {
-  const tunnelManager =
-    options.tunnelManager ??
-    new TunnelManager({
-      onStatusChanged: (event) => {
-        const window = options.getWindow();
-        // Tunnel processes can outlive a BrowserWindow; late runtime events are best-effort UI
-        // updates and should be dropped when no renderer is available.
-        if (isWindowAvailable(window)) {
-          window.webContents.send(IPC.TUNNEL_STATUS_CHANGED, event);
-        }
-      },
-      onLog: (event) => {
-        const window = options.getWindow();
-        // Keep the preload/API contract as `data` while allowing TunnelManager to use its more
-        // precise internal `line` name.
-        if (isWindowAvailable(window)) {
-          window.webContents.send(IPC.TUNNEL_LOG, {
-            alias: event.alias,
-            data: event.line,
-          });
-        }
-      },
-    });
+  const { tunnelManager } = options;
 
   ipcMain.handle(IPC.TUNNEL_LIST, () => {
     const hosts = options.sshConfigManager.list();

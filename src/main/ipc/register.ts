@@ -5,6 +5,7 @@ import { HotkeyManager } from '../hotkey/hotkey-manager';
 import { PaneInfoTracker } from '../pane-info/pane-info-tracker';
 import { PtyManager } from '../pty/pty-manager';
 import { SettingsStore } from '../settings/settings-store';
+import { TunnelManager } from '../tunnels/tunnel-manager';
 import { registerPtyHandlers } from './handlers/pty';
 import { registerPaneInfoHandlers } from './handlers/pane-info';
 import { registerSettingsHandlers } from './handlers/settings';
@@ -21,8 +22,13 @@ interface RegisterIpcHandlersOptions {
 
 export interface RegisteredIpcHandlers {
   dispose: () => void;
+  hasActiveTunnelForQuitConfirm: () => boolean;
   hotkeyManager: HotkeyManager;
   paneInfoTracker: PaneInfoTracker;
+}
+
+function isWindowAvailable(window: BrowserWindow | null): window is BrowserWindow {
+  return window !== null && !window.isDestroyed();
 }
 
 /**
@@ -80,6 +86,27 @@ export function registerIpcHandlers(options: RegisterIpcHandlersOptions): Regist
       paneInfoTracker.unregister(id);
     },
   });
+  const tunnelManager = new TunnelManager({
+    onStatusChanged: (event) => {
+      const window = options.getWindow();
+      // Tunnel processes can outlive a BrowserWindow; late runtime events are best-effort UI
+      // updates and should be dropped when no renderer is available.
+      if (isWindowAvailable(window)) {
+        window.webContents.send(IPC.TUNNEL_STATUS_CHANGED, event);
+      }
+    },
+    onLog: (event) => {
+      const window = options.getWindow();
+      // Keep the preload/API contract as `data` while allowing TunnelManager to use its more
+      // precise internal `line` name.
+      if (isWindowAvailable(window)) {
+        window.webContents.send(IPC.TUNNEL_LOG, {
+          alias: event.alias,
+          data: event.line,
+        });
+      }
+    },
+  });
   const disposePtyHandlers = registerPtyHandlers({ getWindow: options.getWindow, ptyManager });
   const disposePaneInfoHandlers = registerPaneInfoHandlers({
     getWindow: options.getWindow,
@@ -90,11 +117,17 @@ export function registerIpcHandlers(options: RegisterIpcHandlersOptions): Regist
   applyRuntimeSettings(settingsStore.get());
   const disposeSettingsHandlers = registerSettingsHandlers({ settingsStore, applyRuntimeSettings });
   const disposeTunnelHandlers = registerTunnelHandlers({
-    getWindow: options.getWindow,
     sshConfigManager,
+    tunnelManager,
   });
 
   return {
+    hasActiveTunnelForQuitConfirm: () =>
+      tunnelManager.list().some((runtimeEntry) => {
+        // `error` is intentionally ignored here: TunnelManager clears the child-process reference
+        // before entering that state, so there is no active SSH process left to protect.
+        return runtimeEntry.state.status === 'starting' || runtimeEntry.state.status === 'running';
+      }),
     hotkeyManager,
     paneInfoTracker,
     dispose: () => {
