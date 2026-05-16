@@ -187,7 +187,6 @@ describe('WorkspacesView', () => {
       infosByPtyId: {
         'pty-server': {
           ptyId: 'pty-server',
-          activity: 'running',
           processActivity: 'running',
           foregroundCommand: 'pnpm run dev',
           foregroundSession: { kind: 'other' },

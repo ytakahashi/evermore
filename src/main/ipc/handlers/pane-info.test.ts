@@ -28,7 +28,6 @@ describe('registerPaneInfoHandlers', () => {
     // Given: an injected pane info tracker.
     const info: PaneRuntimeInfo = {
       ptyId: 'pty-1',
-      activity: 'running',
       processActivity: 'running',
       foregroundCommand: 'pnpm test',
       foregroundSession: { kind: 'other' },

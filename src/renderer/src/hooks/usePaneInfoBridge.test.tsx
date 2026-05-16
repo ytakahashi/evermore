@@ -6,7 +6,6 @@ import { usePaneInfoBridge } from './usePaneInfoBridge';
 
 const info: PaneRuntimeInfo = {
   ptyId: 'pty-1',
-  activity: 'idle',
   processActivity: 'idle',
   foregroundSession: { kind: 'none' },
   integration: {
@@ -75,7 +74,6 @@ describe('usePaneInfoBridge', () => {
     // When: main-process runtime events arrive through preload subscriptions.
     const runningInfo: PaneRuntimeInfo = {
       ptyId: 'pty-1',
-      activity: 'running',
       processActivity: 'running',
       foregroundCommand: 'pnpm dev',
       foregroundSession: { kind: 'other' },

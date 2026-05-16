@@ -133,8 +133,7 @@ export class PaneInfoTracker {
    * Stores the latest OSC 7 cwd observed by the renderer-side terminal parser.
    *
    * Delegates to {@link applySignal} so renderer-driven and main-process-driven OSC 7 inputs share
-   * the same merge rules (in particular, the SSH skip and the integration protocol bookkeeping).
-   * Remove this method once the renderer OSC 7 handler is retired in Phase 4.
+   * the same merge rules (in particular, the SSH skip and integration protocol bookkeeping).
    */
   public notifyCwd(ptyId: string, cwd: string): void {
     this.applySignal(ptyId, { type: 'cwd', source: 'osc7', cwd });
@@ -342,7 +341,6 @@ export class PaneInfoTracker {
     const activeCommand = process.currentCommand ?? process.lastCommand;
     const nextInfo: PaneRuntimeInfo = {
       ptyId: process.ptyId,
-      activity: processActivity,
       processActivity,
       foregroundSession:
         processActivity === 'idle' ? { kind: 'none' } : { ...process.foregroundSession },

@@ -30,9 +30,11 @@ interface UseTerminalResult {
 /**
  * Connects an xterm.js instance to the main-process PTY API for one terminal pane.
  *
- * This hook intentionally owns both xterm and PTY subscriptions together. Phase 1 has no pane store
- * yet, so the runtime PTY id lives here and will later become the implementation detail behind a
- * persisted pane model.
+ * The hook owns the renderer-only terminal lifecycle: xterm/addon setup, fit/resize updates,
+ * settings application, PTY creation/disposal, PTY data forwarding, focus handling, and optional
+ * initial command injection. Pane runtime state itself is owned by the main process, but this hook
+ * still reports the PTY id and keeps two migration fallbacks alive until later OSC phases remove
+ * them: renderer-side OSC 7 cwd updates and lightweight input-based command reporting.
  */
 export function useTerminal(options: UseTerminalOptions): UseTerminalResult {
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -210,6 +212,10 @@ export function useTerminal(options: UseTerminalOptions): UseTerminalResult {
     }
 
     focusIfActive();
+    // The main-process TerminalSignalParser also observes OSC 7 and forwards it through
+    // PaneInfoTracker. This renderer-side handler exists to drive `onCwdChange` for workspace cwd
+    // persistence; once that path is sourced from the main-process pane runtime feed, both this
+    // handler and the `notifyCwd` IPC can be removed.
     const osc7Disposable = terminal.parser.registerOscHandler(7, (data) => {
       const cwd = parseOsc7Cwd(data);
       if (cwd) {

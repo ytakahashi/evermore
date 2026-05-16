@@ -57,9 +57,8 @@ function shellRow(tpgid: number): ProcessTableRow {
 function expectedInfo(
   overrides: Partial<PaneRuntimeInfo> & Pick<PaneRuntimeInfo, 'ptyId' | 'observedAt'>,
 ): PaneRuntimeInfo {
-  const processActivity = overrides.processActivity ?? overrides.activity ?? 'idle';
+  const processActivity = overrides.processActivity ?? 'idle';
   return {
-    activity: processActivity,
     processActivity,
     foregroundSession: { kind: processActivity === 'idle' ? 'none' : 'other' },
     integration: {
@@ -180,32 +179,6 @@ describe('PaneInfoTracker', () => {
         observedAt: 1002,
       }),
     });
-  });
-
-  it('keeps activity and processActivity equal during migration', async () => {
-    // Given: a registered pane has a foreground process.
-    tracker.register('pty-1', 123);
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    rows = [
-      shellRow(456),
-      {
-        pid: 456,
-        ppid: 123,
-        pgid: 456,
-        tpgid: 456,
-        command: '/usr/bin/make',
-        args: 'make test',
-      },
-    ];
-
-    // When: polling emits running state.
-    now = 1002;
-    await tracker.poll();
-
-    // Then: legacy and new activity fields carry the same value.
-    const [info] = tracker.list();
-    expect(info?.activity).toBe('running');
-    expect(info?.processActivity).toBe('running');
   });
 
   it('records shell integration protocols when signals are applied directly', () => {

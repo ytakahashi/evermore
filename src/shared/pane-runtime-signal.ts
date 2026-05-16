@@ -1,7 +1,6 @@
 /**
- * Runtime signals extracted from PTY output by the main-process terminal signal parser.
- *
- * Phase 1 only emits these signals. Pane runtime state consumes them in later phases.
+ * Runtime signals extracted from PTY output by the main-process terminal signal parser and
+ * consumed by `PaneInfoTracker` to drive shell-integration-aware pane runtime state.
  */
 export type PaneRuntimeSignal =
   | { type: 'cwd'; cwd: string; source: PaneRuntimeSignalCwdSource }
