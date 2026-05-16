@@ -1,8 +1,10 @@
 import type { BrowserWindow } from 'electron';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { IPC } from '../../shared/ipc-channels';
+import type { PaneRuntimeSignal } from '../../shared/pane-runtime-signal';
 import { DEFAULT_APP_SETTINGS } from '../../shared/settings-defaults';
 import type { AppSettings } from '../../shared/types';
+import type { PtyManagerCallbacks } from '../pty/types';
 import type { SettingsStore } from '../settings/settings-store';
 import type {
   TunnelLogEvent,
@@ -22,6 +24,16 @@ const disposeMocks = vi.hoisted(() => ({
   tunnelHandlers: vi.fn(),
   windowHandlers: vi.fn(),
   workspaceHandlers: vi.fn(),
+}));
+
+const paneInfoTrackerMock = vi.hoisted(() => ({
+  applySignal: vi.fn<(ptyId: string, signal: PaneRuntimeSignal) => void>(),
+  register: vi.fn<(ptyId: string, shellPid: number) => void>(),
+  unregister: vi.fn<(ptyId: string) => void>(),
+}));
+
+const ptyManagerMock = vi.hoisted(() => ({
+  callbacks: undefined as PtyManagerCallbacks | undefined,
 }));
 
 const tunnelManagerMock = vi.hoisted(() => ({
@@ -46,17 +58,19 @@ vi.mock('../hotkey/hotkey-manager', () => ({
 vi.mock('../pane-info/pane-info-tracker', () => ({
   PaneInfoTracker: vi.fn().mockImplementation(function () {
     return {
+      applySignal: paneInfoTrackerMock.applySignal,
       dispose: disposeMocks.paneInfoTrackerDispose,
       list: vi.fn(() => []),
-      register: vi.fn(),
+      register: paneInfoTrackerMock.register,
       setPollIntervalMs: vi.fn(),
-      unregister: vi.fn(),
+      unregister: paneInfoTrackerMock.unregister,
     };
   }),
 }));
 
 vi.mock('../pty/pty-manager', () => ({
-  PtyManager: vi.fn().mockImplementation(function () {
+  PtyManager: vi.fn().mockImplementation(function (callbacks: PtyManagerCallbacks) {
+    ptyManagerMock.callbacks = callbacks;
     return {};
   }),
 }));
@@ -159,6 +173,10 @@ describe('registerIpcHandlers', () => {
     tunnelManagerMock.logs.mockClear();
     tunnelManagerMock.start.mockClear();
     tunnelManagerMock.stop.mockClear();
+    paneInfoTrackerMock.applySignal.mockClear();
+    paneInfoTrackerMock.register.mockClear();
+    paneInfoTrackerMock.unregister.mockClear();
+    ptyManagerMock.callbacks = undefined;
   });
 
   it('broadcasts tunnel status and log events to the current window', () => {
@@ -241,6 +259,22 @@ describe('registerIpcHandlers', () => {
 
     // When/Then: there is nothing to confirm against.
     expect(handlers.hasActiveTunnelForQuitConfirm()).toBe(false);
+  });
+
+  it('forwards PTY signals to the pane info tracker', () => {
+    // Given: IPC runtime is registered and ptyManager exposes its callback bundle.
+    registerIpcHandlers({
+      getWindow: () => null,
+      settingsStore: createSettingsStore() as unknown as SettingsStore,
+    });
+    expect(ptyManagerMock.callbacks).toBeDefined();
+
+    // When: a runtime signal is observed from PTY output.
+    const signal: PaneRuntimeSignal = { type: 'shell-command-started', source: 'osc133' };
+    ptyManagerMock.callbacks?.onSignal?.({ id: 'pty-1', signal });
+
+    // Then: the pane info tracker receives the signal as the primary observer.
+    expect(paneInfoTrackerMock.applySignal).toHaveBeenCalledWith('pty-1', signal);
   });
 
   it('drops tunnel events after the current window is destroyed', () => {

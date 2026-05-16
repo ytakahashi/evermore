@@ -32,8 +32,6 @@ export interface Pane {
   initialCommand?: string; // runtime only; sanitizePane drops it from persistence so restored panes do not replay
 }
 
-export type PaneActivity = 'idle' | 'running';
-
 export type PaneProcessActivity = 'idle' | 'running';
 
 export type PaneSessionKind = 'none' | 'ssh' | 'other';
@@ -84,11 +82,6 @@ export interface PaneAgentInfo {
 
 export interface PaneRuntimeInfo {
   ptyId: string;
-  /**
-   * @deprecated Use `processActivity`. Kept during the Phase 2 migration and emitted with the same
-   * value as `processActivity`.
-   */
-  activity: PaneActivity;
   processActivity: PaneProcessActivity;
   /** Foreground command line when activity is running. */
   foregroundCommand?: string;

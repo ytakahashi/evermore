@@ -19,7 +19,7 @@ interface PaneSummaryProps {
 }
 
 function PaneSummary({ info, isActivePane, onClick, pane }: PaneSummaryProps): React.JSX.Element {
-  const isRunning = (info?.processActivity ?? info?.activity) === 'running';
+  const isRunning = info?.processActivity === 'running';
   const label =
     isRunning && info?.foregroundCommand
       ? info.foregroundCommand

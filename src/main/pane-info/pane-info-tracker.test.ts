@@ -1,7 +1,47 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PaneRuntimeInfo } from '../../shared/types';
+import { TerminalSignalParser } from '../pty/terminal-signal-parser';
 import { PaneInfoTracker } from './pane-info-tracker';
 import type { PaneInfoChangedEvent, ProcessTableRow } from './types';
+
+/**
+ * Decodes only the terminal control bytes `\x1b` (ESC) and `\x07` (BEL) used to delimit OSC
+ * sequences in the fixture, leaving inner OSC 633;E `\xNN` escapes (`\x3b`, `\x27`, `\x5c`) intact
+ * so the parser's command-line decoder sees the on-the-wire shape produced by VS Code.
+ */
+function decodeEscapedFixture(fixture: string): string {
+  let decoded = '';
+
+  for (let index = 0; index < fixture.length; index += 1) {
+    const char = fixture[index];
+    if (char !== '\\') {
+      decoded += char;
+      continue;
+    }
+
+    const next = fixture[index + 1];
+    if (next === '\\') {
+      decoded += '\\';
+      index += 1;
+      continue;
+    }
+
+    if (next === 'x') {
+      const hex = fixture.slice(index + 2, index + 4);
+      if (hex.toLowerCase() === '1b' || hex.toLowerCase() === '07') {
+        decoded += String.fromCharCode(Number.parseInt(hex, 16));
+        index += 3;
+        continue;
+      }
+    }
+
+    decoded += char;
+  }
+
+  return decoded;
+}
 
 function shellRow(tpgid: number): ProcessTableRow {
   return {
@@ -17,9 +57,8 @@ function shellRow(tpgid: number): ProcessTableRow {
 function expectedInfo(
   overrides: Partial<PaneRuntimeInfo> & Pick<PaneRuntimeInfo, 'ptyId' | 'observedAt'>,
 ): PaneRuntimeInfo {
-  const processActivity = overrides.processActivity ?? overrides.activity ?? 'idle';
+  const processActivity = overrides.processActivity ?? 'idle';
   return {
-    activity: processActivity,
     processActivity,
     foregroundSession: { kind: processActivity === 'idle' ? 'none' : 'other' },
     integration: {
@@ -140,32 +179,6 @@ describe('PaneInfoTracker', () => {
         observedAt: 1002,
       }),
     });
-  });
-
-  it('keeps activity and processActivity equal during migration', async () => {
-    // Given: a registered pane has a foreground process.
-    tracker.register('pty-1', 123);
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    rows = [
-      shellRow(456),
-      {
-        pid: 456,
-        ppid: 123,
-        pgid: 456,
-        tpgid: 456,
-        command: '/usr/bin/make',
-        args: 'make test',
-      },
-    ];
-
-    // When: polling emits running state.
-    now = 1002;
-    await tracker.poll();
-
-    // Then: legacy and new activity fields carry the same value.
-    const [info] = tracker.list();
-    expect(info?.activity).toBe('running');
-    expect(info?.processActivity).toBe('running');
   });
 
   it('records shell integration protocols when signals are applied directly', () => {
@@ -671,6 +684,125 @@ describe('PaneInfoTracker', () => {
 
     // Then: missedPsCommandStarts is reset and stale flips back to false.
     expect(tracker.list()[0]?.integration.stale).toBe(false);
+  });
+
+  it('reflects a VS Code-compatible OSC fixture end-to-end from parser through tracker emission', async () => {
+    // Given: a tracker pipes a TerminalSignalParser into its applySignal entry point.
+    tracker.register('pty-1', 123);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    onChanged.mockClear();
+    now = 1002;
+    const parser = new TerminalSignalParser({
+      emit: (signal) => {
+        tracker.applySignal('pty-1', signal);
+      },
+    });
+    const fixture = readFileSync(
+      join(process.cwd(), 'src/main/pty/__fixtures__/vscode-osc.txt'),
+      'utf8',
+    );
+
+    // When: the VS Code shell integration fixture is streamed through the parser.
+    parser.applyChunk(decodeEscapedFixture(fixture));
+
+    // Then: the tracker reflects cwd, integration protocols, the in-flight command lifecycle, and
+    // the finished command with its exit code as a single coherent runtime snapshot.
+    const [info] = tracker.list();
+    expect(info?.cwd).toBe('/Users/me/project');
+    expect(info?.integration.shell).toBe(true);
+    expect(info?.integration.protocols).toEqual(['osc633', 'osc7']);
+    expect(info?.command).toEqual({
+      line: "echo hello; printf 'done\\n'",
+      startedAt: 1002,
+      finishedAt: 1002,
+      exitCode: 0,
+      source: 'shell-integration',
+    });
+    expect(onChanged).toHaveBeenCalled();
+  });
+
+  it('swaps foregroundCommand priority between OSC and fallback when integration toggles stale and recovers', async () => {
+    // Given: shell integration is active with both a fallback submitted command and a 633;E line.
+    tracker.register('pty-1', 123);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    rows = [
+      shellRow(456),
+      {
+        pid: 456,
+        ppid: 123,
+        pgid: 456,
+        tpgid: 456,
+        command: '/usr/bin/node',
+        args: 'node /Users/tester/project/server.js',
+      },
+    ];
+    now = 1002;
+    await tracker.poll();
+    tracker.applySignal('pty-1', {
+      type: 'shell-command-line',
+      command: 'pnpm dev',
+      source: 'osc633',
+    });
+    tracker.applySignal('pty-1', { type: 'shell-command-started', source: 'osc133' });
+    tracker.notifyCommand('pty-1', 'pnpm run dev');
+
+    // Then (sanity): while integration is fresh, the OSC command line wins.
+    expect(tracker.list()[0]?.foregroundCommand).toBe('pnpm dev');
+
+    // When: ps records two more idle→running transitions so missedPsCommandStarts crosses the
+    // stale threshold without a matching 133;C reset.
+    rows = [shellRow(123)];
+    now = 1003;
+    await tracker.poll();
+    rows = [
+      shellRow(789),
+      {
+        pid: 789,
+        ppid: 123,
+        pgid: 789,
+        tpgid: 789,
+        command: '/usr/bin/make',
+        args: 'make test',
+      },
+    ];
+    now = 1004;
+    await tracker.poll();
+    rows = [shellRow(123)];
+    now = 1005;
+    await tracker.poll();
+    rows = [
+      shellRow(789),
+      {
+        pid: 789,
+        ppid: 123,
+        pgid: 789,
+        tpgid: 789,
+        command: '/usr/bin/make',
+        args: 'make test',
+      },
+    ];
+    now = 1006;
+    await tracker.poll();
+
+    // Then: integration goes stale and the priority order flips so the user-submitted command
+    // wins over the now-suspect OSC command line.
+    const staleInfo = tracker.list()[0];
+    expect(staleInfo?.integration.stale).toBe(true);
+    expect(staleInfo?.foregroundCommand).toBe('pnpm run dev');
+
+    // When: a fresh shell-command-started signal arrives and resets missedPsCommandStarts.
+    now = 1007;
+    tracker.applySignal('pty-1', {
+      type: 'shell-command-line',
+      command: 'pnpm build',
+      source: 'osc633',
+    });
+    tracker.applySignal('pty-1', { type: 'shell-command-started', source: 'osc133' });
+
+    // Then: integration recovers and the OSC command line is primary again.
+    const recoveredInfo = tracker.list()[0];
+    expect(recoveredInfo?.integration.stale).toBe(false);
+    expect(recoveredInfo?.foregroundCommand).toBe('pnpm build');
   });
 
   it('unregisters panes and clears runtime info', () => {
