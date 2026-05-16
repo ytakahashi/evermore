@@ -34,11 +34,70 @@ export interface Pane {
 
 export type PaneActivity = 'idle' | 'running';
 
+export type PaneProcessActivity = 'idle' | 'running';
+
+export type PaneSessionKind = 'none' | 'ssh' | 'other';
+
+export interface PaneForegroundSession {
+  kind: PaneSessionKind;
+  /** Reserved for future session-specific display metadata. */
+  details?: string;
+}
+
+export type PaneCommandSource = 'shell-integration' | 'input-heuristic' | 'process-table';
+
+export interface PaneCommandInfo {
+  line: string;
+  startedAt?: number;
+  finishedAt?: number;
+  exitCode?: number;
+  source: PaneCommandSource;
+}
+
+export type PaneIntegrationProtocol = 'osc7' | 'osc133' | 'osc633' | 'osc9' | 'osc777' | 'evermore';
+
+export interface PaneIntegrationInfo {
+  /** Sticky indicator that this PTY has emitted shell lifecycle or command-line OSC signals. */
+  shell: boolean;
+  /** Protocols observed for this PTY, retained until the PTY exits. */
+  protocols: PaneIntegrationProtocol[];
+  /** Unix timestamp in milliseconds for the latest observed terminal runtime sequence. */
+  lastSequenceAt: number;
+  /** Whether shell integration has likely gone stale and fallback inputs are primary again. */
+  stale: boolean;
+}
+
+export interface PaneAttentionInfo {
+  kind: 'awaiting-input' | 'bell';
+  source: 'agent-protocol' | 'notification' | 'heuristic';
+  observedAt: number;
+  expiresAt?: number;
+}
+
+export interface PaneAgentInfo {
+  known?: 'claude' | 'gemini' | 'codex';
+  kind: string | undefined;
+  status?: 'running' | 'thinking' | 'awaiting-input' | 'complete';
+  source: 'command-line' | 'agent-protocol' | 'heuristic';
+  observedAt: number;
+}
+
 export interface PaneRuntimeInfo {
   ptyId: string;
+  /**
+   * @deprecated Use `processActivity`. Kept during the Phase 2 migration and emitted with the same
+   * value as `processActivity`.
+   */
   activity: PaneActivity;
+  processActivity: PaneProcessActivity;
   /** Foreground command line when activity is running. */
   foregroundCommand?: string;
+  foregroundSession: PaneForegroundSession;
+  command?: PaneCommandInfo;
+  attention?: PaneAttentionInfo;
+  agent?: PaneAgentInfo;
+  cwd?: string;
+  integration: PaneIntegrationInfo;
   /** Unix timestamp in milliseconds for the latest observation. */
   observedAt: number;
 }

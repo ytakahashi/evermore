@@ -1,4 +1,7 @@
-import type { PaneRuntimeSignal } from '../../shared/pane-runtime-signal';
+import type {
+  PaneRuntimeSignal,
+  PaneRuntimeSignalLifecycleSource,
+} from '../../shared/pane-runtime-signal';
 
 const ESC = '\x1b';
 const BEL = '\x07';
@@ -181,27 +184,33 @@ function parseLifecycleSignal(payload: string): PaneRuntimeSignal | null {
     return null;
   }
 
+  const source: PaneRuntimeSignalLifecycleSource = namespace === '133' ? 'osc133' : 'osc633';
+
   switch (segments[1]) {
     case 'A':
-      return { type: 'shell-prompt-start' };
+      return { type: 'shell-prompt-start', source };
     case 'B':
-      return { type: 'shell-prompt-end' };
+      return { type: 'shell-prompt-end', source };
     case 'C':
-      return { type: 'shell-command-started' };
+      return { type: 'shell-command-started', source };
     case 'D':
-      return parseCommandFinishedSignal(segments[2]);
+      return parseCommandFinishedSignal(source, segments[2]);
     default:
       return null;
   }
 }
 
-function parseCommandFinishedSignal(exitCodePayload: string | undefined): PaneRuntimeSignal {
+function parseCommandFinishedSignal(
+  source: PaneRuntimeSignalLifecycleSource,
+  exitCodePayload: string | undefined,
+): PaneRuntimeSignal {
   if (exitCodePayload === undefined || !/^-?\d+$/.test(exitCodePayload)) {
-    return { type: 'shell-command-finished' };
+    return { type: 'shell-command-finished', source };
   }
 
   return {
     type: 'shell-command-finished',
+    source,
     exitCode: Number(exitCodePayload),
   };
 }

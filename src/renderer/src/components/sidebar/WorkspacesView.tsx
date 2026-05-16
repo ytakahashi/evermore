@@ -19,9 +19,9 @@ interface PaneSummaryProps {
 }
 
 function PaneSummary({ info, isActivePane, onClick, pane }: PaneSummaryProps): React.JSX.Element {
-  const isRunning = info?.activity === 'running';
+  const isRunning = (info?.processActivity ?? info?.activity) === 'running';
   const label =
-    isRunning && info.foregroundCommand
+    isRunning && info?.foregroundCommand
       ? info.foregroundCommand
       : getPathBasename(pane.cwd, { emptyFallback: '(loading)' });
   const cwdLabel = getTruncatedPathLabel(pane.cwd);

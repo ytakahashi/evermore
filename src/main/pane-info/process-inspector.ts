@@ -74,11 +74,13 @@ export function observePaneActivity(
     .filter((row) => row.pgid === shellRow.tpgid && row.pid !== shellPid)
     .sort((a, b) => a.pid - b.pid);
   const leader = foregroundRows.find((row) => row.pid === row.pgid) ?? foregroundRows[0];
-  const foregroundCommand = leader ? formatCommandLine(leader.args || leader.command) : undefined;
+  const foregroundArgs = leader ? leader.args || leader.command : undefined;
+  const foregroundCommand = foregroundArgs ? formatCommandLine(foregroundArgs) : undefined;
 
   return {
     activity: 'running',
     foregroundCommand,
+    foregroundArgs,
   };
 }
 

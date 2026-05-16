@@ -70,13 +70,13 @@ describe('TerminalSignalParser', () => {
 
     // Then: each lifecycle marker is converted into the shared signal shape.
     expect(signals).toEqual([
-      { type: 'shell-prompt-start' },
-      { type: 'shell-prompt-end' },
-      { type: 'shell-command-started' },
-      { type: 'shell-command-finished' },
-      { type: 'shell-command-finished', exitCode: 0 },
-      { type: 'shell-command-finished', exitCode: 130 },
-      { type: 'shell-prompt-start' },
+      { type: 'shell-prompt-start', source: 'osc133' },
+      { type: 'shell-prompt-end', source: 'osc133' },
+      { type: 'shell-command-started', source: 'osc133' },
+      { type: 'shell-command-finished', source: 'osc133' },
+      { type: 'shell-command-finished', source: 'osc133', exitCode: 0 },
+      { type: 'shell-command-finished', source: 'osc133', exitCode: 130 },
+      { type: 'shell-prompt-start', source: 'osc133' },
     ]);
   });
 
@@ -96,10 +96,10 @@ describe('TerminalSignalParser', () => {
 
     // Then: A/B/C/D are mapped while unsupported 633 subcommands are ignored.
     expect(signals).toEqual([
-      { type: 'shell-prompt-start' },
-      { type: 'shell-prompt-end' },
-      { type: 'shell-command-started' },
-      { type: 'shell-command-finished', exitCode: 0 },
+      { type: 'shell-prompt-start', source: 'osc633' },
+      { type: 'shell-prompt-end', source: 'osc633' },
+      { type: 'shell-command-started', source: 'osc633' },
+      { type: 'shell-command-finished', source: 'osc633', exitCode: 0 },
     ]);
   });
 
@@ -111,7 +111,10 @@ describe('TerminalSignalParser', () => {
     const signals = collectSignals([data]);
 
     // Then: the parser stays a dumb tap and emits both observations.
-    expect(signals).toEqual([{ type: 'shell-prompt-start' }, { type: 'shell-prompt-start' }]);
+    expect(signals).toEqual([
+      { type: 'shell-prompt-start', source: 'osc133' },
+      { type: 'shell-prompt-start', source: 'osc633' },
+    ]);
   });
 
   it('supports ST terminators and chunk boundaries', () => {
@@ -122,7 +125,10 @@ describe('TerminalSignalParser', () => {
     const signals = collectSignals(chunks);
 
     // Then: split BEL/ST-terminated sequences are reconstructed.
-    expect(signals).toEqual([{ type: 'shell-command-started' }, { type: 'shell-prompt-end' }]);
+    expect(signals).toEqual([
+      { type: 'shell-command-started', source: 'osc133' },
+      { type: 'shell-prompt-end', source: 'osc133' },
+    ]);
   });
 
   it('parses OSC 7 cwd payloads', () => {
@@ -188,7 +194,7 @@ describe('TerminalSignalParser', () => {
     const signals = collectSignals(data, 16);
 
     // Then: the oversized payload is ignored and later OSC sequences still parse normally.
-    expect(signals).toEqual([{ type: 'shell-command-started' }]);
+    expect(signals).toEqual([{ type: 'shell-command-started', source: 'osc133' }]);
   });
 
   it('ignores unknown OSC and non-OSC escape sequences', () => {
@@ -230,7 +236,7 @@ describe('TerminalSignalParser', () => {
     parser.applyChunk('\x1b]133;B\x07');
 
     // Then: the stale partial payload is gone and subsequent complete OSC still works.
-    expect(signals).toEqual([{ type: 'shell-prompt-end' }]);
+    expect(signals).toEqual([{ type: 'shell-prompt-end', source: 'osc133' }]);
   });
 
   it('does not throw when the signal callback throws', () => {
@@ -260,16 +266,16 @@ describe('TerminalSignalParser', () => {
 
     // Then: supported VS Code signals are emitted in order and unsupported properties are dropped.
     expect(signals).toEqual([
-      { type: 'shell-prompt-start' },
+      { type: 'shell-prompt-start', source: 'osc633' },
       { type: 'cwd', cwd: '/Users/me/project', source: 'osc7' },
-      { type: 'shell-prompt-end' },
+      { type: 'shell-prompt-end', source: 'osc633' },
       {
         type: 'shell-command-line',
         command: "echo hello; printf 'done\\n'",
         source: 'osc633',
       },
-      { type: 'shell-command-started' },
-      { type: 'shell-command-finished', exitCode: 0 },
+      { type: 'shell-command-started', source: 'osc633' },
+      { type: 'shell-command-finished', source: 'osc633', exitCode: 0 },
     ]);
   });
 });

@@ -25,11 +25,15 @@ export function isRunningOnlyConditionMet(
   paneInfo: readonly PaneRuntimeInfo[],
   tunnelActiveForQuit: boolean,
 ): boolean {
-  return paneInfo.some((info) => info.activity === 'running') || tunnelActiveForQuit;
+  return paneInfo.some((info) => getProcessActivity(info) === 'running') || tunnelActiveForQuit;
 }
 
 function hasRunningPane(paneInfo: readonly PaneRuntimeInfo[]): boolean {
-  return paneInfo.some((info) => info.activity === 'running');
+  return paneInfo.some((info) => getProcessActivity(info) === 'running');
+}
+
+function getProcessActivity(info: PaneRuntimeInfo): PaneRuntimeInfo['processActivity'] {
+  return info.processActivity ?? info.activity;
 }
 
 function createGenericDialogOptions(): MessageBoxOptions {
