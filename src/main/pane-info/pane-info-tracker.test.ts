@@ -404,6 +404,275 @@ describe('PaneInfoTracker', () => {
     expect(info?.foregroundCommand).toBe('/usr/bin/ssh user@host');
   });
 
+  it('does not promote processActivity to running for shell-command-line without a matching shell-command-started', async () => {
+    // Given: a pane is idle and no shell-command-started has been observed.
+    tracker.register('pty-1', 123);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    onChanged.mockClear();
+
+    // When: only a shell-command-line is applied without the matching 133;C.
+    now = 1002;
+    tracker.applySignal('pty-1', {
+      type: 'shell-command-line',
+      command: 'pnpm test',
+      source: 'osc633',
+    });
+
+    // Then: the pane stays idle and the OSC command line does not surface as foregroundCommand.
+    const [info] = tracker.list();
+    expect(info?.processActivity).toBe('idle');
+    expect(info?.foregroundCommand).toBeUndefined();
+  });
+
+  it('records lastCommand with exitCode on shell-command-finished and resets currentCommand', async () => {
+    // Given: a pane has a shell integration command in flight.
+    tracker.register('pty-1', 123);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    now = 1002;
+    tracker.applySignal('pty-1', {
+      type: 'shell-command-line',
+      command: 'pnpm test',
+      source: 'osc633',
+    });
+    tracker.applySignal('pty-1', { type: 'shell-command-started', source: 'osc133' });
+
+    // When: 133;D arrives with an exit code.
+    now = 1003;
+    tracker.applySignal('pty-1', {
+      type: 'shell-command-finished',
+      source: 'osc133',
+      exitCode: 42,
+    });
+
+    // Then: the in-flight command is finished and the next emitted command snapshot reflects
+    // lastCommand, including finishedAt and exitCode.
+    const [info] = tracker.list();
+    expect(info?.command).toEqual({
+      line: 'pnpm test',
+      startedAt: 1002,
+      finishedAt: 1003,
+      exitCode: 42,
+      source: 'shell-integration',
+    });
+  });
+
+  it('records lastCommand with undefined exitCode when ps transitions to idle without 133;D', async () => {
+    // Given: ps observes a foreground process while shell integration reports an in-flight command.
+    tracker.register('pty-1', 123);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    rows = [
+      shellRow(456),
+      {
+        pid: 456,
+        ppid: 123,
+        pgid: 456,
+        tpgid: 456,
+        command: '/usr/bin/make',
+        args: 'make test',
+      },
+    ];
+    now = 1002;
+    await tracker.poll();
+    tracker.applySignal('pty-1', {
+      type: 'shell-command-line',
+      command: 'pnpm test',
+      source: 'osc633',
+    });
+    tracker.applySignal('pty-1', { type: 'shell-command-started', source: 'osc133' });
+
+    // When: ps observes the pane back at the shell prompt before 133;D is received.
+    rows = [shellRow(123)];
+    now = 1003;
+    await tracker.poll();
+
+    // Then: the pseudo finish leaves exitCode undefined so it can be told apart from exit 0.
+    const [info] = tracker.list();
+    expect(info?.command).toMatchObject({
+      line: 'pnpm test',
+      startedAt: 1002,
+      finishedAt: 1003,
+      source: 'shell-integration',
+    });
+    expect(info?.command?.exitCode).toBeUndefined();
+  });
+
+  it('keeps shellIntegrationCommandLine and missedPsCommandStarts unchanged when remote shell-command-line arrives during an ssh session', async () => {
+    // Given: shell integration was observed locally and ps already pushed integration into stale,
+    // then ssh takes over as the local foreground process.
+    tracker.register('pty-1', 123);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    tracker.applySignal('pty-1', { type: 'shell-prompt-start', source: 'osc133' });
+    const localRunning = [
+      shellRow(456),
+      {
+        pid: 456,
+        ppid: 123,
+        pgid: 456,
+        tpgid: 456,
+        command: '/usr/bin/make',
+        args: 'make test',
+      },
+    ];
+    rows = localRunning;
+    now = 1002;
+    await tracker.poll();
+    rows = [shellRow(123)];
+    now = 1003;
+    await tracker.poll();
+    rows = localRunning;
+    now = 1004;
+    await tracker.poll();
+    rows = [shellRow(123)];
+    now = 1005;
+    await tracker.poll();
+    rows = [
+      shellRow(789),
+      {
+        pid: 789,
+        ppid: 123,
+        pgid: 789,
+        tpgid: 789,
+        command: '/usr/bin/ssh',
+        args: '/usr/bin/ssh user@host',
+      },
+    ];
+    now = 1006;
+    await tracker.poll();
+    expect(tracker.list()[0]?.foregroundSession.kind).toBe('ssh');
+    expect(tracker.list()[0]?.integration.stale).toBe(true);
+
+    // When: a remote shell-command-line arrives while ssh is the local foreground.
+    now = 1007;
+    tracker.applySignal('pty-1', {
+      type: 'shell-command-line',
+      command: 'vim foo.c',
+      source: 'osc633',
+    });
+
+    // Then: missedPsCommandStarts has not been reset by the SSH-guarded 633;E path so stale stays
+    // true, and foregroundCommand keeps showing the local ssh process.
+    expect(tracker.list()[0]?.foregroundCommand).toBe('/usr/bin/ssh user@host');
+    expect(tracker.list()[0]?.integration.stale).toBe(true);
+
+    // When: ps transitions directly from ssh (running) to another non-ssh foreground (running)
+    // without going through idle. Going through idle would otherwise fire the running→idle
+    // cleanup path that clears shellIntegrationCommandLine and mask whether the SSH-guarded
+    // 633;E set it. running→running keeps any leaked state intact for the next assertion.
+    rows = localRunning;
+    now = 1008;
+    await tracker.poll();
+    expect(tracker.list()[0]?.foregroundSession.kind).toBe('other');
+
+    // When: a local shell-command-started fires without a preceding 633;E. currentCommand.line is
+    // populated from shellIntegrationCommandLine at this moment.
+    now = 1009;
+    tracker.applySignal('pty-1', { type: 'shell-command-started', source: 'osc133' });
+
+    // Then: the new currentCommand.line stays empty. If the SSH-guarded 633;E earlier had
+    // populated shellIntegrationCommandLine (regression), 'vim foo.c' would leak into the next
+    // local command lifecycle here instead.
+    expect(tracker.list()[0]?.command).toMatchObject({
+      line: '',
+      startedAt: 1009,
+      source: 'shell-integration',
+    });
+  });
+
+  it('keeps processActivity running when remote shell-command-finished arrives during an ssh session', async () => {
+    // Given: ps observes ssh as the local foreground process.
+    tracker.register('pty-1', 123);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    rows = [
+      shellRow(789),
+      {
+        pid: 789,
+        ppid: 123,
+        pgid: 789,
+        tpgid: 789,
+        command: '/usr/bin/ssh',
+        args: '/usr/bin/ssh user@host',
+      },
+    ];
+    now = 1002;
+    await tracker.poll();
+    expect(tracker.list()[0]?.foregroundSession.kind).toBe('ssh');
+
+    // When: the remote shell signals shell-command-finished while the ssh process is still alive.
+    now = 1003;
+    tracker.applySignal('pty-1', {
+      type: 'shell-command-finished',
+      source: 'osc133',
+      exitCode: 0,
+    });
+
+    // Then: the local processActivity stays running so the sidebar keeps the ssh running marker.
+    expect(tracker.list()[0]?.processActivity).toBe('running');
+  });
+
+  it('produces equivalent runtime info for notifyCwd and applySignal cwd inputs', async () => {
+    // Given: two panes that ps observes as idle (no matching shellRow for the registered pid).
+    tracker.register('pty-notify', 100);
+    tracker.register('pty-signal', 200);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    // When: one pane records cwd via notifyCwd and the other via applySignal with the same value.
+    now = 1002;
+    tracker.notifyCwd('pty-notify', '/Users/tester/project');
+    tracker.applySignal('pty-signal', {
+      type: 'cwd',
+      cwd: '/Users/tester/project',
+      source: 'osc7',
+    });
+
+    // Then: every field on the resulting runtime info except ptyId is identical.
+    const notifyInfo = tracker.list().find((info) => info.ptyId === 'pty-notify');
+    const signalInfo = tracker.list().find((info) => info.ptyId === 'pty-signal');
+    expect(notifyInfo).toBeDefined();
+    expect(signalInfo).toBeDefined();
+    const { ptyId: _notifyPtyId, ...notifyRest } = notifyInfo as PaneRuntimeInfo;
+    const { ptyId: _signalPtyId, ...signalRest } = signalInfo as PaneRuntimeInfo;
+    expect(notifyRest).toEqual(signalRest);
+  });
+
+  it('toggles integration.stale when ps repeatedly misses command starts and a shell-command-started resets the counter', async () => {
+    // Given: shell integration was observed.
+    tracker.register('pty-1', 123);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    tracker.applySignal('pty-1', { type: 'shell-prompt-start', source: 'osc133' });
+
+    // When: ps records two non-ssh idle→running transitions without matching OSC.
+    const localRunning = [
+      shellRow(456),
+      {
+        pid: 456,
+        ppid: 123,
+        pgid: 456,
+        tpgid: 456,
+        command: '/usr/bin/make',
+        args: 'make test',
+      },
+    ];
+    rows = localRunning;
+    now = 1002;
+    await tracker.poll();
+    rows = [shellRow(123)];
+    now = 1003;
+    await tracker.poll();
+    rows = localRunning;
+    now = 1004;
+    await tracker.poll();
+
+    // Then: integration becomes stale after the second missed command start.
+    expect(tracker.list()[0]?.integration.stale).toBe(true);
+
+    // When: a shell-command-started signal arrives.
+    now = 1005;
+    tracker.applySignal('pty-1', { type: 'shell-command-started', source: 'osc133' });
+
+    // Then: missedPsCommandStarts is reset and stale flips back to false.
+    expect(tracker.list()[0]?.integration.stale).toBe(false);
+  });
+
   it('unregisters panes and clears runtime info', () => {
     // Given: a registered pane.
     tracker.register('pty-1', 123);
