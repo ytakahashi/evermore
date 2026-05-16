@@ -1,11 +1,13 @@
 import type { IPty, IPtyForkOptions, IDisposable } from 'node-pty';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { PtyManager } from './pty-manager';
+import { TerminalSignalParser } from './terminal-signal-parser';
 import type {
   PtyCreateEvent,
   PtyDataEvent,
   PtyDisposeEvent,
   PtyExitEvent,
+  PtySignalEvent,
   PtySpawn,
 } from './types';
 
@@ -61,6 +63,7 @@ describe('PtyManager', () => {
   let onExit: ReturnType<typeof vi.fn<(event: PtyExitEvent) => void>>;
   let onCreate: ReturnType<typeof vi.fn<(event: PtyCreateEvent) => void>>;
   let onDispose: ReturnType<typeof vi.fn<(event: PtyDisposeEvent) => void>>;
+  let onSignal: ReturnType<typeof vi.fn<(event: PtySignalEvent) => void>>;
   let manager: PtyManager;
 
   beforeEach(() => {
@@ -70,7 +73,16 @@ describe('PtyManager', () => {
     onExit = vi.fn();
     onCreate = vi.fn<(event: PtyCreateEvent) => void>();
     onDispose = vi.fn<(event: PtyDisposeEvent) => void>();
-    manager = new PtyManager({ onData, onExit, onCreate, onDispose }, spawn, () => '/Users/tester');
+    onSignal = vi.fn<(event: PtySignalEvent) => void>();
+    manager = new PtyManager(
+      { onData, onExit, onCreate, onDispose, onSignal },
+      spawn,
+      () => '/Users/tester',
+    );
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
   });
 
   it('creates a PTY and forwards process output through callbacks', () => {
@@ -110,6 +122,7 @@ describe('PtyManager', () => {
 
   it('disposes a PTY and ignores later operations for that id', () => {
     // Given: a live PTY id owned by the manager.
+    const parserDispose = vi.spyOn(TerminalSignalParser.prototype, 'dispose');
     const id = manager.create({ cwd: '/Users/tester' });
 
     // When: the PTY is explicitly disposed.
@@ -120,6 +133,7 @@ describe('PtyManager', () => {
     // Then: listeners are cleaned up, the process is killed, and the id is no longer usable.
     expect(fakePty.dataDisposable.dispose).toHaveBeenCalledOnce();
     expect(fakePty.exitDisposable.dispose).toHaveBeenCalledOnce();
+    expect(parserDispose).toHaveBeenCalledOnce();
     expect(fakePty.kill).toHaveBeenCalledOnce();
     expect(onDispose).toHaveBeenCalledWith({ id });
     expect(fakePty.write).not.toHaveBeenCalledWith('ignored');
@@ -140,5 +154,86 @@ describe('PtyManager', () => {
     expect(fakePty.exitDisposable.dispose).toHaveBeenCalledOnce();
     expect(onDispose).toHaveBeenCalledWith({ id });
     expect(fakePty.write).not.toHaveBeenCalledWith('ignored');
+  });
+
+  it('emits terminal runtime signals while preserving raw PTY data forwarding', () => {
+    // Given: a live PTY id and output containing a supported OSC signal.
+    const id = manager.create({ cwd: '/Users/tester' });
+    const data = '\x1b]133;C\x07terminal output';
+
+    // When: the PTY emits the raw data chunk.
+    fakePty.emitData(data);
+
+    // Then: the parser emits a typed signal and the original output still reaches the renderer.
+    expect(onSignal).toHaveBeenCalledWith({
+      id,
+      signal: { type: 'shell-command-started' },
+    });
+    expect(onData).toHaveBeenCalledWith({ id, data });
+    expect(onSignal.mock.invocationCallOrder[0]).toBeLessThan(onData.mock.invocationCallOrder[0]);
+  });
+
+  it('keeps forwarding raw PTY data when terminal signal observation throws', () => {
+    // Given: a manager whose signal callback fails.
+    onSignal.mockImplementation(() => {
+      throw new Error('signal callback failed');
+    });
+    const id = manager.create({ cwd: '/Users/tester' });
+    const data = '\x1b]133;C\x07terminal output';
+
+    // When: the PTY emits output containing a signal.
+    fakePty.emitData(data);
+
+    // Then: signal observer failure is contained by the parser and raw data is still forwarded.
+    expect(onSignal).toHaveBeenCalledWith({
+      id,
+      signal: { type: 'shell-command-started' },
+    });
+    expect(onData).toHaveBeenCalledWith({ id, data });
+  });
+
+  it('does not require an onSignal callback', () => {
+    // Given: a manager constructed without the optional signal callback.
+    const managerWithoutSignal = new PtyManager(
+      { onData, onExit, onCreate, onDispose },
+      spawn,
+      () => '/Users/tester',
+    );
+    managerWithoutSignal.create({ cwd: '/Users/tester' });
+
+    // When / Then: signal-bearing output is still safe to observe.
+    expect(() => {
+      fakePty.emitData('\x1b]133;C\x07');
+    }).not.toThrow();
+  });
+
+  it('keeps parser state independent per PTY', () => {
+    // Given: two live PTYs emit split OSC sequences independently.
+    const firstPty = createFakePty();
+    const secondPty = createFakePty();
+    spawn = vi.fn<PtySpawn>().mockReturnValueOnce(firstPty).mockReturnValueOnce(secondPty);
+    manager = new PtyManager(
+      { onData, onExit, onCreate, onDispose, onSignal },
+      spawn,
+      () => '/Users/tester',
+    );
+    const firstId = manager.create({ cwd: '/Users/tester' });
+    const secondId = manager.create({ cwd: '/Users/tester' });
+
+    // When: each PTY completes a different split sequence.
+    firstPty.emitData('\x1b]133;');
+    secondPty.emitData('\x1b]633;');
+    firstPty.emitData('C\x07');
+    secondPty.emitData('A\x07');
+
+    // Then: signals are attributed to the PTY whose parser assembled each sequence.
+    expect(onSignal).toHaveBeenCalledWith({
+      id: firstId,
+      signal: { type: 'shell-command-started' },
+    });
+    expect(onSignal).toHaveBeenCalledWith({
+      id: secondId,
+      signal: { type: 'shell-prompt-start' },
+    });
   });
 });

@@ -4,11 +4,13 @@ import { homedir } from 'node:os';
 import * as nodePty from 'node-pty';
 import type { IDisposable, IPty } from 'node-pty';
 import { buildPtyProcessEnv } from './pty-env';
+import { TerminalSignalParser } from './terminal-signal-parser';
 import type { PtyCreateOptions, PtyManagerCallbacks, PtySpawn } from './types';
 
 interface PtyRecord {
   proc: IPty;
   disposables: IDisposable[];
+  parser: TerminalSignalParser;
 }
 
 /**
@@ -53,7 +55,14 @@ export class PtyManager {
       },
     });
 
+    const parser = new TerminalSignalParser({
+      emit: (signal) => {
+        this.callbacks.onSignal?.({ id, signal });
+      },
+    });
+
     const dataDisposable = proc.onData((data) => {
+      parser.applyChunk(data);
       this.callbacks.onData({ id, data });
     });
     const exitDisposable = proc.onExit(({ exitCode }) => {
@@ -66,6 +75,7 @@ export class PtyManager {
     this.ptys.set(id, {
       proc,
       disposables: [dataDisposable, exitDisposable],
+      parser,
     });
     this.callbacks.onCreate?.({ id, pid: proc.pid });
 
@@ -133,6 +143,7 @@ export class PtyManager {
     for (const disposable of record.disposables) {
       disposable.dispose();
     }
+    record.parser.dispose();
     this.ptys.delete(id);
     this.callbacks.onDispose?.({ id });
     return record;

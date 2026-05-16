@@ -86,6 +86,10 @@ export function registerIpcHandlers(options: RegisterIpcHandlersOptions): Regist
     onDispose: ({ id }) => {
       paneInfoTracker.unregister(id);
     },
+    onSignal: (_event) => {
+      // A later runtime-state implementation will connect this to PaneInfoTracker. Keeping the hook
+      // visible here makes the intended wiring explicit while signal consumption is still a no-op.
+    },
   });
   const tunnelManager = new TunnelManager({
     onStatusChanged: (event) => {
