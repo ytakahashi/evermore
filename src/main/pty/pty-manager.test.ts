@@ -1,6 +1,7 @@
 import type { IPty, IPtyForkOptions, IDisposable } from 'node-pty';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { PtyManager } from './pty-manager';
+import { TerminalSignalParser } from './terminal-signal-parser';
 import type {
   PtyCreateEvent,
   PtyDataEvent,
@@ -80,6 +81,10 @@ describe('PtyManager', () => {
     );
   });
 
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   it('creates a PTY and forwards process output through callbacks', () => {
     // Given: a manager using a mocked `node-pty.spawn`.
 
@@ -117,6 +122,7 @@ describe('PtyManager', () => {
 
   it('disposes a PTY and ignores later operations for that id', () => {
     // Given: a live PTY id owned by the manager.
+    const parserDispose = vi.spyOn(TerminalSignalParser.prototype, 'dispose');
     const id = manager.create({ cwd: '/Users/tester' });
 
     // When: the PTY is explicitly disposed.
@@ -127,6 +133,7 @@ describe('PtyManager', () => {
     // Then: listeners are cleaned up, the process is killed, and the id is no longer usable.
     expect(fakePty.dataDisposable.dispose).toHaveBeenCalledOnce();
     expect(fakePty.exitDisposable.dispose).toHaveBeenCalledOnce();
+    expect(parserDispose).toHaveBeenCalledOnce();
     expect(fakePty.kill).toHaveBeenCalledOnce();
     expect(onDispose).toHaveBeenCalledWith({ id });
     expect(fakePty.write).not.toHaveBeenCalledWith('ignored');
@@ -163,6 +170,7 @@ describe('PtyManager', () => {
       signal: { type: 'shell-command-started' },
     });
     expect(onData).toHaveBeenCalledWith({ id, data });
+    expect(onSignal.mock.invocationCallOrder[0]).toBeLessThan(onData.mock.invocationCallOrder[0]);
   });
 
   it('keeps forwarding raw PTY data when terminal signal observation throws', () => {
