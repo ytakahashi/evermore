@@ -188,7 +188,15 @@ describe('WorkspacesView', () => {
         'pty-server': {
           ptyId: 'pty-server',
           activity: 'running',
+          processActivity: 'running',
           foregroundCommand: 'pnpm run dev',
+          foregroundSession: { kind: 'other' },
+          integration: {
+            shell: false,
+            protocols: [],
+            lastSequenceAt: 0,
+            stale: false,
+          },
           observedAt: 1000,
         },
       },

@@ -29,7 +29,15 @@ describe('registerPaneInfoHandlers', () => {
     const info: PaneRuntimeInfo = {
       ptyId: 'pty-1',
       activity: 'running',
+      processActivity: 'running',
       foregroundCommand: 'pnpm test',
+      foregroundSession: { kind: 'other' },
+      integration: {
+        shell: false,
+        protocols: [],
+        lastSequenceAt: 0,
+        stale: false,
+      },
       observedAt: 1000,
     };
     const paneInfoTracker = {

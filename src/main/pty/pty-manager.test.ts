@@ -167,7 +167,7 @@ describe('PtyManager', () => {
     // Then: the parser emits a typed signal and the original output still reaches the renderer.
     expect(onSignal).toHaveBeenCalledWith({
       id,
-      signal: { type: 'shell-command-started' },
+      signal: { type: 'shell-command-started', source: 'osc133' },
     });
     expect(onData).toHaveBeenCalledWith({ id, data });
     expect(onSignal.mock.invocationCallOrder[0]).toBeLessThan(onData.mock.invocationCallOrder[0]);
@@ -187,7 +187,7 @@ describe('PtyManager', () => {
     // Then: signal observer failure is contained by the parser and raw data is still forwarded.
     expect(onSignal).toHaveBeenCalledWith({
       id,
-      signal: { type: 'shell-command-started' },
+      signal: { type: 'shell-command-started', source: 'osc133' },
     });
     expect(onData).toHaveBeenCalledWith({ id, data });
   });
@@ -229,11 +229,11 @@ describe('PtyManager', () => {
     // Then: signals are attributed to the PTY whose parser assembled each sequence.
     expect(onSignal).toHaveBeenCalledWith({
       id: firstId,
-      signal: { type: 'shell-command-started' },
+      signal: { type: 'shell-command-started', source: 'osc133' },
     });
     expect(onSignal).toHaveBeenCalledWith({
       id: secondId,
-      signal: { type: 'shell-prompt-start' },
+      signal: { type: 'shell-prompt-start', source: 'osc633' },
     });
   });
 });

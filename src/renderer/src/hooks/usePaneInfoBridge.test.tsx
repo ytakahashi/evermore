@@ -7,6 +7,14 @@ import { usePaneInfoBridge } from './usePaneInfoBridge';
 const info: PaneRuntimeInfo = {
   ptyId: 'pty-1',
   activity: 'idle',
+  processActivity: 'idle',
+  foregroundSession: { kind: 'none' },
+  integration: {
+    shell: false,
+    protocols: [],
+    lastSequenceAt: 0,
+    stale: false,
+  },
   observedAt: 1000,
 };
 
@@ -68,7 +76,15 @@ describe('usePaneInfoBridge', () => {
     const runningInfo: PaneRuntimeInfo = {
       ptyId: 'pty-1',
       activity: 'running',
+      processActivity: 'running',
       foregroundCommand: 'pnpm dev',
+      foregroundSession: { kind: 'other' },
+      integration: {
+        shell: false,
+        protocols: [],
+        lastSequenceAt: 0,
+        stale: false,
+      },
       observedAt: 1001,
     };
     changedCallback?.(runningInfo);

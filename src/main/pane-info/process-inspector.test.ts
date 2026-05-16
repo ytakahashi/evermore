@@ -81,6 +81,7 @@ describe('process-inspector', () => {
     expect(activity).toEqual({
       activity: 'running',
       foregroundCommand: 'node /Users/tester/project/server.js',
+      foregroundArgs: 'node /Users/tester/project/server.js',
     });
   });
 });

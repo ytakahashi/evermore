@@ -12,13 +12,29 @@ type ShowMessageBox = (
 const idlePane: PaneRuntimeInfo = {
   ptyId: 'pty-idle',
   activity: 'idle',
+  processActivity: 'idle',
+  foregroundSession: { kind: 'none' },
+  integration: {
+    shell: false,
+    protocols: [],
+    lastSequenceAt: 0,
+    stale: false,
+  },
   observedAt: 1,
 };
 
 const runningPane: PaneRuntimeInfo = {
   ptyId: 'pty-1',
   activity: 'running',
+  processActivity: 'running',
   foregroundCommand: 'pnpm test',
+  foregroundSession: { kind: 'other' },
+  integration: {
+    shell: false,
+    protocols: [],
+    lastSequenceAt: 0,
+    stale: false,
+  },
   observedAt: 1,
 };
 

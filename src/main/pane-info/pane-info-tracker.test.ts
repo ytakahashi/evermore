@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { PaneRuntimeInfo } from '../../shared/types';
 import { PaneInfoTracker } from './pane-info-tracker';
 import type { PaneInfoChangedEvent, ProcessTableRow } from './types';
 
@@ -10,6 +11,24 @@ function shellRow(tpgid: number): ProcessTableRow {
     tpgid,
     command: '/bin/zsh',
     args: '/bin/zsh -l',
+  };
+}
+
+function expectedInfo(
+  overrides: Partial<PaneRuntimeInfo> & Pick<PaneRuntimeInfo, 'ptyId' | 'observedAt'>,
+): PaneRuntimeInfo {
+  const processActivity = overrides.processActivity ?? overrides.activity ?? 'idle';
+  return {
+    activity: processActivity,
+    processActivity,
+    foregroundSession: { kind: processActivity === 'idle' ? 'none' : 'other' },
+    integration: {
+      shell: false,
+      protocols: [],
+      lastSequenceAt: 0,
+      stale: false,
+    },
+    ...overrides,
   };
 }
 
@@ -44,9 +63,10 @@ describe('PaneInfoTracker', () => {
     tracker.register('pty-1', 123);
 
     // Then: the initial runtime info is available and emitted.
-    expect(tracker.list()).toEqual([{ ptyId: 'pty-1', activity: 'idle', observedAt: 1000 }]);
+    const info = expectedInfo({ ptyId: 'pty-1', observedAt: 1000 });
+    expect(tracker.list()).toEqual([info]);
     expect(onChanged).toHaveBeenCalledWith({
-      info: { ptyId: 'pty-1', activity: 'idle', observedAt: 1000 },
+      info,
     });
   });
 
@@ -60,7 +80,7 @@ describe('PaneInfoTracker', () => {
     await tracker.poll();
 
     // Then: the timestamp updates without sending a redundant event.
-    expect(tracker.list()).toEqual([{ ptyId: 'pty-1', activity: 'idle', observedAt: 1001 }]);
+    expect(tracker.list()).toEqual([expectedInfo({ ptyId: 'pty-1', observedAt: 1001 })]);
     expect(onChanged).not.toHaveBeenCalled();
 
     // When: a foreground process becomes active.
@@ -80,12 +100,12 @@ describe('PaneInfoTracker', () => {
 
     // Then: the running state is emitted.
     expect(onChanged).toHaveBeenCalledWith({
-      info: {
+      info: expectedInfo({
         ptyId: 'pty-1',
-        activity: 'running',
+        processActivity: 'running',
         foregroundCommand: 'make test',
         observedAt: 1002,
-      },
+      }),
     });
   });
 
@@ -113,12 +133,116 @@ describe('PaneInfoTracker', () => {
 
     // Then: the sidebar-facing info keeps the command the user actually submitted.
     expect(onChanged).toHaveBeenCalledWith({
-      info: {
+      info: expectedInfo({
         ptyId: 'pty-1',
-        activity: 'running',
+        processActivity: 'running',
         foregroundCommand: 'pnpm run dev',
         observedAt: 1002,
+      }),
+    });
+  });
+
+  it('keeps activity and processActivity equal during migration', async () => {
+    // Given: a registered pane has a foreground process.
+    tracker.register('pty-1', 123);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    rows = [
+      shellRow(456),
+      {
+        pid: 456,
+        ppid: 123,
+        pgid: 456,
+        tpgid: 456,
+        command: '/usr/bin/make',
+        args: 'make test',
       },
+    ];
+
+    // When: polling emits running state.
+    now = 1002;
+    await tracker.poll();
+
+    // Then: legacy and new activity fields carry the same value.
+    const [info] = tracker.list();
+    expect(info?.activity).toBe('running');
+    expect(info?.processActivity).toBe('running');
+  });
+
+  it('records shell integration protocols when signals are applied directly', () => {
+    // Given: a registered pane.
+    tracker.register('pty-1', 123);
+    onChanged.mockClear();
+
+    // When: duplicate lifecycle sources are observed by the tracker.
+    now = 1002;
+    tracker.applySignal('pty-1', { type: 'shell-prompt-start', source: 'osc133' });
+    tracker.applySignal('pty-1', { type: 'shell-prompt-start', source: 'osc133' });
+    tracker.applySignal('pty-1', { type: 'shell-prompt-end', source: 'osc633' });
+
+    // Then: protocols are retained once in observation order.
+    const [info] = tracker.list();
+    expect(info?.integration).toEqual({
+      shell: true,
+      protocols: ['osc133', 'osc633'],
+      lastSequenceAt: 1002,
+      stale: false,
+    });
+  });
+
+  it('creates command state from shell integration signals without register.ts wiring', () => {
+    // Given: a registered pane receives shell integration signals directly.
+    tracker.register('pty-1', 123);
+
+    // When: command line and start signals are applied.
+    now = 1002;
+    tracker.applySignal('pty-1', {
+      type: 'shell-command-line',
+      command: 'pnpm test',
+      source: 'osc633',
+    });
+    tracker.applySignal('pty-1', { type: 'shell-command-started', source: 'osc133' });
+
+    // Then: the new runtime info shape can represent the in-flight command.
+    expect(tracker.list()[0]).toMatchObject({
+      ptyId: 'pty-1',
+      processActivity: 'running',
+      foregroundCommand: 'pnpm test',
+      command: {
+        line: 'pnpm test',
+        startedAt: 1002,
+        source: 'shell-integration',
+      },
+    });
+  });
+
+  it('overwrites stale in-flight command state when a new command start arrives', () => {
+    // Given: a previous command start did not receive D or a prompt-start cleanup.
+    tracker.register('pty-1', 123);
+    now = 1002;
+    tracker.applySignal('pty-1', {
+      type: 'shell-command-line',
+      command: 'pnpm test',
+      source: 'osc633',
+    });
+    tracker.applySignal('pty-1', { type: 'shell-command-started', source: 'osc133' });
+
+    // When: the next command start arrives with a newer command line.
+    now = 2000;
+    tracker.applySignal('pty-1', {
+      type: 'shell-command-line',
+      command: 'pnpm build',
+      source: 'osc633',
+    });
+    tracker.applySignal('pty-1', { type: 'shell-command-started', source: 'osc133' });
+
+    // Then: the latest command start recovers the tracker state.
+    expect(tracker.list()[0]).toMatchObject({
+      command: {
+        line: 'pnpm build',
+        startedAt: 2000,
+        source: 'shell-integration',
+      },
+      foregroundCommand: 'pnpm build',
     });
   });
 

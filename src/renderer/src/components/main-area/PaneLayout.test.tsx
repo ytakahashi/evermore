@@ -231,7 +231,15 @@ describe('PaneLayout', () => {
         'pty-1': {
           ptyId: 'pty-1',
           activity: 'running',
+          processActivity: 'running',
           foregroundCommand: 'pnpm dev',
+          foregroundSession: { kind: 'other' },
+          integration: {
+            shell: false,
+            protocols: [],
+            lastSequenceAt: 0,
+            stale: false,
+          },
           observedAt: 1,
         },
       },
