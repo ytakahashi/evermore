@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import type { PaneRuntimeSignal } from '../../shared/pane-runtime-signal';
+import { encodeOsc633CommandLine } from '../../shared/shell-integration/osc633-encode';
 import { TerminalSignalParser } from './terminal-signal-parser';
 
 function collectSignals(chunks: string[], maxOscPayloadCodeUnits?: number): PaneRuntimeSignal[] {
@@ -175,9 +176,39 @@ describe('TerminalSignalParser', () => {
     ]);
   });
 
+  it('round-trips OSC 633 command lines encoded as UTF-8 bytes', () => {
+    // Given: commands that exercise separators, control bytes, backslashes, and multibyte text.
+    const commands = [
+      'pnpm run dev; ls',
+      "printf 'a\\b'",
+      'cat <<EOF\n日本語\nEOF',
+      'line1\r\0line2',
+    ];
+    const data = commands.map((command) => {
+      return `\x1b]633;E;${encodeOsc633CommandLine(command)}\x07`;
+    });
+
+    // When: the encoded payloads are parsed.
+    const signals = collectSignals(data);
+
+    // Then: each command line is restored exactly.
+    expect(signals).toEqual(
+      commands.map((command) => ({
+        type: 'shell-command-line',
+        command,
+        source: 'osc633',
+      })),
+    );
+  });
+
   it('drops malformed or empty OSC 633 command line payloads', () => {
     // Given: invalid command line escape sequences and an empty command payload.
-    const data = ['\x1b]633;E;\\q\x07', '\x1b]633;E;\\x0G\x07', '\x1b]633;E;\x07'];
+    const data = [
+      '\x1b]633;E;\\q\x07',
+      '\x1b]633;E;\\x0G\x07',
+      '\x1b]633;E;\\xe6\\x97\x07',
+      '\x1b]633;E;\x07',
+    ];
 
     // When: the PTY output is parsed.
     const signals = collectSignals(data);
