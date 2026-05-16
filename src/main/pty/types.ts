@@ -1,4 +1,5 @@
 import type * as nodePty from 'node-pty';
+import type { PaneRuntimeSignal } from '../../shared/pane-runtime-signal';
 
 export interface PtyCreateOptions {
   cwd: string;
@@ -27,11 +28,20 @@ export interface PtyDisposeEvent {
   id: string;
 }
 
+export interface PtySignalEvent {
+  id: string;
+  signal: PaneRuntimeSignal;
+}
+
 export interface PtyManagerCallbacks {
   onData: (event: PtyDataEvent) => void;
   onExit: (event: PtyExitEvent) => void;
   onCreate?: (event: PtyCreateEvent) => void;
   onDispose?: (event: PtyDisposeEvent) => void;
+  /**
+   * Emitted when the terminal signal parser observes a known OSC sequence.
+   */
+  onSignal?: (event: PtySignalEvent) => void;
 }
 
 export type PtySpawn = typeof nodePty.spawn;
