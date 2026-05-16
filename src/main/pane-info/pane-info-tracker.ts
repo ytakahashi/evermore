@@ -1,4 +1,7 @@
-import type { PaneRuntimeSignal } from '../../shared/pane-runtime-signal';
+import type {
+  PaneRuntimeSignal,
+  PaneRuntimeSignalLifecycleSource,
+} from '../../shared/pane-runtime-signal';
 import type {
   PaneIntegrationInfo,
   PaneIntegrationProtocol,
@@ -80,7 +83,13 @@ export class PaneInfoTracker {
 
       case 'shell-prompt-start':
         this.applyLifecycleProtocol(process, signal.source, now);
-        this.finishCurrentCommand(process, now);
+        // A/B are lifecycle signals too, so under the SSH invariant the tracker must not touch
+        // local currentCommand/lastCommand state from remote prompt markers. In practice
+        // currentCommand is undefined while ssh is the foreground process, but guarding here keeps
+        // the invariant explicit instead of relying on finishCurrentCommand's early return.
+        if (process.foregroundSession.kind !== 'ssh') {
+          this.finishCurrentCommand(process, now);
+        }
         break;
 
       case 'shell-prompt-end':
@@ -254,11 +263,10 @@ export class PaneInfoTracker {
         process.missedPsCommandStarts += 1;
       }
 
-      if (
-        previousActivity === 'running' &&
-        observed.activity === 'idle' &&
-        process.currentCommand
-      ) {
+      // The running→idle ps transition is the third command-cycle cleanup path alongside 133;D
+      // and 133;A. The currentCommand guard is intentionally absent so that
+      // shellIntegrationCommandLine is cleared even when 633;E arrived without a matching 133;C.
+      if (previousActivity === 'running' && observed.activity === 'idle') {
         this.finishCurrentCommand(process, this.now());
       }
 
@@ -282,7 +290,7 @@ export class PaneInfoTracker {
 
   private applyLifecycleProtocol(
     process: RegisteredPaneProcess,
-    source: PaneRuntimeSignal['source'] & PaneIntegrationProtocol,
+    source: PaneRuntimeSignalLifecycleSource,
     now: number,
   ): void {
     appendProtocolOnce(process.integration, source);
@@ -295,16 +303,24 @@ export class PaneInfoTracker {
     finishedAt: number,
     exitCode?: number,
   ): void {
-    if (!process.currentCommand) {
-      return;
+    if (process.currentCommand) {
+      process.lastCommand = {
+        ...process.currentCommand,
+        finishedAt,
+        ...(exitCode === undefined ? {} : { exitCode }),
+      };
+      process.currentCommand = undefined;
     }
+    // Always run, even when currentCommand was undefined: malformed sequences such as 633;E
+    // arriving without a matching 133;C would otherwise leave a stale shellIntegrationCommandLine
+    // that outranks freshly observed ps foreground processes (notably `ssh`) at display time.
+    this.clearShellIntegrationCommandLine(process);
+  }
 
-    process.lastCommand = {
-      ...process.currentCommand,
-      finishedAt,
-      ...(exitCode === undefined ? {} : { exitCode }),
-    };
-    process.currentCommand = undefined;
+  private clearShellIntegrationCommandLine(process: RegisteredPaneProcess): void {
+    // The OSC 633;E command line is tied to the command lifecycle that has just ended. The next
+    // command's 633;E repopulates this before its 133;C arrives.
+    process.shellIntegrationCommandLine = undefined;
   }
 
   private recomputeInfo(
@@ -324,6 +340,9 @@ export class PaneInfoTracker {
 
     const processActivity = this.computeProcessActivity(process);
     const foregroundCommand = this.computeForegroundCommand(process, integration.stale);
+    // Prefer the in-flight command so the sidebar reflects the live shell-integration command
+    // before its `D` arrives; otherwise fall back to the most recent finished command.
+    const activeCommand = process.currentCommand ?? process.lastCommand;
     const nextInfo: PaneRuntimeInfo = {
       ptyId: process.ptyId,
       activity: processActivity,
@@ -333,9 +352,7 @@ export class PaneInfoTracker {
       integration,
       observedAt: options.observedAt,
       ...(foregroundCommand ? { foregroundCommand } : {}),
-      ...((process.lastCommand ?? process.currentCommand)
-        ? { command: process.currentCommand ?? process.lastCommand }
-        : {}),
+      ...(activeCommand ? { command: activeCommand } : {}),
       ...(process.cwd ? { cwd: process.cwd } : {}),
       ...(process.attention ? { attention: process.attention } : {}),
       ...(process.agent ? { agent: process.agent } : {}),

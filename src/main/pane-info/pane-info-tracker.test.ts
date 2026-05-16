@@ -246,6 +246,164 @@ describe('PaneInfoTracker', () => {
     });
   });
 
+  it('clears the shell integration command line on shell-command-finished before the next poll', async () => {
+    // Given: a pane is observed as running a node process and shell integration is in flight.
+    tracker.register('pty-1', 123);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    rows = [
+      shellRow(456),
+      {
+        pid: 456,
+        ppid: 123,
+        pgid: 456,
+        tpgid: 456,
+        command: '/usr/bin/node',
+        args: 'node /Users/tester/project/server.js',
+      },
+    ];
+    now = 1002;
+    await tracker.poll();
+    tracker.applySignal('pty-1', {
+      type: 'shell-command-line',
+      command: 'pnpm test',
+      source: 'osc633',
+    });
+    tracker.applySignal('pty-1', { type: 'shell-command-started', source: 'osc133' });
+
+    // When: the command finishes via OSC 133;D before the next ps poll observes the transition.
+    now = 1003;
+    tracker.applySignal('pty-1', {
+      type: 'shell-command-finished',
+      source: 'osc133',
+      exitCode: 0,
+    });
+
+    // Then: the finished command is captured and the stale shell-integration command line does not
+    // stick around as the display value before ps has a chance to refresh.
+    const [info] = tracker.list();
+    expect(info?.command).toMatchObject({
+      line: 'pnpm test',
+      finishedAt: 1003,
+      exitCode: 0,
+    });
+    expect(info?.foregroundCommand).toBe('node /Users/tester/project/server.js');
+  });
+
+  it('clears the shell integration command line on shell-command-finished even when the matching command-started was missed', async () => {
+    // Given: 633;E is observed but the matching 133;C is dropped, so shellIntegrationCommandLine
+    // is populated while currentCommand stays undefined.
+    tracker.register('pty-1', 123);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    now = 1002;
+    tracker.applySignal('pty-1', {
+      type: 'shell-command-line',
+      command: 'pnpm test',
+      source: 'osc633',
+    });
+
+    // When: 133;D arrives without a matching 133;C, then ps observes ssh as the new foreground.
+    now = 1003;
+    tracker.applySignal('pty-1', {
+      type: 'shell-command-finished',
+      source: 'osc133',
+      exitCode: 0,
+    });
+    rows = [
+      shellRow(789),
+      {
+        pid: 789,
+        ppid: 123,
+        pgid: 789,
+        tpgid: 789,
+        command: '/usr/bin/ssh',
+        args: '/usr/bin/ssh user@host',
+      },
+    ];
+    now = 1004;
+    await tracker.poll();
+
+    // Then: the stale 633;E command line does not outrank the freshly observed ssh foreground.
+    const [info] = tracker.list();
+    expect(info?.foregroundSession).toEqual({ kind: 'ssh' });
+    expect(info?.foregroundCommand).toBe('/usr/bin/ssh user@host');
+  });
+
+  it('clears the shell integration command line when ps transitions to idle without a matching command-started', async () => {
+    // Given: 633;E is observed but the matching 133;C is dropped, leaving the OSC command line
+    // dangling while a separate foreground process is observed by ps.
+    tracker.register('pty-1', 123);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    rows = [
+      shellRow(456),
+      {
+        pid: 456,
+        ppid: 123,
+        pgid: 456,
+        tpgid: 456,
+        command: '/usr/bin/node',
+        args: 'node /Users/tester/project/server.js',
+      },
+    ];
+    now = 1002;
+    await tracker.poll();
+    tracker.applySignal('pty-1', {
+      type: 'shell-command-line',
+      command: 'pnpm test',
+      source: 'osc633',
+    });
+
+    // When: ps next observes the pane back at the shell prompt (idle).
+    rows = [shellRow(123)];
+    now = 1003;
+    await tracker.poll();
+
+    // Then: the running→idle cleanup path drops the stale shell-integration command line so the
+    // pane no longer displays a foreground command at all.
+    const [info] = tracker.list();
+    expect(info?.processActivity).toBe('idle');
+    expect(info?.foregroundCommand).toBeUndefined();
+  });
+
+  it('switches the foreground command to ssh once ps observes an ssh foreground process', async () => {
+    // Given: a local command has completed and shell integration recorded its command line.
+    tracker.register('pty-1', 123);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    now = 1002;
+    tracker.applySignal('pty-1', {
+      type: 'shell-command-line',
+      command: 'pnpm test',
+      source: 'osc633',
+    });
+    tracker.applySignal('pty-1', { type: 'shell-command-started', source: 'osc133' });
+    now = 1003;
+    tracker.applySignal('pty-1', {
+      type: 'shell-command-finished',
+      source: 'osc133',
+      exitCode: 0,
+    });
+
+    // When: the user runs `ssh user@host` and ps now reports ssh as the foreground process.
+    rows = [
+      shellRow(789),
+      {
+        pid: 789,
+        ppid: 123,
+        pgid: 789,
+        tpgid: 789,
+        command: '/usr/bin/ssh',
+        args: '/usr/bin/ssh user@host',
+      },
+    ];
+    now = 1004;
+    await tracker.poll();
+
+    // Then: the sidebar displays the new local foreground (ssh) rather than the previous command.
+    const [info] = tracker.list();
+    expect(info?.processActivity).toBe('running');
+    expect(info?.foregroundSession).toEqual({ kind: 'ssh' });
+    expect(info?.foregroundCommand).toBe('/usr/bin/ssh user@host');
+  });
+
   it('unregisters panes and clears runtime info', () => {
     // Given: a registered pane.
     tracker.register('pty-1', 123);
