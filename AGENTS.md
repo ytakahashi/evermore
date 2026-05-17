@@ -39,12 +39,11 @@ Refer to [ARCHITECTURE.md](./ARCHITECTURE.md) for details.
 
 ### Testing
 
-- Test files are colocated with source files.
-- Test runner is Vitest (config: `vitest.config.ts`).
+Test tier structure (unit / integration / e2e), directory layout, runner configuration, and
+architectural invariants are documented in [ARCHITECTURE.md](./ARCHITECTURE.md#testing). The
+conventions below apply when writing tests in any tier.
+
 - Tests use explicit imports (`import { describe, it, expect } from 'vitest'`), not globals.
-- Renderer component tests run in jsdom.
-- Main-process unit tests should prefer pure classes and dependency injection.
-- Do not require real Electron windows, real PTYs, or real xterm instances in unit tests; mock them.
 - Use **Given / When / Then** style with explicit comment blocks to structure test cases for better
   readability.
 

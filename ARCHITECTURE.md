@@ -286,14 +286,35 @@ The IPC surface is the most important boundary in the app and follows a strict s
 
 ## Testing
 
-- Test files are colocated with source files (`foo.ts` ↔ `foo.test.ts`).
-- Vitest is configured by `vitest.config.ts`. The current test runner uses one global `jsdom`
-  environment for `src/main/**`, `src/renderer/src/**`, and `src/shared/**` tests, with renderer
-  setup loaded from `src/renderer/src/test/setup.ts`.
-- Main-process tests still follow Node-oriented constraints even though the test environment is
-  `jsdom`: they should exercise pure managers and injected adapters, not browser APIs.
+Tests are organized in three tiers by subject scope. The runner is Vitest (config in
+`vitest.config.ts`). The default environment is `jsdom` for `src/main/**`, `src/renderer/src/**`,
+`src/shared/**`, and `tests/**` tests; individual test files can opt into the Node environment when
+they need real Node-only APIs (for example the e2e suite that drives `node-pty`). Shared setup that
+registers DOM matchers and React Testing Library cleanup lives in `tests/setup.ts`.
+
+### Tier policy
+
+- **Unit tests** verify a single module (class / function / hook / component) in isolation. The
+  surrounding dependencies are replaced by mocks, fakes, or pure data inputs. Unit tests are
+  colocated with the code they cover (`src/**/*.test.{ts,tsx}`). The vast majority of tests fall
+  here.
+- **Integration tests** combine multiple real modules — typically across feature directories —
+  without mocking the seams between them. They must remain deterministic and host-independent (no
+  external process, no network, no host-dependent filesystem reads beyond temp dirs or checked-in
+  fixtures). They live in `tests/integration/` so cross-module wiring is visible and is not mistaken
+  for a unit test of either side.
+- **End-to-end tests** depend on a runtime external dependency (real subprocess such as zsh / ssh,
+  real network socket, etc.). They live in `tests/e2e/` and use `describe.skipIf(...)` to skip when
+  that dependency is unavailable on the current host (for example, `existsSync('/bin/zsh')` is
+  false). CI does not install these dependencies, so the affected suites skip there; developers must
+  run `pnpm test` on a host that satisfies the dependency when changing covered code.
+
+### Invariants
+
+- Main-process tests follow Node-oriented constraints despite running in `jsdom`: they exercise pure
+  managers and injected adapters, not browser APIs.
 - Main-process unit tests inject fakes through manager constructor options (`spawn`, `now`,
   `storage`, `getHomeDirectory`, `parse`, `readFile`, `readDirectory`). They must not require a real
   Electron window, real PTY, real ssh process, or real filesystem.
-- Renderer store tests should use the `create<Store>()` factory with injected options instead of the
-  global singleton, so test cases stay isolated.
+- Renderer store tests use the `create<Store>()` factory with injected options instead of the global
+  singleton, so test cases stay isolated.
