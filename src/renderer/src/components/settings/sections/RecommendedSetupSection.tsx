@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Check, Copy } from 'lucide-react';
+import { EVERMORE_ZSH_SHELL_INTEGRATION_SNIPPET } from '../../../../../shared/shell-integration/zsh-snippet';
 
 interface SetupSnippet {
   content: string;
@@ -12,33 +13,15 @@ interface SetupSnippet {
 
 type CopyState = 'idle' | 'copied' | 'error';
 
-// The zsh snippet walks PWD byte-by-byte so non-ASCII paths are encoded as UTF-8
-// percent bytes for `decodeURIComponent`, not as Unicode codepoints.
 const SETUP_SNIPPETS: readonly SetupSnippet[] = [
   {
-    id: 'osc7',
-    title: 'OSC 7 cwd tracking',
+    id: 'evermore-zsh',
+    title: 'Shell integration (zsh)',
     target: '~/.zshrc',
     language: 'sh',
     description:
-      'Emits the current directory when your shell starts and whenever it changes, so Evermore can keep pane cwd metadata in sync. Targets zsh; bash/fish users need an equivalent PROMPT_COMMAND / pwd hook that prints the same OSC 7 sequence.',
-    content: `function _evermore_osc7() {
-  emulate -L zsh
-  setopt no_multibyte
-  local i ch out=""
-  for (( i = 1; i <= \${#PWD}; i++ )); do
-    ch=$PWD[i]
-    case $ch in
-      [a-zA-Z0-9/._~-]) out+=$ch ;;
-      *) out+=$(printf '%%%02X' "'$ch") ;;
-    esac
-  done
-  printf '\\e]7;file://%s%s\\e\\\\' "$HOST" "$out"
-}
-
-autoload -Uz add-zsh-hook
-add-zsh-hook chpwd _evermore_osc7
-[[ -o interactive ]] && _evermore_osc7`,
+      'Emits OSC 7 (cwd), OSC 133 (prompt and command lifecycle), and OSC 633;E (exact command line) so the Evermore sidebar reflects shell-level state instead of process-table heuristics. zsh only — paste this whole block at the end of ~/.zshrc. The snippet is idempotent and becomes a no-op under another terminal emulator (VS Code, Warp, WezTerm, iTerm, Ghostty) that already provides shell integration.',
+    content: EVERMORE_ZSH_SHELL_INTEGRATION_SNIPPET,
   },
   {
     id: 'ssh-config',

@@ -27,10 +27,12 @@ describe('RecommendedSetupSection', () => {
 
     // Then: the optional setup snippets and their target files are shown for manual copy/paste.
     expect(screen.getByRole('heading', { name: 'Recommended setup' })).toBeInTheDocument();
-    expect(screen.getByText('OSC 7 cwd tracking')).toBeInTheDocument();
+    expect(screen.getByText('Shell integration (zsh)')).toBeInTheDocument();
     expect(screen.getByText('SSH tunnel reliability')).toBeInTheDocument();
     expect(screen.getByText('~/.zshrc')).toBeInTheDocument();
     expect(screen.getByText('~/.ssh/config')).toBeInTheDocument();
+    // The previous OSC 7-only entry has been folded into the combined snippet above.
+    expect(screen.queryByText('OSC 7 cwd tracking')).not.toBeInTheDocument();
   });
 
   it('copies the selected snippet to the clipboard', async () => {
@@ -47,8 +49,36 @@ describe('RecommendedSetupSection', () => {
     expect(clipboardWriteText).toHaveBeenCalledWith(
       expect.stringContaining('ExitOnForwardFailure'),
     );
-    expect(clipboardWriteText).not.toHaveBeenCalledWith(expect.stringContaining('add-zsh-hook'));
+    // The shell integration snippet uses a distinctive installer-function name that the SSH snippet
+    // does not contain, so this guards against the two snippets being copied together.
+    expect(clipboardWriteText).not.toHaveBeenCalledWith(
+      expect.stringContaining('_evermore_install_shell_integration'),
+    );
     expect(screen.getByText('Copied')).toBeInTheDocument();
+  });
+
+  it('copies the shell integration snippet with the OSC 633;E and OSC 133 markers intact', async () => {
+    // Given: the recommended setup section is visible.
+    render(<RecommendedSetupSection />);
+
+    // When: the user copies the shell integration snippet.
+    fireEvent.click(screen.getByRole('button', { name: 'Copy Shell integration (zsh) snippet' }));
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    // Then: the clipboard receives the full snippet including the lifecycle wiring.
+    expect(clipboardWriteText).toHaveBeenCalledWith(
+      expect.stringContaining('_evermore_install_shell_integration'),
+    );
+    expect(clipboardWriteText).toHaveBeenCalledWith(
+      expect.stringContaining('add-zsh-hook preexec _evermore_preexec'),
+    );
+    expect(clipboardWriteText).toHaveBeenCalledWith(expect.stringContaining('\\e]633;E;'));
+    expect(clipboardWriteText).toHaveBeenCalledWith(expect.stringContaining('\\e]133;A'));
+    expect(clipboardWriteText).toHaveBeenCalledWith(
+      expect.stringContaining('zle -A _evermore_zle_line_init zle-line-init'),
+    );
   });
 
   it('shows an inline error when clipboard access is unavailable', () => {
@@ -57,7 +87,7 @@ describe('RecommendedSetupSection', () => {
     render(<RecommendedSetupSection />);
 
     // When: the user tries to copy a snippet.
-    fireEvent.click(screen.getByRole('button', { name: 'Copy OSC 7 cwd tracking snippet' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Copy Shell integration (zsh) snippet' }));
 
     // Then: the copy failure is surfaced without persisting any setting.
     expect(screen.getByText('Copy failed')).toBeInTheDocument();

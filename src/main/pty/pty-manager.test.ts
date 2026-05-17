@@ -107,6 +107,27 @@ describe('PtyManager', () => {
     expect(onCreate).toHaveBeenCalledWith({ id, pid: 1234 });
   });
 
+  it('sets TERM_PROGRAM=Evermore so the shell integration snippet identifies Evermore panes', () => {
+    // Given: a parent process whose TERM_PROGRAM identifies a different terminal emulator.
+    const originalTermProgram = process.env['TERM_PROGRAM'];
+    process.env['TERM_PROGRAM'] = 'iTerm.app';
+
+    try {
+      // When: the manager spawns a PTY.
+      manager.create({ cwd: '/Users/tester' });
+
+      // Then: the spawn env identifies the host terminal as Evermore, overriding the parent value.
+      const spawnedEnv = spawn.mock.calls[0]?.[2]?.env ?? {};
+      expect(spawnedEnv['TERM_PROGRAM']).toBe('Evermore');
+    } finally {
+      if (originalTermProgram === undefined) {
+        delete process.env['TERM_PROGRAM'];
+      } else {
+        process.env['TERM_PROGRAM'] = originalTermProgram;
+      }
+    }
+  });
+
   it('writes and resizes the active PTY', () => {
     // Given: a live PTY id owned by the manager.
     const id = manager.create({ cwd: '/Users/tester' });

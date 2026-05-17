@@ -253,19 +253,43 @@ function parseOsc633CommandLine(payload: string): string | null {
   return command === '' ? null : command;
 }
 
+// Hoisted to avoid per-flush allocation on the PTY data hot path. TextDecoder instances are
+// stateless across calls when used without `stream: true`, so a single shared decoder is safe.
+const OSC_633_UTF8_DECODER = new TextDecoder('utf-8', { fatal: true });
+
 function decodeOsc633CommandLine(encodedCommand: string): string | null {
   let decoded = '';
+  let pendingBytes: number[] = [];
+
+  const flushPendingBytes = (): boolean => {
+    if (pendingBytes.length === 0) {
+      return true;
+    }
+
+    try {
+      decoded += OSC_633_UTF8_DECODER.decode(Uint8Array.from(pendingBytes));
+      pendingBytes = [];
+      return true;
+    } catch (_error: unknown) {
+      // Ignore decode errors for incomplete or invalid UTF-8 sequences
+      // and treat the entire payload as malformed.
+      return false;
+    }
+  };
 
   for (let index = 0; index < encodedCommand.length; index += 1) {
     const char = encodedCommand[index];
     if (char !== '\\') {
+      if (!flushPendingBytes()) {
+        return null;
+      }
       decoded += char;
       continue;
     }
 
     const next = encodedCommand[index + 1];
     if (next === '\\') {
-      decoded += '\\';
+      pendingBytes.push('\\'.charCodeAt(0));
       index += 1;
       continue;
     }
@@ -273,7 +297,7 @@ function decodeOsc633CommandLine(encodedCommand: string): string | null {
     if (next === 'x') {
       const hex = encodedCommand.slice(index + 2, index + 4);
       if (/^[0-9a-fA-F]{2}$/.test(hex)) {
-        decoded += String.fromCharCode(Number.parseInt(hex, 16));
+        pendingBytes.push(Number.parseInt(hex, 16));
         index += 3;
         continue;
       }
@@ -282,5 +306,5 @@ function decodeOsc633CommandLine(encodedCommand: string): string | null {
     return null;
   }
 
-  return decoded;
+  return flushPendingBytes() ? decoded : null;
 }
