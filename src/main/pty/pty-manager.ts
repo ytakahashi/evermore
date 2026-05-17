@@ -52,6 +52,10 @@ export class PtyManager {
         ...buildPtyProcessEnv(process.env, options.env),
         TERM: 'xterm-256color',
         COLORTERM: 'truecolor',
+        // Override any inherited TERM_PROGRAM (e.g. iTerm.app / WezTerm when Evermore was launched
+        // from another terminal) so the shell-integration snippet can identify Evermore panes and
+        // skip its "another host's shell integration is already active" early return.
+        TERM_PROGRAM: 'Evermore',
       },
     });
 
