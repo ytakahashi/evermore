@@ -14,6 +14,11 @@
  *
  * The snippet is idempotent on re-source via the `EVERMORE_SHELL_INTEGRATION` flag; hooks and
  * widgets are registered exactly once per shell session.
+ *
+ * When you modify this snippet, run `pnpm test` locally on macOS so the
+ * `tests/e2e/shell-integration.e2e.test.ts` suite executes against the real zsh and catches
+ * regressions in the OSC sequences. CI runs on Linux without `/bin/zsh`, so that suite is
+ * automatically skipped there and cannot guard the snippet's runtime behavior on its own.
  */
 export const EVERMORE_ZSH_SHELL_INTEGRATION_SNIPPET = `# Evermore shell integration for zsh.
 # Paste this whole block at the end of ~/.zshrc. Re-sourcing the file is safe (idempotent).

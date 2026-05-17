@@ -1,47 +1,7 @@
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PaneRuntimeInfo } from '../../shared/types';
-import { TerminalSignalParser } from '../pty/terminal-signal-parser';
 import { PaneInfoTracker } from './pane-info-tracker';
 import type { PaneInfoChangedEvent, ProcessTableRow } from './types';
-
-/**
- * Decodes only the terminal control bytes `\x1b` (ESC) and `\x07` (BEL) used to delimit OSC
- * sequences in the fixture, leaving inner OSC 633;E `\xNN` escapes (`\x3b`, `\x27`, `\x5c`) intact
- * so the parser's command-line decoder sees the on-the-wire shape produced by VS Code.
- */
-function decodeEscapedFixture(fixture: string): string {
-  let decoded = '';
-
-  for (let index = 0; index < fixture.length; index += 1) {
-    const char = fixture[index];
-    if (char !== '\\') {
-      decoded += char;
-      continue;
-    }
-
-    const next = fixture[index + 1];
-    if (next === '\\') {
-      decoded += '\\';
-      index += 1;
-      continue;
-    }
-
-    if (next === 'x') {
-      const hex = fixture.slice(index + 2, index + 4);
-      if (hex.toLowerCase() === '1b' || hex.toLowerCase() === '07') {
-        decoded += String.fromCharCode(Number.parseInt(hex, 16));
-        index += 3;
-        continue;
-      }
-    }
-
-    decoded += char;
-  }
-
-  return decoded;
-}
 
 function shellRow(tpgid: number): ProcessTableRow {
   return {
@@ -684,41 +644,6 @@ describe('PaneInfoTracker', () => {
 
     // Then: missedPsCommandStarts is reset and stale flips back to false.
     expect(tracker.list()[0]?.integration.stale).toBe(false);
-  });
-
-  it('reflects a VS Code-compatible OSC fixture end-to-end from parser through tracker emission', async () => {
-    // Given: a tracker pipes a TerminalSignalParser into its applySignal entry point.
-    tracker.register('pty-1', 123);
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    onChanged.mockClear();
-    now = 1002;
-    const parser = new TerminalSignalParser({
-      emit: (signal) => {
-        tracker.applySignal('pty-1', signal);
-      },
-    });
-    const fixture = readFileSync(
-      join(process.cwd(), 'src/main/pty/__fixtures__/vscode-osc.txt'),
-      'utf8',
-    );
-
-    // When: the VS Code shell integration fixture is streamed through the parser.
-    parser.applyChunk(decodeEscapedFixture(fixture));
-
-    // Then: the tracker reflects cwd, integration protocols, the in-flight command lifecycle, and
-    // the finished command with its exit code as a single coherent runtime snapshot.
-    const [info] = tracker.list();
-    expect(info?.cwd).toBe('/Users/me/project');
-    expect(info?.integration.shell).toBe(true);
-    expect(info?.integration.protocols).toEqual(['osc633', 'osc7']);
-    expect(info?.command).toEqual({
-      line: "echo hello; printf 'done\\n'",
-      startedAt: 1002,
-      finishedAt: 1002,
-      exitCode: 0,
-      source: 'shell-integration',
-    });
-    expect(onChanged).toHaveBeenCalled();
   });
 
   it('swaps foregroundCommand priority between OSC and fallback when integration toggles stale and recovers', async () => {

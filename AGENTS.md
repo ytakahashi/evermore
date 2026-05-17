@@ -39,7 +39,25 @@ Refer to [ARCHITECTURE.md](./ARCHITECTURE.md) for details.
 
 ### Testing
 
-- Test files are colocated with source files.
+Tests are organized in three tiers by subject scope.
+
+- **Unit tests** verify a single module (class / function / hook / component) in isolation. The
+  surrounding dependencies are replaced by mocks, fakes, or pure data inputs. Unit tests are
+  colocated with the code they cover (`src/**/*.test.{ts,tsx}`). The vast majority of tests fall
+  here.
+- **Integration tests** combine multiple real modules — typically across feature directories —
+  without mocking the seams between them. They must remain deterministic and host-independent (no
+  external process, no network, no host-dependent filesystem reads beyond temp dirs or checked-in
+  fixtures). They live in `tests/integration/` so cross-module wiring is visible and is not mistaken
+  for a unit test of either side.
+- **End-to-end tests** depend on a runtime external dependency (real subprocess such as zsh / ssh,
+  real network socket, etc.). They live in `tests/e2e/` and use `describe.skipIf(...)` to skip when
+  that dependency is unavailable on the current host (for example, `existsSync('/bin/zsh')` is
+  false). CI does not install these dependencies, so the affected suites skip there; developers must
+  run `pnpm test` on a host that satisfies the dependency when changing covered code.
+
+Conventions that apply to all tiers:
+
 - Test runner is Vitest (config: `vitest.config.ts`).
 - Tests use explicit imports (`import { describe, it, expect } from 'vitest'`), not globals.
 - Renderer component tests run in jsdom.
