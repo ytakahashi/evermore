@@ -286,10 +286,11 @@ The IPC surface is the most important boundary in the app and follows a strict s
 
 ## Testing
 
-- Test files are colocated with source files (`foo.ts` ↔ `foo.test.ts`).
+- Unit test files are colocated with source files (`foo.ts` ↔ `foo.test.ts`). Integration tests live
+  in `tests/integration/` and end-to-end tests in `tests/e2e/`; see AGENTS.md for the tier policy.
 - Vitest is configured by `vitest.config.ts`. The current test runner uses one global `jsdom`
-  environment for `src/main/**`, `src/renderer/src/**`, and `src/shared/**` tests, with renderer
-  setup loaded from `src/renderer/src/test/setup.ts`.
+  environment for `src/main/**`, `src/renderer/src/**`, `src/shared/**`, and `tests/**` tests, with
+  shared setup loaded from `tests/setup.ts`.
 - Main-process tests still follow Node-oriented constraints even though the test environment is
   `jsdom`: they should exercise pure managers and injected adapters, not browser APIs.
 - Main-process unit tests inject fakes through manager constructor options (`spawn`, `now`,
