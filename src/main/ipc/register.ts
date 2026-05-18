@@ -80,8 +80,8 @@ export function registerIpcHandlers(options: RegisterIpcHandlersOptions): Regist
         window.webContents.send(IPC.PTY_EXIT, event);
       }
     },
-    onCreate: ({ id, pid }) => {
-      paneInfoTracker.register(id, pid);
+    onCreate: ({ id, pid, cwd }) => {
+      paneInfoTracker.register(id, pid, cwd);
     },
     onDispose: ({ id }) => {
       paneInfoTracker.unregister(id);

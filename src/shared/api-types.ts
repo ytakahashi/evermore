@@ -18,7 +18,6 @@ export interface Api {
   };
   paneInfo: {
     list: () => Promise<PaneRuntimeInfo[]>;
-    notifyCwd: (ptyId: string, cwd: string) => Promise<void>;
     /**
      * Reports the command text submitted in the terminal UI for display purposes.
      *

@@ -104,7 +104,7 @@ describe('PtyManager', () => {
       }),
     );
     expect(onData).toHaveBeenCalledWith({ id, data: 'hello' });
-    expect(onCreate).toHaveBeenCalledWith({ id, pid: 1234 });
+    expect(onCreate).toHaveBeenCalledWith({ id, pid: 1234, cwd: '/Users/tester' });
   });
 
   it('sets TERM_PROGRAM=Evermore so the shell integration snippet identifies Evermore panes', () => {

@@ -35,6 +35,7 @@ export class PtyManager {
   public create(options: PtyCreateOptions): string {
     const id = randomUUID();
     const shell = options.shell ?? process.env['SHELL'] ?? '/bin/zsh';
+    const resolvedCwd = this.resolveCwd(options.cwd);
     // Start the shell as a login shell so macOS's `/etc/zprofile` runs `path_helper`, populating
     // PATH from `/etc/paths` and `/etc/paths.d/*` (Homebrew, cryptex, MacPorts, etc.). Without
     // `-l` the spawned PATH would diverge from what the user sees in iTerm2 or Terminal.app.
@@ -47,7 +48,7 @@ export class PtyManager {
       name: 'xterm-256color',
       cols: options.cols ?? 80,
       rows: options.rows ?? 24,
-      cwd: this.resolveCwd(options.cwd),
+      cwd: resolvedCwd,
       env: {
         ...buildPtyProcessEnv(process.env, options.env),
         TERM: 'xterm-256color',
@@ -81,7 +82,7 @@ export class PtyManager {
       disposables: [dataDisposable, exitDisposable],
       parser,
     });
-    this.callbacks.onCreate?.({ id, pid: proc.pid });
+    this.callbacks.onCreate?.({ id, pid: proc.pid, cwd: resolvedCwd });
 
     return id;
   }

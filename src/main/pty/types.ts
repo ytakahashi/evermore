@@ -22,6 +22,14 @@ export interface PtyExitEvent {
 export interface PtyCreateEvent {
   id: string;
   pid: number;
+  /**
+   * Absolute working directory the PTY was actually spawned with, after `PtyManager.resolveCwd`
+   * has clamped non-existent inputs to the user's home directory.
+   *
+   * This is the authoritative initial cwd used by `PaneInfoTracker.register` so the first
+   * `PaneRuntimeInfo` emission carries a workable cwd before any OSC 7 lifecycle signal arrives.
+   */
+  cwd: string;
 }
 
 export interface PtyDisposeEvent {

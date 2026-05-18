@@ -28,7 +28,7 @@ const disposeMocks = vi.hoisted(() => ({
 
 const paneInfoTrackerMock = vi.hoisted(() => ({
   applySignal: vi.fn<(ptyId: string, signal: PaneRuntimeSignal) => void>(),
-  register: vi.fn<(ptyId: string, shellPid: number) => void>(),
+  register: vi.fn<(ptyId: string, shellPid: number, cwd: string) => void>(),
   unregister: vi.fn<(ptyId: string) => void>(),
 }));
 
@@ -275,6 +275,25 @@ describe('registerIpcHandlers', () => {
 
     // Then: the pane info tracker receives the signal as the primary observer.
     expect(paneInfoTrackerMock.applySignal).toHaveBeenCalledWith('pty-1', signal);
+  });
+
+  it('registers created PTYs with the pane info tracker using the resolved cwd', () => {
+    // Given: IPC runtime is registered and ptyManager exposes its callback bundle.
+    registerIpcHandlers({
+      getWindow: () => null,
+      settingsStore: createSettingsStore() as unknown as SettingsStore,
+    });
+    expect(ptyManagerMock.callbacks).toBeDefined();
+
+    // When: the PTY manager reports a created process with its resolved cwd.
+    ptyManagerMock.callbacks?.onCreate?.({
+      id: 'pty-1',
+      pid: 1234,
+      cwd: '/Users/tester',
+    });
+
+    // Then: pane runtime tracking is seeded with the same cwd before any OSC 7 arrives.
+    expect(paneInfoTrackerMock.register).toHaveBeenCalledWith('pty-1', 1234, '/Users/tester');
   });
 
   it('drops tunnel events after the current window is destroyed', () => {

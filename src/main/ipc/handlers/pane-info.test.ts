@@ -24,7 +24,7 @@ describe('registerPaneInfoHandlers', () => {
     ipcMainMock.removeHandler.mockClear();
   });
 
-  it('registers list and cwd notification handlers', () => {
+  it('registers list and command notification handlers', () => {
     // Given: an injected pane info tracker.
     const info: PaneRuntimeInfo = {
       ptyId: 'pty-1',
@@ -43,7 +43,6 @@ describe('registerPaneInfoHandlers', () => {
       dispose: vi.fn(),
       list: vi.fn(() => [info]),
       notifyCommand: vi.fn(),
-      notifyCwd: vi.fn(),
       register: vi.fn(),
       unregister: vi.fn(),
     };
@@ -54,16 +53,13 @@ describe('registerPaneInfoHandlers', () => {
       paneInfoTracker,
     });
     const listed = getHandler(IPC.PANE_INFO_LIST)?.({});
-    getHandler(IPC.PANE_INFO_NOTIFY_CWD)?.({}, { ptyId: 'pty-1', cwd: '/Users/tester/project' });
     getHandler(IPC.PANE_INFO_NOTIFY_COMMAND)?.({}, { ptyId: 'pty-1', command: 'pnpm run dev' });
     dispose();
 
     // Then: requests are bridged to the tracker and cleanup removes handlers.
     expect(listed).toEqual([info]);
-    expect(paneInfoTracker.notifyCwd).toHaveBeenCalledWith('pty-1', '/Users/tester/project');
     expect(paneInfoTracker.notifyCommand).toHaveBeenCalledWith('pty-1', 'pnpm run dev');
     expect(ipcMainMock.removeHandler).toHaveBeenCalledWith(IPC.PANE_INFO_LIST);
-    expect(ipcMainMock.removeHandler).toHaveBeenCalledWith(IPC.PANE_INFO_NOTIFY_CWD);
     expect(ipcMainMock.removeHandler).toHaveBeenCalledWith(IPC.PANE_INFO_NOTIFY_COMMAND);
     expect(paneInfoTracker.dispose).toHaveBeenCalledOnce();
   });

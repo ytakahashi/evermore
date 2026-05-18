@@ -6,7 +6,6 @@ import { Terminal } from '@xterm/xterm';
 import { useResizeObserver } from '../../hooks/useResizeObserver';
 import { DEFAULT_APP_SETTINGS } from '../../../../shared/settings-defaults';
 import { useSettingsStore } from '../../stores/settingsStore';
-import { parseOsc7Cwd } from './osc7';
 import { terminalTheme } from './theme';
 
 const BACKSPACE = '\x7f';
@@ -18,7 +17,6 @@ interface UseTerminalOptions {
   cwd: string;
   initialCommand?: string;
   isActive?: boolean;
-  onCwdChange?: (cwd: string) => void;
   onPtyIdChange?: (ptyId: string | null) => void;
   shell?: string;
 }
@@ -32,9 +30,9 @@ interface UseTerminalResult {
  *
  * The hook owns the renderer-only terminal lifecycle: xterm/addon setup, fit/resize updates,
  * settings application, PTY creation/disposal, PTY data forwarding, focus handling, and optional
- * initial command injection. Pane runtime state itself is owned by the main process, but this hook
- * still reports the PTY id and keeps two migration fallbacks alive until later OSC phases remove
- * them: renderer-side OSC 7 cwd updates and lightweight input-based command reporting.
+ * initial command injection. Pane runtime state itself is owned by the main process. The hook
+ * reports the PTY id to the caller and forwards user-submitted command text as a fallback for
+ * sidebar display until shell integration sequences cover every pane.
  */
 export function useTerminal(options: UseTerminalOptions): UseTerminalResult {
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -45,7 +43,6 @@ export function useTerminal(options: UseTerminalOptions): UseTerminalResult {
   const initialCommandWrittenPtyIdsRef = useRef(new Set<string>());
   const pendingCommandRef = useRef('');
   const isActiveRef = useRef(options.isActive ?? false);
-  const onCwdChangeRef = useRef(options.onCwdChange);
   const onPtyIdChangeRef = useRef(options.onPtyIdChange);
   const cursorStyle = useSettingsStore(
     (state) => state.settings?.terminal.cursorStyle ?? DEFAULT_APP_SETTINGS.terminal.cursorStyle,
@@ -151,10 +148,6 @@ export function useTerminal(options: UseTerminalOptions): UseTerminalResult {
   }, [options.isActive]);
 
   useEffect(() => {
-    onCwdChangeRef.current = options.onCwdChange;
-  }, [options.onCwdChange]);
-
-  useEffect(() => {
     onPtyIdChangeRef.current = options.onPtyIdChange;
   }, [options.onPtyIdChange]);
 
@@ -212,30 +205,12 @@ export function useTerminal(options: UseTerminalOptions): UseTerminalResult {
     }
 
     focusIfActive();
-    // The main-process TerminalSignalParser also observes OSC 7 and forwards it through
-    // PaneInfoTracker. This renderer-side handler exists to drive `onCwdChange` for workspace cwd
-    // persistence; once that path is sourced from the main-process pane runtime feed, both this
-    // handler and the `notifyCwd` IPC can be removed.
-    const osc7Disposable = terminal.parser.registerOscHandler(7, (data) => {
-      const cwd = parseOsc7Cwd(data);
-      if (cwd) {
-        onCwdChangeRef.current?.(cwd);
-        const ptyId = ptyIdRef.current;
-        if (ptyId) {
-          void window.api?.paneInfo?.notifyCwd(ptyId, cwd);
-        }
-      }
-
-      return true;
-    });
-
     const ptyApi = window.api?.pty;
     if (!ptyApi) {
       // Vitest/jsdom renders this component without Electron's preload. Showing a terminal-local
       // message keeps smoke tests simple while making a broken preload obvious in development.
       terminal.writeln('Terminal API is unavailable.');
       return () => {
-        osc7Disposable.dispose();
         terminal.dispose();
         terminalRef.current = null;
         fitAddonRef.current = null;
@@ -273,8 +248,9 @@ export function useTerminal(options: UseTerminalOptions): UseTerminalResult {
       }
     });
 
-    // cwd is a process creation input, not live terminal state. Later OSC 7 updates will change the
-    // persisted pane cwd, but they must not restart the running shell just because props changed.
+    // cwd is a process creation input, not live terminal state. Live cwd updates flow through the
+    // main-process pane runtime feed and reach the workspace store via `usePaneInfoBridge`; this
+    // hook intentionally never restarts the running shell because of prop drift.
     const initialOptions = initialOptionsRef.current;
     void ptyApi.create({ cwd: initialOptions.cwd, shell: initialOptions.shell }).then((id) => {
       if (disposed) {
@@ -286,7 +262,6 @@ export function useTerminal(options: UseTerminalOptions): UseTerminalResult {
 
       ptyIdRef.current = id;
       onPtyIdChangeRef.current?.(id);
-      void window.api?.paneInfo?.notifyCwd(id, initialOptions.cwd);
       fitAndResize();
       focusIfActive();
 
@@ -309,7 +284,6 @@ export function useTerminal(options: UseTerminalOptions): UseTerminalResult {
         void ptyApi.dispose(ptyId);
       }
       inputDisposable.dispose();
-      osc7Disposable.dispose();
       dataCleanup();
       exitCleanup();
       terminal.dispose();

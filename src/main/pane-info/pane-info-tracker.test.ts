@@ -27,6 +27,9 @@ function expectedInfo(
       lastSequenceAt: 0,
       stale: false,
     },
+    // Every `tracker.register(...)` call in this suite seeds cwd with '/tmp', so the helper
+    // defaults to the same value. Override `cwd` explicitly when a test exercises OSC 7 / chpwd.
+    cwd: '/tmp',
     ...overrides,
   };
 }
@@ -59,7 +62,7 @@ describe('PaneInfoTracker', () => {
     // Given: a tracker with no panes.
 
     // When: a PTY is registered.
-    tracker.register('pty-1', 123);
+    tracker.register('pty-1', 123, '/tmp');
 
     // Then: the initial runtime info is available and emitted.
     const info = expectedInfo({ ptyId: 'pty-1', observedAt: 1000 });
@@ -71,7 +74,7 @@ describe('PaneInfoTracker', () => {
 
   it('emits only when activity or foreground command changes', async () => {
     // Given: a registered pane starts idle.
-    tracker.register('pty-1', 123);
+    tracker.register('pty-1', 123, '/tmp');
     onChanged.mockClear();
 
     // When: polling observes the same idle state.
@@ -110,7 +113,7 @@ describe('PaneInfoTracker', () => {
 
   it('prefers the submitted terminal command while a process is running', async () => {
     // Given: a pane has a user-submitted command before ps observes its child process.
-    tracker.register('pty-1', 123);
+    tracker.register('pty-1', 123, '/tmp');
     await new Promise((resolve) => setTimeout(resolve, 0));
     tracker.notifyCommand('pty-1', 'pnpm run dev');
     onChanged.mockClear();
@@ -143,7 +146,7 @@ describe('PaneInfoTracker', () => {
 
   it('records shell integration protocols when signals are applied directly', () => {
     // Given: a registered pane.
-    tracker.register('pty-1', 123);
+    tracker.register('pty-1', 123, '/tmp');
     onChanged.mockClear();
 
     // When: duplicate lifecycle sources are observed by the tracker.
@@ -164,7 +167,7 @@ describe('PaneInfoTracker', () => {
 
   it('creates command state from shell integration signals without register.ts wiring', () => {
     // Given: a registered pane receives shell integration signals directly.
-    tracker.register('pty-1', 123);
+    tracker.register('pty-1', 123, '/tmp');
 
     // When: command line and start signals are applied.
     now = 1002;
@@ -190,7 +193,7 @@ describe('PaneInfoTracker', () => {
 
   it('overwrites stale in-flight command state when a new command start arrives', () => {
     // Given: a previous command start did not receive D or a prompt-start cleanup.
-    tracker.register('pty-1', 123);
+    tracker.register('pty-1', 123, '/tmp');
     now = 1002;
     tracker.applySignal('pty-1', {
       type: 'shell-command-line',
@@ -221,7 +224,7 @@ describe('PaneInfoTracker', () => {
 
   it('clears the shell integration command line on shell-command-finished before the next poll', async () => {
     // Given: a pane is observed as running a node process and shell integration is in flight.
-    tracker.register('pty-1', 123);
+    tracker.register('pty-1', 123, '/tmp');
     await new Promise((resolve) => setTimeout(resolve, 0));
     rows = [
       shellRow(456),
@@ -265,7 +268,7 @@ describe('PaneInfoTracker', () => {
   it('clears the shell integration command line on shell-command-finished even when the matching command-started was missed', async () => {
     // Given: 633;E is observed but the matching 133;C is dropped, so shellIntegrationCommandLine
     // is populated while currentCommand stays undefined.
-    tracker.register('pty-1', 123);
+    tracker.register('pty-1', 123, '/tmp');
     await new Promise((resolve) => setTimeout(resolve, 0));
     now = 1002;
     tracker.applySignal('pty-1', {
@@ -304,7 +307,7 @@ describe('PaneInfoTracker', () => {
   it('clears the shell integration command line when ps transitions to idle without a matching command-started', async () => {
     // Given: 633;E is observed but the matching 133;C is dropped, leaving the OSC command line
     // dangling while a separate foreground process is observed by ps.
-    tracker.register('pty-1', 123);
+    tracker.register('pty-1', 123, '/tmp');
     await new Promise((resolve) => setTimeout(resolve, 0));
     rows = [
       shellRow(456),
@@ -339,7 +342,7 @@ describe('PaneInfoTracker', () => {
 
   it('switches the foreground command to ssh once ps observes an ssh foreground process', async () => {
     // Given: a local command has completed and shell integration recorded its command line.
-    tracker.register('pty-1', 123);
+    tracker.register('pty-1', 123, '/tmp');
     await new Promise((resolve) => setTimeout(resolve, 0));
     now = 1002;
     tracker.applySignal('pty-1', {
@@ -379,7 +382,7 @@ describe('PaneInfoTracker', () => {
 
   it('does not promote processActivity to running for shell-command-line without a matching shell-command-started', async () => {
     // Given: a pane is idle and no shell-command-started has been observed.
-    tracker.register('pty-1', 123);
+    tracker.register('pty-1', 123, '/tmp');
     await new Promise((resolve) => setTimeout(resolve, 0));
     onChanged.mockClear();
 
@@ -399,7 +402,7 @@ describe('PaneInfoTracker', () => {
 
   it('records lastCommand with exitCode on shell-command-finished and resets currentCommand', async () => {
     // Given: a pane has a shell integration command in flight.
-    tracker.register('pty-1', 123);
+    tracker.register('pty-1', 123, '/tmp');
     await new Promise((resolve) => setTimeout(resolve, 0));
     now = 1002;
     tracker.applySignal('pty-1', {
@@ -431,7 +434,7 @@ describe('PaneInfoTracker', () => {
 
   it('records lastCommand with undefined exitCode when ps transitions to idle without 133;D', async () => {
     // Given: ps observes a foreground process while shell integration reports an in-flight command.
-    tracker.register('pty-1', 123);
+    tracker.register('pty-1', 123, '/tmp');
     await new Promise((resolve) => setTimeout(resolve, 0));
     rows = [
       shellRow(456),
@@ -472,7 +475,7 @@ describe('PaneInfoTracker', () => {
   it('keeps shellIntegrationCommandLine and missedPsCommandStarts unchanged when remote shell-command-line arrives during an ssh session', async () => {
     // Given: shell integration was observed locally and ps already pushed integration into stale,
     // then ssh takes over as the local foreground process.
-    tracker.register('pty-1', 123);
+    tracker.register('pty-1', 123, '/tmp');
     await new Promise((resolve) => setTimeout(resolve, 0));
     tracker.applySignal('pty-1', { type: 'shell-prompt-start', source: 'osc133' });
     const localRunning = [
@@ -553,7 +556,7 @@ describe('PaneInfoTracker', () => {
 
   it('keeps processActivity running when remote shell-command-finished arrives during an ssh session', async () => {
     // Given: ps observes ssh as the local foreground process.
-    tracker.register('pty-1', 123);
+    tracker.register('pty-1', 123, '/tmp');
     await new Promise((resolve) => setTimeout(resolve, 0));
     rows = [
       shellRow(789),
@@ -582,34 +585,110 @@ describe('PaneInfoTracker', () => {
     expect(tracker.list()[0]?.processActivity).toBe('running');
   });
 
-  it('produces equivalent runtime info for notifyCwd and applySignal cwd inputs', async () => {
-    // Given: two panes that ps observes as idle (no matching shellRow for the registered pid).
-    tracker.register('pty-notify', 100);
-    tracker.register('pty-signal', 200);
-    await new Promise((resolve) => setTimeout(resolve, 0));
+  it('only skips OSC 7 cwd updates after the foreground process is classified as ssh', async () => {
+    // The SSH cwd guard in `applyCwd` keys on `foregroundSession.kind`, which is derived from the
+    // most recent `ps` observation. OSC 7 that arrives before any matching `ps` row has classified
+    // the foreground process is therefore still written to `PaneRuntimeInfo.cwd`. This test pins
+    // both halves of that behaviour together so the guard's reliance on the ps-derived session
+    // classification is explicit, not accidental.
 
-    // When: one pane records cwd via notifyCwd and the other via applySignal with the same value.
+    // Given: a fresh pane with no ps observation yet — foregroundSession defaults to 'none'.
+    tracker.register('pty-1', 123, '/tmp');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(tracker.list()[0]?.foregroundSession.kind).toBe('none');
+
+    // When: an OSC 7 arrives before ps has had a chance to classify the foreground process.
     now = 1002;
-    tracker.notifyCwd('pty-notify', '/Users/tester/project');
-    tracker.applySignal('pty-signal', {
+    tracker.applySignal('pty-1', {
       type: 'cwd',
-      cwd: '/Users/tester/project',
+      cwd: '/remote/path',
       source: 'osc7',
     });
 
-    // Then: every field on the resulting runtime info except ptyId is identical.
-    const notifyInfo = tracker.list().find((info) => info.ptyId === 'pty-notify');
-    const signalInfo = tracker.list().find((info) => info.ptyId === 'pty-signal');
-    expect(notifyInfo).toBeDefined();
-    expect(signalInfo).toBeDefined();
-    const { ptyId: _notifyPtyId, ...notifyRest } = notifyInfo as PaneRuntimeInfo;
-    const { ptyId: _signalPtyId, ...signalRest } = signalInfo as PaneRuntimeInfo;
-    expect(notifyRest).toEqual(signalRest);
+    // Then: cwd is updated because the guard has no ssh classification to skip on yet.
+    expect(tracker.list()[0]?.cwd).toBe('/remote/path');
+
+    // And: once ps confirms ssh as the foreground process, later OSC 7 updates are skipped.
+    rows = [
+      shellRow(789),
+      {
+        pid: 789,
+        ppid: 123,
+        pgid: 789,
+        tpgid: 789,
+        command: '/usr/bin/ssh',
+        args: '/usr/bin/ssh user@host',
+      },
+    ];
+    now = 1003;
+    await tracker.poll();
+    expect(tracker.list()[0]?.foregroundSession.kind).toBe('ssh');
+    now = 1004;
+    tracker.applySignal('pty-1', {
+      type: 'cwd',
+      cwd: '/another/remote',
+      source: 'osc7',
+    });
+    expect(tracker.list()[0]?.cwd).toBe('/remote/path');
+  });
+
+  it('resumes OSC 7 cwd writes once the ssh foreground session ends', async () => {
+    // Pins the recovery half of the SSH cwd invariant. The companion test above only confirms
+    // that `applyCwd` skips while `foregroundSession.kind === 'ssh'`; without this case a future
+    // change that made the SSH skip sticky (e.g. caching the flag on the process record) would
+    // still pass the "block during ssh" assertion. We need both halves pinned.
+
+    // Given: ps classifies the local foreground as ssh after an initial local cwd was recorded.
+    tracker.register('pty-1', 123, '/tmp');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    now = 1002;
+    tracker.applySignal('pty-1', {
+      type: 'cwd',
+      cwd: '/Users/local/project',
+      source: 'osc7',
+    });
+    rows = [
+      shellRow(789),
+      {
+        pid: 789,
+        ppid: 123,
+        pgid: 789,
+        tpgid: 789,
+        command: '/usr/bin/ssh',
+        args: '/usr/bin/ssh user@host',
+      },
+    ];
+    now = 1003;
+    await tracker.poll();
+    expect(tracker.list()[0]?.foregroundSession.kind).toBe('ssh');
+    // Confirm the SSH skip is active before exercising recovery — a remote cwd is rejected.
+    now = 1004;
+    tracker.applySignal('pty-1', {
+      type: 'cwd',
+      cwd: '/remote/path',
+      source: 'osc7',
+    });
+    expect(tracker.list()[0]?.cwd).toBe('/Users/local/project');
+
+    // When: ssh exits, ps observes the shell back in the foreground, and a fresh OSC 7 arrives.
+    rows = [shellRow(123)];
+    now = 1005;
+    await tracker.poll();
+    expect(tracker.list()[0]?.foregroundSession.kind).toBe('none');
+    now = 1006;
+    tracker.applySignal('pty-1', {
+      type: 'cwd',
+      cwd: '/Users/local/after-ssh',
+      source: 'osc7',
+    });
+
+    // Then: the cwd is written through again because the SSH classification is gone.
+    expect(tracker.list()[0]?.cwd).toBe('/Users/local/after-ssh');
   });
 
   it('toggles integration.stale when ps repeatedly misses command starts and a shell-command-started resets the counter', async () => {
     // Given: shell integration was observed.
-    tracker.register('pty-1', 123);
+    tracker.register('pty-1', 123, '/tmp');
     await new Promise((resolve) => setTimeout(resolve, 0));
     tracker.applySignal('pty-1', { type: 'shell-prompt-start', source: 'osc133' });
 
@@ -648,7 +727,7 @@ describe('PaneInfoTracker', () => {
 
   it('swaps foregroundCommand priority between OSC and fallback when integration toggles stale and recovers', async () => {
     // Given: shell integration is active with both a fallback submitted command and a 633;E line.
-    tracker.register('pty-1', 123);
+    tracker.register('pty-1', 123, '/tmp');
     await new Promise((resolve) => setTimeout(resolve, 0));
     rows = [
       shellRow(456),
@@ -732,7 +811,7 @@ describe('PaneInfoTracker', () => {
 
   it('unregisters panes and clears runtime info', () => {
     // Given: a registered pane.
-    tracker.register('pty-1', 123);
+    tracker.register('pty-1', 123, '/tmp');
 
     // When: the pane is unregistered.
     tracker.unregister('pty-1');
@@ -751,7 +830,7 @@ describe('PaneInfoTracker', () => {
       now: () => now,
       pollIntervalMs: 1000,
     });
-    tracker.register('pty-1', 123);
+    tracker.register('pty-1', 123, '/tmp');
     await vi.runOnlyPendingTimersAsync();
     listProcesses.mockClear();
 
@@ -773,7 +852,7 @@ describe('PaneInfoTracker', () => {
       now: () => now,
       pollIntervalMs: 1000,
     });
-    tracker.register('pty-1', 123);
+    tracker.register('pty-1', 123, '/tmp');
     await vi.runOnlyPendingTimersAsync();
     listProcesses.mockClear();
 

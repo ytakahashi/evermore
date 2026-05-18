@@ -44,6 +44,15 @@ export interface WorkspaceStoreState {
   closePane: (paneId: string) => void;
   resizeSplit: (path: number[], ratio: number) => void;
   updatePaneCwd: (paneId: string, cwd: string) => void;
+  /**
+   * Reflects an authoritative cwd observation keyed by runtime PTY id.
+   *
+   * Bridge code that receives `PaneRuntimeInfo` from the main process does not know which workspace
+   * owns the PTY, so it cannot use {@link updatePaneCwd} directly. This helper scans all loaded
+   * workspaces (every workspace stays mounted, see `MainTerminalArea`) and forwards to the same
+   * cwd update path as {@link updatePaneCwd}.
+   */
+  updatePaneCwdByPtyId: (ptyId: string, cwd: string) => void;
   updateWorkspace: (workspace: Workspace) => void;
 }
 
@@ -336,6 +345,24 @@ export function createWorkspaceStore(
       }));
 
       return updatedWorkspace;
+    };
+
+    // Shared cwd-update body for both pane-id and pty-id keyed actions. Keeping the early-return
+    // and persistence call in one place is what guarantees that re-emits of the same cwd cannot
+    // bump `workspace.updatedAt` regardless of which entry point the caller used.
+    const applyCwdUpdate = (workspace: Workspace, paneId: string, cwd: string): void => {
+      const pane = workspace.panes.find((currentPane) => currentPane.id === paneId);
+      if (!pane || pane.cwd === cwd) {
+        return;
+      }
+
+      const updatedWorkspace = updateWorkspaceState({
+        ...workspace,
+        panes: workspace.panes.map((currentPane) =>
+          currentPane.id === paneId ? { ...currentPane, cwd } : currentPane,
+        ),
+      });
+      persistWorkspaceDebounced(updatedWorkspace.id, cwdDebounceMs);
     };
 
     return {
@@ -748,18 +775,20 @@ export function createWorkspaceStore(
           return;
         }
 
-        const pane = workspace.panes.find((currentPane) => currentPane.id === paneId);
-        if (!pane || pane.cwd === cwd) {
+        applyCwdUpdate(workspace, paneId, cwd);
+      },
+      updatePaneCwdByPtyId: (ptyId: string, cwd: string): void => {
+        // All workspaces stay mounted (see `MainTerminalArea`), so a PTY id is unique across the
+        // whole renderer process. Stop at the first match to avoid scanning further workspaces.
+        for (const workspace of get().workspaces) {
+          const pane = workspace.panes.find((currentPane) => currentPane.ptyId === ptyId);
+          if (!pane) {
+            continue;
+          }
+
+          applyCwdUpdate(workspace, pane.id, cwd);
           return;
         }
-
-        const updatedWorkspace = updateWorkspaceState({
-          ...workspace,
-          panes: workspace.panes.map((currentPane) =>
-            currentPane.id === paneId ? { ...currentPane, cwd } : currentPane,
-          ),
-        });
-        persistWorkspaceDebounced(updatedWorkspace.id, cwdDebounceMs);
       },
       updateWorkspace: (workspace: Workspace): void => {
         const updatedWorkspace = updateWorkspaceState(workspace);

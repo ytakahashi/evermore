@@ -5,7 +5,7 @@ import { PaneInfoTracker } from '../../pane-info/pane-info-tracker';
 
 type PaneInfoRuntimeTracker = Pick<
   PaneInfoTracker,
-  'dispose' | 'list' | 'notifyCommand' | 'notifyCwd' | 'register' | 'unregister'
+  'dispose' | 'list' | 'notifyCommand' | 'register' | 'unregister'
 >;
 
 interface RegisterPaneInfoHandlersOptions {
@@ -35,9 +35,6 @@ export function registerPaneInfoHandlers(options: RegisterPaneInfoHandlersOption
     });
 
   ipcMain.handle(IPC.PANE_INFO_LIST, (): PaneRuntimeInfo[] => paneInfoTracker.list());
-  ipcMain.handle(IPC.PANE_INFO_NOTIFY_CWD, (_event, payload: { ptyId: string; cwd: string }) => {
-    paneInfoTracker.notifyCwd(payload.ptyId, payload.cwd);
-  });
   ipcMain.handle(
     IPC.PANE_INFO_NOTIFY_COMMAND,
     (_event, payload: { ptyId: string; command: string }) => {
@@ -47,7 +44,6 @@ export function registerPaneInfoHandlers(options: RegisterPaneInfoHandlersOption
 
   return () => {
     ipcMain.removeHandler(IPC.PANE_INFO_LIST);
-    ipcMain.removeHandler(IPC.PANE_INFO_NOTIFY_CWD);
     ipcMain.removeHandler(IPC.PANE_INFO_NOTIFY_COMMAND);
     paneInfoTracker.dispose();
   };

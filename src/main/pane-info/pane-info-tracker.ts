@@ -47,11 +47,17 @@ export class PaneInfoTracker {
 
   /**
    * Registers a PTY id and shell PID for activity tracking.
+   *
+   * `cwd` must be the absolute path the PTY was actually spawned with (i.e. `resolveCwd` output).
+   * It is seeded into `PaneRuntimeInfo.cwd` on the first emit so the sidebar and workspace cwd
+   * have a usable value before any OSC 7 lifecycle signal arrives. Callers must not pass an empty
+   * string; the tracker treats the value as opaque and does not validate it.
    */
-  public register(ptyId: string, shellPid: number): void {
+  public register(ptyId: string, shellPid: number, cwd: string): void {
     const process: RegisteredPaneProcess = {
       ptyId,
       shellPid,
+      cwd,
       foregroundSession: { kind: 'none' },
       integration: createInitialIntegration(),
       lastProcessActivity: 'idle',
@@ -78,7 +84,13 @@ export class PaneInfoTracker {
     const now = this.now();
     switch (signal.type) {
       case 'cwd':
-        this.applyCwd(process, signal.cwd, now);
+        // applyCwd returns false when the SSH invariant skips the write. Bail out before the
+        // recomputeInfo call below so a remote shell hammering OSC 7 during an ssh session does
+        // not pay for an emit attempt per signal: the equivalence check would suppress the emit,
+        // but the recompute itself still allocates a fresh PaneRuntimeInfo.
+        if (!this.applyCwd(process, signal.cwd, now)) {
+          return;
+        }
         break;
 
       case 'shell-prompt-start':
@@ -127,16 +139,6 @@ export class PaneInfoTracker {
     }
 
     this.recomputeInfo(process, { emit: true, observedAt: now });
-  }
-
-  /**
-   * Stores the latest OSC 7 cwd observed by the renderer-side terminal parser.
-   *
-   * Delegates to {@link applySignal} so renderer-driven and main-process-driven OSC 7 inputs share
-   * the same merge rules (in particular, the SSH skip and integration protocol bookkeeping).
-   */
-  public notifyCwd(ptyId: string, cwd: string): void {
-    this.applySignal(ptyId, { type: 'cwd', source: 'osc7', cwd });
   }
 
   /**
@@ -274,14 +276,19 @@ export class PaneInfoTracker {
     }
   }
 
-  private applyCwd(process: RegisteredPaneProcess, cwd: string, now: number): void {
+  /**
+   * Applies an OSC 7 cwd observation. Returns `false` when the SSH invariant skipped the write so
+   * the caller can also skip the surrounding `recomputeInfo` and avoid a no-op emit cycle.
+   */
+  private applyCwd(process: RegisteredPaneProcess, cwd: string, now: number): boolean {
     if (process.foregroundSession.kind === 'ssh') {
-      return;
+      return false;
     }
 
     process.cwd = cwd;
     appendProtocolOnce(process.integration, 'osc7');
     process.integration.lastSequenceAt = now;
+    return true;
   }
 
   private applyLifecycleProtocol(

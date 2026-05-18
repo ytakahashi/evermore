@@ -115,7 +115,6 @@ function PaneCell({
   const setActivePane = useWorkspaceStore((state) => state.setActivePane);
   const setPanePtyId = useWorkspaceStore((state) => state.setPanePtyId);
   const splitPane = useWorkspaceStore((state) => state.splitPane);
-  const updatePaneCwd = useWorkspaceStore((state) => state.updatePaneCwd);
   const removePaneInfo = usePaneInfoStore((state) => state.removeInfo);
   const setFullscreenPaneId = useUiStore((state) => state.setFullscreenPaneId);
 
@@ -145,9 +144,6 @@ function PaneCell({
         cwd={pane.cwd}
         initialCommand={pane.initialCommand}
         isActive={isActive}
-        onCwdChange={(cwd) => {
-          updatePaneCwd(pane.id, cwd);
-        }}
         onPtyIdChange={(ptyId) => {
           // The PTY id is cleared on process exit and on unmount. Drop the matching paneInfo entry
           // here so the renderer cache does not accumulate entries for retired PTYs over a long

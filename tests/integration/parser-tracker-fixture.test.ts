@@ -66,7 +66,7 @@ describe('TerminalSignalParser → PaneInfoTracker integration', () => {
       now: () => 1002,
       pollIntervalMs: 0,
     });
-    tracker.register('pty-1', 123);
+    tracker.register('pty-1', 123, '/tmp');
     await new Promise((resolve) => setTimeout(resolve, 0));
     onChanged.mockClear();
 
@@ -97,5 +97,34 @@ describe('TerminalSignalParser → PaneInfoTracker integration', () => {
       source: 'shell-integration',
     });
     expect(onChanged).toHaveBeenCalled();
+  });
+
+  it('emits the seeded cwd from PaneInfoTracker.register before any parser signal arrives', async () => {
+    // The initial cwd flows from `PtyManager.resolveCwd` through `register.ts` into
+    // `tracker.register(ptyId, pid, cwd)`. This integration check pins the seam where that seed
+    // becomes visible to consumers: a fresh registration must populate `PaneRuntimeInfo.cwd` on
+    // the very first emit so the sidebar and workspace store have a usable cwd before the shell
+    // ever sends an OSC 7. Without it, panes would briefly render with no cwd at startup.
+
+    // Given: a tracker that captures onChanged events with no parser signals in flight.
+    const onChanged = vi.fn<(event: PaneInfoChangedEvent) => void>();
+    const tracker = new PaneInfoTracker({
+      callbacks: { onChanged },
+      // The seeded-cwd path must not depend on ps observations.
+      inspector: { listProcesses: () => Promise.resolve([]) },
+      now: () => 2000,
+      pollIntervalMs: 0,
+    });
+
+    // When: a pane is registered with the cwd that `PtyManager.resolveCwd` would have produced.
+    tracker.register('pty-seed', 999, '/Users/tester/seeded-cwd');
+    // The first emit happens on the trailing microtask of register()'s implicit poll path.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    // Then: the first PANE_INFO_CHANGED event carries the seeded cwd.
+    expect(onChanged).toHaveBeenCalled();
+    const firstEvent = onChanged.mock.calls[0]?.[0];
+    expect(firstEvent?.info.ptyId).toBe('pty-seed');
+    expect(firstEvent?.info.cwd).toBe('/Users/tester/seeded-cwd');
   });
 });
