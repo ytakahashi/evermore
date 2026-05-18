@@ -84,7 +84,13 @@ export class PaneInfoTracker {
     const now = this.now();
     switch (signal.type) {
       case 'cwd':
-        this.applyCwd(process, signal.cwd, now);
+        // applyCwd returns false when the SSH invariant skips the write. Bail out before the
+        // recomputeInfo call below so a remote shell hammering OSC 7 during an ssh session does
+        // not pay for an emit attempt per signal: the equivalence check would suppress the emit,
+        // but the recompute itself still allocates a fresh PaneRuntimeInfo.
+        if (!this.applyCwd(process, signal.cwd, now)) {
+          return;
+        }
         break;
 
       case 'shell-prompt-start':
@@ -270,14 +276,19 @@ export class PaneInfoTracker {
     }
   }
 
-  private applyCwd(process: RegisteredPaneProcess, cwd: string, now: number): void {
+  /**
+   * Applies an OSC 7 cwd observation. Returns `false` when the SSH invariant skipped the write so
+   * the caller can also skip the surrounding `recomputeInfo` and avoid a no-op emit cycle.
+   */
+  private applyCwd(process: RegisteredPaneProcess, cwd: string, now: number): boolean {
     if (process.foregroundSession.kind === 'ssh') {
-      return;
+      return false;
     }
 
     process.cwd = cwd;
     appendProtocolOnce(process.integration, 'osc7');
     process.integration.lastSequenceAt = now;
+    return true;
   }
 
   private applyLifecycleProtocol(

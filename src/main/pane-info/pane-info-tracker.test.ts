@@ -632,6 +632,60 @@ describe('PaneInfoTracker', () => {
     expect(tracker.list()[0]?.cwd).toBe('/remote/path');
   });
 
+  it('resumes OSC 7 cwd writes once the ssh foreground session ends', async () => {
+    // Pins the recovery half of the SSH cwd invariant. The companion test above only confirms
+    // that `applyCwd` skips while `foregroundSession.kind === 'ssh'`; without this case a future
+    // change that made the SSH skip sticky (e.g. caching the flag on the process record) would
+    // still pass the "block during ssh" assertion. We need both halves pinned.
+
+    // Given: ps classifies the local foreground as ssh after an initial local cwd was recorded.
+    tracker.register('pty-1', 123, '/tmp');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    now = 1002;
+    tracker.applySignal('pty-1', {
+      type: 'cwd',
+      cwd: '/Users/local/project',
+      source: 'osc7',
+    });
+    rows = [
+      shellRow(789),
+      {
+        pid: 789,
+        ppid: 123,
+        pgid: 789,
+        tpgid: 789,
+        command: '/usr/bin/ssh',
+        args: '/usr/bin/ssh user@host',
+      },
+    ];
+    now = 1003;
+    await tracker.poll();
+    expect(tracker.list()[0]?.foregroundSession.kind).toBe('ssh');
+    // Confirm the SSH skip is active before exercising recovery — a remote cwd is rejected.
+    now = 1004;
+    tracker.applySignal('pty-1', {
+      type: 'cwd',
+      cwd: '/remote/path',
+      source: 'osc7',
+    });
+    expect(tracker.list()[0]?.cwd).toBe('/Users/local/project');
+
+    // When: ssh exits, ps observes the shell back in the foreground, and a fresh OSC 7 arrives.
+    rows = [shellRow(123)];
+    now = 1005;
+    await tracker.poll();
+    expect(tracker.list()[0]?.foregroundSession.kind).toBe('none');
+    now = 1006;
+    tracker.applySignal('pty-1', {
+      type: 'cwd',
+      cwd: '/Users/local/after-ssh',
+      source: 'osc7',
+    });
+
+    // Then: the cwd is written through again because the SSH classification is gone.
+    expect(tracker.list()[0]?.cwd).toBe('/Users/local/after-ssh');
+  });
+
   it('toggles integration.stale when ps repeatedly misses command starts and a shell-command-started resets the counter', async () => {
     // Given: shell integration was observed.
     tracker.register('pty-1', 123, '/tmp');

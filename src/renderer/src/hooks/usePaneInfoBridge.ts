@@ -47,7 +47,10 @@ export function usePaneInfoBridge(): void {
 
     // Pull path A: trigger once per PTY id when the workspace first observes a non-null ptyId.
     // The set is local to this effect because `usePaneInfoBridge` is mounted once near the React
-    // root; if it ever unmounts the next mount needs to reseed.
+    // root; if it ever unmounts the next mount needs to reseed. We deliberately do not prune the
+    // set on `unregister`/PTY dispose: PTY ids are `randomUUID()`-generated, so dead entries are
+    // never reused, and keeping the set monotonically growing is simpler than threading dispose
+    // callbacks through here for what amounts to a few bytes per retired PTY.
     const seenPtyIds = new Set<string>();
     const unsubscribeWorkspace = useWorkspaceStore.subscribe((state) => {
       const newlySeen: string[] = [];
@@ -67,6 +70,10 @@ export function usePaneInfoBridge(): void {
 
     if (!didLoadRef.current) {
       didLoadRef.current = true;
+      // `.then` (not `.finally`) is intentional: `loadPaneInfo` swallows its own errors and
+      // always resolves, so the reconcile sweep is unreachable from a rejected path. If the
+      // store contract ever changes to surface rejections here, this should switch to `.finally`
+      // so a failed initial fetch still triggers pull B with whatever snapshot is in the store.
       void usePaneInfoStore
         .getState()
         .loadPaneInfo()

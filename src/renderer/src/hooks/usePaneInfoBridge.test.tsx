@@ -213,6 +213,46 @@ describe('usePaneInfoBridge', () => {
     await waitFor(() => expect(getActivePane()?.cwd).toBe('/Users/tester/project'));
   });
 
+  it('pull path A: does not re-fire when the same ptyId is observed in a later workspace mutation', async () => {
+    // The `seenPtyIds` guard is the only thing protecting pull A from re-running on every
+    // unrelated workspace mutation. To exercise the guard we mutate the paneInfo snapshot to a
+    // *different* cwd after the initial replay, then bump the workspace state without changing
+    // pane.ptyId: without the guard, pull A would pick up the new snapshot value and overwrite
+    // the pane cwd; with the guard it stays at the originally pulled value. We deliberately use
+    // `setInfo` (a direct store mutation) rather than the onChanged callback so the push path is
+    // not exercised here and only pull A is under test.
+
+    // Given: the pane has already gone through pull A's first observation.
+    const seeded: PaneRuntimeInfo = { ...info, cwd: '/Users/tester/project' };
+    useWorkspaceStore.setState({
+      workspaces: [createWorkspaceWithPane(undefined)],
+      activeWorkspaceId: 'workspace-1',
+    });
+    render(<TestBridge />);
+    resolveList?.([seeded]);
+    await waitFor(() =>
+      expect(usePaneInfoStore.getState().infosByPtyId).toEqual({ 'pty-1': seeded }),
+    );
+    act(() => {
+      useWorkspaceStore.getState().setPanePtyId('pane-1', 'pty-1');
+    });
+    await waitFor(() => expect(getActivePane()?.cwd).toBe('/Users/tester/project'));
+
+    // When: the snapshot reports a new cwd via the direct store mutation, and the workspace
+    // mutates again with the same ptyId still attached.
+    act(() => {
+      usePaneInfoStore.getState().setInfo({ ...info, cwd: '/Users/tester/elsewhere' });
+    });
+    act(() => {
+      useWorkspaceStore.setState((state) => ({
+        workspaces: state.workspaces.map((workspace) => ({ ...workspace, updatedAt: 2 })),
+      }));
+    });
+
+    // Then: pull A's guard suppresses the replay, so the pane keeps its original cwd.
+    expect(getActivePane()?.cwd).toBe('/Users/tester/project');
+  });
+
   it('pull path B: replays the snapshot after loadPaneInfo resolves for an already-known ptyId', async () => {
     // Given: the pane's PTY id is already set before the initial list resolves. loadPaneInfo has
     // not returned yet, so the bridge has nothing to forward through the push path.
@@ -228,5 +268,30 @@ describe('usePaneInfoBridge', () => {
 
     // Then: the workspace pane picks up the cwd through the post-load reconcile sweep.
     await waitFor(() => expect(getActivePane()?.cwd).toBe('/Users/tester/project'));
+  });
+
+  it('pull path B: does not bump updatedAt when the snapshot cwd already matches the pane cwd', async () => {
+    // pull B replays every visible ptyId after loadPaneInfo settles. The workspace store's cwd
+    // early-return is what keeps a matching cwd from bumping `updatedAt`, but we pin the
+    // end-to-end behaviour at the bridge layer because regressions could land in either piece
+    // (the helper, the store, or the call site sequencing) and silently double-dirty workspaces.
+
+    // Given: a workspace pane whose cwd already matches what the snapshot will carry.
+    useWorkspaceStore.setState({
+      workspaces: [createWorkspaceWithPane('pty-1')],
+      activeWorkspaceId: 'workspace-1',
+    });
+    const initialUpdatedAt = useWorkspaceStore.getState().workspaces[0]!.updatedAt;
+    render(<TestBridge />);
+
+    // When: loadPaneInfo resolves with the same cwd as the pane already has.
+    const seeded: PaneRuntimeInfo = { ...info, cwd: '/Users/tester' };
+    resolveList?.([seeded]);
+    await waitFor(() =>
+      expect(usePaneInfoStore.getState().infosByPtyId).toEqual({ 'pty-1': seeded }),
+    );
+
+    // Then: the workspace stays at its initial updatedAt — pull B's replay is a no-op.
+    expect(useWorkspaceStore.getState().workspaces[0]?.updatedAt).toBe(initialUpdatedAt);
   });
 });
