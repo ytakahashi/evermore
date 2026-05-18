@@ -140,7 +140,7 @@ describe.skipIf(!hasZsh)('Evermore zsh shell integration (real zsh)', () => {
       pollIntervalMs: 0,
     });
     const ptyId = 'e2e-pty';
-    tracker.register(ptyId, pty.pid);
+    tracker.register(ptyId, pty.pid, '/tmp');
     for (const signal of session.signalsSince(0)) {
       tracker.applySignal(ptyId, signal);
     }

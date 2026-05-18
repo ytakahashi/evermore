@@ -66,7 +66,7 @@ describe('TerminalSignalParser → PaneInfoTracker integration', () => {
       now: () => 1002,
       pollIntervalMs: 0,
     });
-    tracker.register('pty-1', 123);
+    tracker.register('pty-1', 123, '/tmp');
     await new Promise((resolve) => setTimeout(resolve, 0));
     onChanged.mockClear();
 

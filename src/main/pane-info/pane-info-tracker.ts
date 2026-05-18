@@ -47,11 +47,17 @@ export class PaneInfoTracker {
 
   /**
    * Registers a PTY id and shell PID for activity tracking.
+   *
+   * `cwd` must be the absolute path the PTY was actually spawned with (i.e. `resolveCwd` output).
+   * It is seeded into `PaneRuntimeInfo.cwd` on the first emit so the sidebar and workspace cwd
+   * have a usable value before any OSC 7 lifecycle signal arrives. Callers must not pass an empty
+   * string; the tracker treats the value as opaque and does not validate it.
    */
-  public register(ptyId: string, shellPid: number): void {
+  public register(ptyId: string, shellPid: number, cwd: string): void {
     const process: RegisteredPaneProcess = {
       ptyId,
       shellPid,
+      cwd,
       foregroundSession: { kind: 'none' },
       integration: createInitialIntegration(),
       lastProcessActivity: 'idle',
@@ -127,16 +133,6 @@ export class PaneInfoTracker {
     }
 
     this.recomputeInfo(process, { emit: true, observedAt: now });
-  }
-
-  /**
-   * Stores the latest OSC 7 cwd observed by the renderer-side terminal parser.
-   *
-   * Delegates to {@link applySignal} so renderer-driven and main-process-driven OSC 7 inputs share
-   * the same merge rules (in particular, the SSH skip and integration protocol bookkeeping).
-   */
-  public notifyCwd(ptyId: string, cwd: string): void {
-    this.applySignal(ptyId, { type: 'cwd', source: 'osc7', cwd });
   }
 
   /**

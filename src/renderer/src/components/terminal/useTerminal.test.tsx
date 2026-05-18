@@ -25,26 +25,15 @@ const xtermMock = vi.hoisted(() => {
       },
     );
     public readonly inputDisposable = { dispose: vi.fn() };
-    public readonly osc7Disposable = { dispose: vi.fn() };
     public readonly selectionChangeDisposable = {
       dispose: vi.fn(() => {
         this.selectionChangeListener = null;
       }),
     };
     public options: Record<string, unknown>;
-    public readonly parser = {
-      registerOscHandler: vi.fn((ident: number, listener: (data: string) => boolean) => {
-        if (ident === 7) {
-          this.osc7Listener = listener;
-        }
-
-        return this.osc7Disposable;
-      }),
-    };
     public readonly unicode = { activeVersion: '6' };
     private customKeyEventHandler: ((event: KeyboardEvent) => boolean) | null = null;
     private inputListener: ((data: string) => void) | null = null;
-    private osc7Listener: ((data: string) => boolean) | null = null;
     private selection = '';
     private selectionChangeListener: (() => void) | null = null;
 
@@ -78,10 +67,6 @@ const xtermMock = vi.hoisted(() => {
 
     public evaluateCustomKey(event: KeyboardEvent): boolean | null {
       return this.customKeyEventHandler?.(event) ?? null;
-    }
-
-    public emitOsc7(data: string): boolean | null {
-      return this.osc7Listener?.(data) ?? null;
     }
   }
 
@@ -132,7 +117,6 @@ interface TestTerminalProps {
   cwd?: string;
   initialCommand?: string;
   isActive?: boolean;
-  onCwdChange?: (cwd: string) => void;
   onPtyIdChange?: (ptyId: string | null) => void;
 }
 
@@ -140,14 +124,12 @@ function TestTerminal({
   cwd = '/Users/tester/project',
   initialCommand,
   isActive = true,
-  onCwdChange,
   onPtyIdChange,
 }: TestTerminalProps): React.JSX.Element {
   const { containerRef } = useTerminal({
     cwd,
     initialCommand,
     isActive,
-    onCwdChange,
     onPtyIdChange,
     shell: '/bin/zsh',
   });
@@ -157,7 +139,7 @@ function TestTerminal({
 
 describe('useTerminal', () => {
   let ptyApi: PtyApiMock;
-  let paneInfoApi: Pick<Window['api']['paneInfo'], 'notifyCommand' | 'notifyCwd'>;
+  let paneInfoApi: Pick<Window['api']['paneInfo'], 'notifyCommand'>;
   let dataCleanup: Mock<() => void>;
   let exitCleanup: Mock<() => void>;
   let exitListener: ((id: string, code: number) => void) | null;
@@ -214,7 +196,6 @@ describe('useTerminal', () => {
     };
     paneInfoApi = {
       notifyCommand: vi.fn(() => Promise.resolve()),
-      notifyCwd: vi.fn(() => Promise.resolve()),
     };
 
     Object.defineProperty(window, 'api', {
@@ -277,7 +258,6 @@ describe('useTerminal', () => {
       expect(ptyApi.resize).toHaveBeenCalledWith('pty-1', 132, 43);
     });
     expect(xtermMock.terminalInstances[0]?.focus).toHaveBeenCalled();
-    expect(paneInfoApi.notifyCwd).toHaveBeenCalledWith('pty-1', '/Users/tester/project');
   });
 
   it('creates xterm with the currently loaded terminal settings', async () => {
@@ -552,7 +532,6 @@ describe('useTerminal', () => {
     // Then: the backing process, xterm input, and preload listeners are all disposed.
     expect(ptyApi.dispose).toHaveBeenCalledWith('pty-1');
     expect(xtermMock.terminalInstances[0]?.inputDisposable.dispose).toHaveBeenCalledOnce();
-    expect(xtermMock.terminalInstances[0]?.osc7Disposable.dispose).toHaveBeenCalledOnce();
     expect(dataCleanup).toHaveBeenCalledOnce();
     expect(exitCleanup).toHaveBeenCalledOnce();
     expect(xtermMock.terminalInstances[0]?.dispose).toHaveBeenCalledOnce();
@@ -621,28 +600,6 @@ describe('useTerminal', () => {
     // Then: the running shell is kept alive instead of being replaced by a new PTY.
     expect(ptyApi.create).toHaveBeenCalledOnce();
     expect(ptyApi.dispose).not.toHaveBeenCalled();
-  });
-
-  it('reports OSC 7 cwd changes without recreating the PTY', async () => {
-    // Given: a mounted terminal with an OSC 7 handler.
-    const onCwdChange = vi.fn<(cwd: string) => void>();
-    render(<TestTerminal onCwdChange={onCwdChange} />);
-    await waitFor(() => {
-      expect(ptyApi.create).toHaveBeenCalled();
-    });
-
-    // When: xterm parses valid and invalid OSC 7 payloads.
-    const handled = xtermMock.terminalInstances[0]?.emitOsc7(
-      'file://hostname/Users/tester/My%20Project',
-    );
-    xtermMock.terminalInstances[0]?.emitOsc7('https://example.com/ignored');
-
-    // Then: only the valid file URL updates cwd state and no process is recreated.
-    expect(handled).toBe(true);
-    expect(onCwdChange).toHaveBeenCalledOnce();
-    expect(onCwdChange).toHaveBeenCalledWith('/Users/tester/My Project');
-    expect(paneInfoApi.notifyCwd).toHaveBeenCalledWith('pty-1', '/Users/tester/My Project');
-    expect(ptyApi.create).toHaveBeenCalledOnce();
   });
 
   it('re-fits the terminal after fonts are ready', async () => {

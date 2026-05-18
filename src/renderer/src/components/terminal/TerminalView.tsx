@@ -6,7 +6,6 @@ interface TerminalViewProps {
   cwd?: string;
   initialCommand?: string;
   isActive?: boolean;
-  onCwdChange?: (cwd: string) => void;
   onPtyIdChange?: (ptyId: string | null) => void;
   shell?: string;
 }
@@ -18,7 +17,6 @@ export function TerminalView({
   cwd = '',
   initialCommand,
   isActive = false,
-  onCwdChange,
   onPtyIdChange,
   shell,
 }: TerminalViewProps): React.JSX.Element {
@@ -26,7 +24,6 @@ export function TerminalView({
     cwd,
     initialCommand,
     isActive,
-    onCwdChange,
     onPtyIdChange,
     shell,
   });

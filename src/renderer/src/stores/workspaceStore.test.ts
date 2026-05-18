@@ -188,6 +188,94 @@ describe('workspaceStore', () => {
     expect(workspaceApi.update).not.toHaveBeenCalled();
   });
 
+  it('reflects cwd updates keyed by ptyId in the matching pane', async () => {
+    // Given: a workspace pane has acquired a runtime PTY id.
+    vi.useFakeTimers();
+    const useStore = createWorkspaceStore({
+      workspaceApi,
+      cwdDebounceMs: 100,
+      debounceMs: 50,
+      now: () => now,
+    });
+    await useStore.getState().loadWorkspaces();
+    useStore.getState().setPanePtyId('workspace-1-pane-1', 'pty-1');
+
+    // When: the bridge reports a new cwd keyed by ptyId.
+    useStore.getState().updatePaneCwdByPtyId('pty-1', '/Users/tester/project');
+
+    // Then: the pane's cwd updates immediately and persists after the cwd debounce timer.
+    expect(selectActivePane(useStore.getState())?.cwd).toBe('/Users/tester/project');
+    await vi.advanceTimersByTimeAsync(100);
+    expect(workspaceApi.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        panes: [
+          {
+            id: 'workspace-1-pane-1',
+            ptyId: 'pty-1',
+            cwd: '/Users/tester/project',
+          },
+        ],
+      }),
+    );
+  });
+
+  it('reflects cwd updates for panes in inactive workspaces', async () => {
+    // Given: two workspaces are loaded and the second pane has a runtime PTY id.
+    vi.useFakeTimers();
+    const workspace2 = createWorkspace('workspace-2', '/Users/tester/2');
+    workspaceApi.list = vi.fn(() =>
+      Promise.resolve({
+        workspaces: [workspace, workspace2],
+        activeWorkspaceId: 'workspace-1',
+      }),
+    );
+    const useStore = createWorkspaceStore({
+      workspaceApi,
+      cwdDebounceMs: 100,
+      debounceMs: 50,
+      now: () => now,
+    });
+    await useStore.getState().loadWorkspaces();
+    // Pretend the inactive workspace's pane already has a PTY id (every workspace stays mounted).
+    useStore.setState((state) => ({
+      workspaces: state.workspaces.map((current) =>
+        current.id === 'workspace-2'
+          ? { ...current, panes: [{ ...current.panes[0]!, ptyId: 'pty-2' }] }
+          : current,
+      ),
+    }));
+
+    // When: a cwd update arrives for the inactive workspace's ptyId.
+    useStore.getState().updatePaneCwdByPtyId('pty-2', '/Users/tester/2/sub');
+
+    // Then: the inactive workspace's pane reflects the new cwd and persists.
+    const updatedInactive = useStore
+      .getState()
+      .workspaces.find((current) => current.id === 'workspace-2');
+    expect(updatedInactive?.panes[0]?.cwd).toBe('/Users/tester/2/sub');
+    await vi.advanceTimersByTimeAsync(100);
+    expect(workspaceApi.update).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'workspace-2' }),
+    );
+  });
+
+  it('treats unchanged or unknown cwd updates by ptyId as a no-op', async () => {
+    // Given: a loaded workspace and a pane that already has its current cwd.
+    vi.useFakeTimers();
+    const useStore = createWorkspaceStore({ workspaceApi, cwdDebounceMs: 100, now: () => now });
+    await useStore.getState().loadWorkspaces();
+    useStore.getState().setPanePtyId('workspace-1-pane-1', 'pty-1');
+
+    // When: the bridge reports the same cwd, and a cwd for an unknown ptyId.
+    useStore.getState().updatePaneCwdByPtyId('pty-1', '/Users/tester');
+    useStore.getState().updatePaneCwdByPtyId('pty-unknown', '/Users/tester/project');
+    await vi.advanceTimersByTimeAsync(100);
+
+    // Then: workspace.updatedAt stays at its loaded value and persistence is not scheduled.
+    expect(selectActiveWorkspace(useStore.getState())?.updatedAt).toBe(1);
+    expect(workspaceApi.update).not.toHaveBeenCalled();
+  });
+
   it('updates pane PTY ids without scheduling persistence', async () => {
     // Given: a loaded workspace store.
     vi.useFakeTimers();

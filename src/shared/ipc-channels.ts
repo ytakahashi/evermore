@@ -9,7 +9,6 @@ export const IPC = {
 
   // Pane info
   PANE_INFO_LIST: 'pane-info:list',
-  PANE_INFO_NOTIFY_CWD: 'pane-info:notify-cwd',
   PANE_INFO_NOTIFY_COMMAND: 'pane-info:notify-command',
   PANE_INFO_CHANGED: 'pane-info:changed', // main -> renderer
 
