@@ -77,6 +77,7 @@ describe('TunnelsSection', () => {
       stopTunnel: initialTunnelsState.stopTunnel,
       setStatus: initialTunnelsState.setStatus,
       appendLog: initialTunnelsState.appendLog,
+      clearTunnelDiagnostics: initialTunnelsState.clearTunnelDiagnostics,
     });
   });
 
@@ -148,6 +149,47 @@ describe('TunnelsSection', () => {
     ).toBeInTheDocument();
     expect(screen.getByText('2 forwards')).toBeInTheDocument();
     expect(screen.getByText('127.0.0.1:15432 → db.internal:5432')).toBeInTheDocument();
+  });
+
+  it('shows the Clear button only when an error tunnel row is expanded', () => {
+    // Given: one error tunnel and one stopped tunnel are loaded.
+    useTunnelsStore.setState({ tunnels: [errorTunnel, stoppedTunnel] });
+
+    // When: the section renders with both rows collapsed.
+    render(<TunnelsSection />);
+
+    // Then: no Clear button is visible before expansion.
+    expect(screen.queryByRole('button', { name: 'Clear error and logs' })).not.toBeInTheDocument();
+
+    // When: the error tunnel row is expanded.
+    fireEvent.click(screen.getByRole('button', { name: /api-tunnel/ }));
+
+    // Then: the Clear button appears for the error tunnel.
+    expect(screen.getByRole('button', { name: 'Clear error and logs' })).toBeInTheDocument();
+
+    // When: the stopped tunnel row is also expanded.
+    fireEvent.click(screen.getByRole('button', { name: /db-tunnel/ }));
+
+    // Then: still only one Clear button — the stopped tunnel row does not render one.
+    expect(screen.getAllByRole('button', { name: 'Clear error and logs' })).toHaveLength(1);
+  });
+
+  it('clears diagnostics for the target alias when Clear is clicked', () => {
+    // Given: an error tunnel is loaded and the clear action is installed in the store.
+    const clearTunnelDiagnostics = vi.fn();
+    useTunnelsStore.setState({
+      tunnels: [errorTunnel],
+      clearTunnelDiagnostics,
+    });
+
+    // When: the row is expanded and the Clear button is clicked.
+    render(<TunnelsSection />);
+    fireEvent.click(screen.getByRole('button', { name: /api-tunnel/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Clear error and logs' }));
+
+    // Then: clearTunnelDiagnostics is called with the error tunnel's alias.
+    expect(clearTunnelDiagnostics).toHaveBeenCalledOnce();
+    expect(clearTunnelDiagnostics).toHaveBeenCalledWith('api-tunnel');
   });
 
   it('renders loading, empty, and error states with the tunnel tip', () => {

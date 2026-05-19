@@ -3,7 +3,7 @@ import type { Api } from '../../../shared/api-types';
 import { TUNNEL_LOG_BUFFER_SIZE } from '../../../shared/tunnel-constants';
 import type { Tunnel, TunnelStatus } from '../../../shared/types';
 
-type TunnelApi = Pick<Api['tunnel'], 'list' | 'start' | 'stop'>;
+type TunnelApi = Pick<Api['tunnel'], 'list' | 'start' | 'stop' | 'clearDiagnostics'>;
 
 interface CreateTunnelsStoreOptions {
   logBufferSize?: number;
@@ -20,6 +20,15 @@ export interface TunnelsStoreState {
   stopTunnel: (alias: string) => Promise<void>;
   setStatus: (alias: string, status: TunnelStatus, error?: string) => void;
   appendLog: (alias: string, line: string) => void;
+  /**
+   * Clears diagnostic fields for a tunnel in the `error` state via IPC, then mirrors the
+   * reset in the renderer store.
+   *
+   * The main-process `TunnelManager` record is updated first so that a subsequent
+   * `loadTunnels()` call (e.g. from the Reload button) does not resurrect the stale error.
+   * If the IPC call fails, the store is left unchanged.
+   */
+  clearTunnelDiagnostics: (alias: string) => Promise<void>;
 }
 
 /**
@@ -123,6 +132,31 @@ export function createTunnelsStore(
                 : recentLogs,
           };
         }),
+      }));
+    },
+    clearTunnelDiagnostics: async (alias: string): Promise<void> => {
+      try {
+        await getTunnelApi().clearDiagnostics(alias);
+      } catch (_error: unknown) {
+        // Best-effort: if the IPC call fails, the store update is skipped so the UI
+        // keeps showing the stale diagnostics until the next loadTunnels() call.
+        return;
+      }
+      // Guard: only apply the reset if the tunnel is still in error state.
+      // A status event or a Start action may have arrived while the IPC was in flight,
+      // and overwriting a live tunnel with stopped would cause a transient incorrect display.
+      set((state) => ({
+        tunnels: state.tunnels.map((tunnel) =>
+          tunnel.alias === alias && tunnel.status === 'error'
+            ? {
+                ...tunnel,
+                status: 'stopped',
+                lastError: undefined,
+                recentLogs: [],
+                startedAt: undefined,
+              }
+            : tunnel,
+        ),
       }));
     },
   }));

@@ -76,6 +76,7 @@ interface TunnelRowProps {
   disabled: boolean;
   expanded: boolean;
   onAction: (alias: string, status: TunnelStatus) => void;
+  onClear: (alias: string) => void;
   onToggle: (alias: string) => void;
   tunnel: Tunnel;
 }
@@ -84,6 +85,7 @@ function TunnelRow({
   disabled,
   expanded,
   onAction,
+  onClear,
   onToggle,
   tunnel,
 }: TunnelRowProps): React.JSX.Element {
@@ -152,6 +154,19 @@ function TunnelRow({
               {logs.join('\n')}
             </pre>
           )}
+          {tunnel.status === 'error' && (
+            <button
+              aria-label="Clear error and logs"
+              className="rounded border border-border px-2 py-0.5 text-[11px] text-muted hover:bg-raised hover:text-foreground"
+              title="Clear error and logs"
+              type="button"
+              onClick={() => {
+                onClear(tunnel.alias);
+              }}
+            >
+              Clear
+            </button>
+          )}
         </div>
       )}
     </div>
@@ -167,6 +182,7 @@ export function TunnelsSection(): React.JSX.Element {
   const error = useTunnelsStore((state) => state.error);
   const startTunnel = useTunnelsStore((state) => state.startTunnel);
   const stopTunnel = useTunnelsStore((state) => state.stopTunnel);
+  const clearTunnelDiagnostics = useTunnelsStore((state) => state.clearTunnelDiagnostics);
   const { isReloading, reloadConnections } = useReloadConnections();
   const [expandedAliases, setExpandedAliases] = useState<Set<string>>(() => new Set());
   const [busyAliases, setBusyAliases] = useState<Set<string>>(() => new Set());
@@ -258,6 +274,7 @@ export function TunnelsSection(): React.JSX.Element {
             expanded={expandedAliases.has(tunnel.alias)}
             tunnel={tunnel}
             onAction={handleAction}
+            onClear={clearTunnelDiagnostics}
             onToggle={toggleExpanded}
           />
         ))}

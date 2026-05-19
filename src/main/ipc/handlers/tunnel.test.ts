@@ -25,6 +25,7 @@ interface TestTunnelManager {
   getRuntimeState: ReturnType<typeof vi.fn<(alias: string) => TunnelRuntimeState | undefined>>;
   list: ReturnType<typeof vi.fn<() => Array<{ alias: string; state: TunnelRuntimeState }>>>;
   logs: ReturnType<typeof vi.fn<(alias: string) => string[]>>;
+  clearDiagnostics: ReturnType<typeof vi.fn<(alias: string) => void>>;
   disposeAll: ReturnType<typeof vi.fn<() => void>>;
 }
 
@@ -41,6 +42,7 @@ function createTunnelManager(
       Object.entries(runtimeStates).flatMap(([alias, state]) => (state ? [{ alias, state }] : [])),
     ),
     logs: vi.fn<(alias: string) => string[]>((alias: string) => [`${alias} log`]),
+    clearDiagnostics: vi.fn<(alias: string) => void>(),
     disposeAll: vi.fn<() => void>(),
   };
 }
@@ -173,7 +175,23 @@ describe('registerTunnelHandlers', () => {
     expect(ipcMainMock.removeHandler).toHaveBeenCalledWith(IPC.TUNNEL_START);
     expect(ipcMainMock.removeHandler).toHaveBeenCalledWith(IPC.TUNNEL_STOP);
     expect(ipcMainMock.removeHandler).toHaveBeenCalledWith(IPC.TUNNEL_LOGS);
+    expect(ipcMainMock.removeHandler).toHaveBeenCalledWith(IPC.TUNNEL_CLEAR_DIAGNOSTICS);
     expect(tunnelManager.disposeAll).toHaveBeenCalledOnce();
+  });
+
+  it('delegates clearDiagnostics requests to the tunnel manager', () => {
+    // Given: tunnel handlers are registered with an injected runtime manager.
+    const tunnelManager = createTunnelManager();
+    registerTunnelHandlers({
+      sshConfigManager: { list: vi.fn(() => []) },
+      tunnelManager,
+    });
+
+    // When: the renderer invokes the clear-diagnostics handler.
+    getHandler(IPC.TUNNEL_CLEAR_DIAGNOSTICS)?.({}, { alias: 'dev' });
+
+    // Then: the request is bridged to the manager.
+    expect(tunnelManager.clearDiagnostics).toHaveBeenCalledWith('dev');
   });
 
   it('warns when an active runtime tunnel is no longer configured', () => {

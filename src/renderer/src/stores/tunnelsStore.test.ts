@@ -6,7 +6,7 @@ import {
   selectRunningTunnelCount,
 } from './tunnelsStore';
 
-type TunnelApiMock = Pick<Window['api']['tunnel'], 'list' | 'start' | 'stop'>;
+type TunnelApiMock = Pick<Window['api']['tunnel'], 'list' | 'start' | 'stop' | 'clearDiagnostics'>;
 
 const tunnel: Tunnel = {
   alias: 'dev',
@@ -27,6 +27,7 @@ function createTunnelApi(overrides: Partial<TunnelApiMock> = {}): TunnelApiMock 
     list: vi.fn(() => Promise.resolve([tunnel])),
     start: vi.fn(() => Promise.resolve()),
     stop: vi.fn(() => Promise.resolve()),
+    clearDiagnostics: vi.fn(() => Promise.resolve()),
     ...overrides,
   };
 }
@@ -174,6 +175,118 @@ describe('tunnelsStore', () => {
 
     // Then: config-ineligible tunnels are not created in renderer state.
     expect(useStore.getState().tunnels).toEqual([]);
+  });
+
+  it('calls clearDiagnostics IPC then resets the target tunnel to stopped', async () => {
+    // Given: a tunnel in error state with logs, and another tunnel with its own error.
+    const tunnelApi = createTunnelApi();
+    const useStore = createTunnelsStore({ tunnelApi });
+    useStore.setState({
+      tunnels: [
+        {
+          ...tunnel,
+          alias: 'dev',
+          status: 'error',
+          startedAt: 1000,
+          lastError: 'bind failed',
+          recentLogs: ['line1'],
+        },
+        {
+          ...tunnel,
+          alias: 'prod',
+          status: 'error',
+          lastError: 'other error',
+          recentLogs: ['lineA'],
+        },
+      ],
+    });
+
+    // When: diagnostics are cleared for 'dev' only.
+    await useStore.getState().clearTunnelDiagnostics('dev');
+
+    // Then: the IPC method is called with the target alias.
+    expect(tunnelApi.clearDiagnostics).toHaveBeenCalledWith('dev');
+
+    // Then: 'dev' is reset to stopped with no diagnostics; 'prod' is untouched.
+    expect(useStore.getState().tunnels[0]).toMatchObject({
+      alias: 'dev',
+      status: 'stopped',
+      startedAt: undefined,
+      lastError: undefined,
+      recentLogs: [],
+    });
+    expect(useStore.getState().tunnels[1]).toMatchObject({
+      alias: 'prod',
+      status: 'error',
+      lastError: 'other error',
+      recentLogs: ['lineA'],
+    });
+  });
+
+  it('skips the store update when clearDiagnostics IPC fails', async () => {
+    // Given: a tunnel in error state and a failing IPC.
+    const tunnelApi = createTunnelApi({
+      clearDiagnostics: vi.fn(() => Promise.reject(new Error('ipc error'))),
+    });
+    const useStore = createTunnelsStore({ tunnelApi });
+    useStore.setState({
+      tunnels: [
+        {
+          ...tunnel,
+          alias: 'dev',
+          status: 'error',
+          lastError: 'bind failed',
+          recentLogs: ['line1'],
+        },
+      ],
+    });
+
+    // When: the IPC call rejects.
+    await useStore.getState().clearTunnelDiagnostics('dev');
+
+    // Then: the store is left unchanged — stale diagnostics remain visible.
+    expect(useStore.getState().tunnels[0]).toMatchObject({
+      status: 'error',
+      lastError: 'bind failed',
+      recentLogs: ['line1'],
+    });
+  });
+
+  it('does not overwrite a tunnel that is no longer in error state when IPC resolves', async () => {
+    // Given: a clearDiagnostics IPC that resolves only after a status event has already
+    // transitioned the tunnel out of error state (e.g. Clear then immediate Start).
+    let resolveIpc!: () => void;
+    const tunnelApi = createTunnelApi({
+      clearDiagnostics: vi.fn(
+        () =>
+          new Promise<void>((resolve) => {
+            resolveIpc = resolve;
+          }),
+      ),
+    });
+    const useStore = createTunnelsStore({ tunnelApi });
+    useStore.setState({
+      tunnels: [
+        {
+          ...tunnel,
+          alias: 'dev',
+          status: 'error',
+          lastError: 'bind failed',
+          recentLogs: ['line1'],
+        },
+      ],
+    });
+
+    // When: the IPC is in flight and a status event promotes the tunnel to starting.
+    const clearPromise = useStore.getState().clearTunnelDiagnostics('dev');
+    useStore.getState().setStatus('dev', 'starting');
+
+    // When: the IPC resolves after the status change.
+    resolveIpc();
+    await clearPromise;
+
+    // Then: the store update is skipped because status is no longer 'error'.
+    expect(useStore.getState().tunnels[0]).toMatchObject({ status: 'starting' });
   });
 
   it('selects running and error tunnel counts', () => {

@@ -391,6 +391,58 @@ describe('TunnelManager', () => {
     ]);
   });
 
+  it('clears diagnostics for an error tunnel and resets it to stopped', () => {
+    // Given: a tunnel has failed and holds an error state with logs.
+    manager.start('dev');
+    spawnedProcesses[0]?.writeStderr('bind failed\n');
+    spawnedProcesses[0]?.emitExit(255);
+    expect(manager.getRuntimeState('dev')).toMatchObject({
+      status: 'error',
+      lastError: 'bind failed',
+    });
+
+    // When: diagnostics are cleared for that alias.
+    manager.clearDiagnostics('dev');
+
+    // Then: the record is reset to stopped with no error or logs.
+    expect(manager.getRuntimeState('dev')).toMatchObject({
+      status: 'stopped',
+      lastError: undefined,
+      startedAt: undefined,
+      recentLogs: [],
+    });
+  });
+
+  it('leaves a starting tunnel completely untouched when clearDiagnostics is called', () => {
+    // Given: a tunnel is mid-startup with one buffered log line.
+    manager.start('dev');
+    spawnedProcesses[0]?.writeStderr('warming up\n');
+    const before = manager.getRuntimeState('dev');
+    expect(before).toMatchObject({ status: 'starting' });
+
+    // When: clearDiagnostics is invoked on the starting tunnel.
+    manager.clearDiagnostics('dev');
+
+    // Then: every observable field is preserved — no live state is disturbed.
+    expect(manager.getRuntimeState('dev')).toEqual(before);
+  });
+
+  it('leaves a running tunnel completely untouched when clearDiagnostics is called', () => {
+    // Given: a tunnel has been promoted to running and has accumulated a log line.
+    manager.start('dev');
+    now = 1500;
+    vi.advanceTimersByTime(1500);
+    spawnedProcesses[0]?.writeStdout('serving\n');
+    const before = manager.getRuntimeState('dev');
+    expect(before).toMatchObject({ status: 'running', pid: 1000, startedAt: 1500 });
+
+    // When: clearDiagnostics is invoked on the running tunnel.
+    manager.clearDiagnostics('dev');
+
+    // Then: every observable field is preserved — the live process is not disturbed.
+    expect(manager.getRuntimeState('dev')).toEqual(before);
+  });
+
   it('returns snapshots that cannot mutate manager state', () => {
     // Given: a tunnel has one recent log line.
     manager.start('dev');

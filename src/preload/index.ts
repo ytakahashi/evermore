@@ -91,6 +91,8 @@ const api = {
     start: (alias: string): Promise<void> => ipcRenderer.invoke(IPC.TUNNEL_START, { alias }),
     stop: (alias: string): Promise<void> => ipcRenderer.invoke(IPC.TUNNEL_STOP, { alias }),
     logs: (alias: string): Promise<string[]> => ipcRenderer.invoke(IPC.TUNNEL_LOGS, { alias }),
+    clearDiagnostics: (alias: string): Promise<void> =>
+      ipcRenderer.invoke(IPC.TUNNEL_CLEAR_DIAGNOSTICS, { alias }),
     onStatusChanged: (
       cb: (alias: string, status: TunnelStatus, error?: string) => void,
     ): (() => void) => {

@@ -30,6 +30,7 @@ export const IPC = {
   TUNNEL_START: 'tunnel:start',
   TUNNEL_STOP: 'tunnel:stop',
   TUNNEL_LOGS: 'tunnel:logs',
+  TUNNEL_CLEAR_DIAGNOSTICS: 'tunnel:clear-diagnostics',
   TUNNEL_STATUS_CHANGED: 'tunnel:status-changed', // main -> renderer
   TUNNEL_LOG: 'tunnel:log', // main -> renderer
 
