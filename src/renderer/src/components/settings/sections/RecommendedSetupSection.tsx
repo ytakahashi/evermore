@@ -15,15 +15,6 @@ type CopyState = 'idle' | 'copied' | 'error';
 
 const SETUP_SNIPPETS: readonly SetupSnippet[] = [
   {
-    id: 'evermore-zsh',
-    title: 'Shell integration (zsh)',
-    target: '~/.zshrc',
-    language: 'sh',
-    description:
-      'Emits OSC 7 (cwd), OSC 133 (prompt and command lifecycle), and OSC 633;E (exact command line) so the Evermore sidebar reflects shell-level state instead of process-table heuristics. zsh only — paste this whole block at the end of ~/.zshrc. The snippet is idempotent and becomes a no-op under another terminal emulator (VS Code, Warp, WezTerm, iTerm, Ghostty) that already provides shell integration.',
-    content: EVERMORE_ZSH_SHELL_INTEGRATION_SNIPPET,
-  },
-  {
     id: 'ssh-config',
     title: 'SSH tunnel reliability',
     target: '~/.ssh/config',
@@ -34,6 +25,15 @@ const SETUP_SNIPPETS: readonly SetupSnippet[] = [
   ServerAliveInterval 30
   ServerAliveCountMax 3
   ExitOnForwardFailure yes`,
+  },
+  {
+    id: 'evermore-zsh',
+    title: 'Shell integration (zsh)',
+    target: '~/.zshrc',
+    language: 'sh',
+    description:
+      'Emits OSC 7 (cwd), OSC 133 (prompt and command lifecycle), and OSC 633;E (exact command line) so the Evermore sidebar reflects shell-level state instead of process-table heuristics. With Advanced features → Automatic shell integration (zsh) enabled (the default), Evermore already injects this snippet into new panes — pasting it manually is not required. The snippet is still useful if you disable auto-injection, or if you want shell integration in subshells started inside an Evermore PTY (auto-injection is intentionally not inherited by subshells). The snippet is idempotent and becomes a no-op under another terminal emulator (VS Code, Warp, WezTerm, iTerm, Ghostty) that already provides shell integration.',
+    content: EVERMORE_ZSH_SHELL_INTEGRATION_SNIPPET,
   },
 ];
 

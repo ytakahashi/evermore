@@ -35,6 +35,37 @@ describe('RecommendedSetupSection', () => {
     expect(screen.queryByText('OSC 7 cwd tracking')).not.toBeInTheDocument();
   });
 
+  it('lists SSH tunnel reliability before the zsh shell integration snippet', () => {
+    // Given: the recommended setup section is visible. The order matters because the zsh snippet
+    // is ~100 lines long; surfacing the shorter, more impactful SSH snippet first keeps it
+    // discoverable now that the zsh snippet is largely auto-handled by Step 2.
+    render(<RecommendedSetupSection />);
+
+    // When: the snippet titles are read in document order.
+    const titles = screen
+      .getAllByRole('heading', { level: 3 })
+      .map((heading) => heading.textContent);
+
+    // Then: SSH tunnel reliability appears before Shell integration (zsh).
+    const sshIndex = titles.findIndex((title) => title === 'SSH tunnel reliability');
+    const zshIndex = titles.findIndex((title) => title === 'Shell integration (zsh)');
+    expect(sshIndex).toBeGreaterThanOrEqual(0);
+    expect(zshIndex).toBeGreaterThan(sshIndex);
+  });
+
+  it('clarifies that manual paste is only a fallback when auto-inject is enabled', () => {
+    // Given: the recommended setup section is visible.
+    render(<RecommendedSetupSection />);
+
+    // Then: the zsh snippet description tells the user that the manual snippet is optional under
+    // the default Advanced features configuration, and explains the subshell carve-out so users
+    // who want lifecycle markers inside `zsh`-from-zsh subshells still know to paste it.
+    expect(
+      screen.getByText(/Automatic shell integration \(zsh\) enabled \(the default\)/i),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/subshells started inside an Evermore PTY/i)).toBeInTheDocument();
+  });
+
   it('copies the selected snippet to the clipboard', async () => {
     // Given: the recommended setup section is visible.
     render(<RecommendedSetupSection />);

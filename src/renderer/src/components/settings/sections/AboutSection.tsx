@@ -2,12 +2,11 @@ import { useEffect, useState } from 'react';
 import { useSettingsStore } from '../../../stores/settingsStore';
 
 /**
- * "About / Advanced" settings section.
+ * "About" settings section.
  *
  * Shows the absolute path to the persisted settings file and lets the user reveal it in the
- * platform file manager. The other settings sections currently render placeholder copy (their
- * controls are added later); this one is the first fully-functional section so users can already
- * locate the file and edit it by hand if they want to.
+ * platform file manager. The renamed "Advanced features" section now lives on its own and hosts
+ * behavior toggles that previously did not have a dedicated home.
  */
 export function AboutSection(): React.JSX.Element {
   const openSettingsFile = useSettingsStore((state) => state.openSettingsFile);
@@ -57,7 +56,7 @@ export function AboutSection(): React.JSX.Element {
   return (
     <div>
       <header className="mb-3">
-        <h2 className="text-base font-semibold">About / Advanced</h2>
+        <h2 className="text-base font-semibold">About</h2>
       </header>
       <div className="flex flex-col gap-2 text-sm">
         <div>
