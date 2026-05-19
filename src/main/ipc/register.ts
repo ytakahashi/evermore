@@ -1,10 +1,11 @@
-import type { BrowserWindow } from 'electron';
+import { app, type BrowserWindow } from 'electron';
 import { IPC } from '../../shared/ipc-channels';
 import type { AppSettings } from '../../shared/types';
 import { HotkeyManager } from '../hotkey/hotkey-manager';
 import { PaneInfoTracker } from '../pane-info/pane-info-tracker';
 import { PtyManager } from '../pty/pty-manager';
 import { SettingsStore } from '../settings/settings-store';
+import { ShellIntegrationInjector } from '../shell-integration/injector';
 import { TunnelManager } from '../tunnels/tunnel-manager';
 import { registerPtyHandlers } from './handlers/pty';
 import { registerPaneInfoHandlers } from './handlers/pane-info';
@@ -19,6 +20,11 @@ import { SshHostResolver } from '../ssh-config/host-resolver';
 interface RegisterIpcHandlersOptions {
   getWindow: () => BrowserWindow | null;
   settingsStore?: SettingsStore;
+  /**
+   * Optional override for the shell-integration injector. Production constructs one rooted at
+   * `app.getPath('userData')`; tests inject a fake to avoid touching the real userData directory.
+   */
+  shellIntegrationInjector?: ShellIntegrationInjector;
 }
 
 export interface RegisteredIpcHandlers {
@@ -42,6 +48,12 @@ export function registerIpcHandlers(options: RegisterIpcHandlersOptions): Regist
   const settingsStore = options.settingsStore ?? new SettingsStore();
   const sshConfigManager = new SshConfigManager();
   const sshHostResolver = new SshHostResolver();
+  const shellIntegrationInjector =
+    options.shellIntegrationInjector ??
+    new ShellIntegrationInjector({
+      userDataDir: app.getPath('userData'),
+      initialAutoInject: settingsStore.get().shellIntegration.autoInject,
+    });
   const paneInfoTracker = new PaneInfoTracker({
     pollIntervalMs: settingsStore.get().paneInfo.pollIntervalMs,
     callbacks: {
@@ -56,6 +68,7 @@ export function registerIpcHandlers(options: RegisterIpcHandlersOptions): Regist
   const hotkeyManager = new HotkeyManager({ getWindow: options.getWindow });
   const applyRuntimeSettings = (settings: AppSettings): AppSettings => {
     paneInfoTracker.setPollIntervalMs(settings.paneInfo.pollIntervalMs);
+    shellIntegrationInjector.setAutoInject(settings.shellIntegration.autoInject);
     const acceptedHotkey = hotkeyManager.set(settings.shortcuts.activateAppHotkey);
     if (acceptedHotkey !== settings.shortcuts.activateAppHotkey) {
       return settingsStore.update({ shortcuts: { activateAppHotkey: acceptedHotkey } });
@@ -64,6 +77,7 @@ export function registerIpcHandlers(options: RegisterIpcHandlersOptions): Regist
     return settings;
   };
   const ptyManager = new PtyManager({
+    shellIntegrationInjector,
     callbacks: {
       onData: (event) => {
         const window = options.getWindow();

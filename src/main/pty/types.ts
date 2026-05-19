@@ -1,5 +1,6 @@
 import type * as nodePty from 'node-pty';
 import type { PaneRuntimeSignal } from '../../shared/pane-runtime-signal';
+import type { ShellIntegrationInjector } from '../shell-integration/injector';
 
 export interface PtyCreateOptions {
   cwd: string;
@@ -58,4 +59,10 @@ export interface PtyManagerOptions {
   callbacks: PtyManagerCallbacks;
   spawn?: PtySpawn;
   getHomeDirectory?: () => string;
+  /**
+   * When provided, the PTY manager asks this injector for env extras (ZDOTDIR + bookkeeping
+   * keys) per-PTY so the spawned zsh sources Evermore's shell-integration forwarding scripts.
+   * Absent in tests that do not exercise auto-injection.
+   */
+  shellIntegrationInjector?: ShellIntegrationInjector;
 }
