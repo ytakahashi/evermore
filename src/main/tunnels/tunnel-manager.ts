@@ -130,6 +130,25 @@ export class TunnelManager {
   }
 
   /**
+   * Resets an error tunnel's diagnostic fields in-place without emitting a status event.
+   *
+   * Only applies when `status` is `'error'`; no-ops for `starting` or `running` to avoid
+   * interfering with a live process. Does not call `onStatusChanged` — the renderer store is
+   * updated by the IPC handler after this call returns.
+   */
+  public clearDiagnostics(alias: string): void {
+    const record = this.records.get(alias);
+    if (!record || record.status !== 'error') {
+      return;
+    }
+
+    record.status = 'stopped';
+    record.lastError = undefined;
+    record.recentLogs = [];
+    record.startedAt = undefined;
+  }
+
+  /**
    * Terminates all active tunnels during app shutdown or IPC teardown.
    */
   public disposeAll(): void {

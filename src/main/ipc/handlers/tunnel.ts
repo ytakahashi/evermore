@@ -7,7 +7,7 @@ import type { TunnelManager } from '../../tunnels/tunnel-manager';
 type TunnelSshConfigManager = Pick<SshConfigManager, 'list'>;
 type TunnelRuntimeManager = Pick<
   TunnelManager,
-  'start' | 'stop' | 'getRuntimeState' | 'list' | 'logs' | 'disposeAll'
+  'start' | 'stop' | 'getRuntimeState' | 'list' | 'logs' | 'clearDiagnostics' | 'disposeAll'
 >;
 
 interface RegisterTunnelHandlersOptions {
@@ -71,12 +71,16 @@ export function registerTunnelHandlers(options: RegisterTunnelHandlersOptions): 
   ipcMain.handle(IPC.TUNNEL_LOGS, (_event, payload: { alias: string }) =>
     tunnelManager.logs(payload.alias),
   );
+  ipcMain.handle(IPC.TUNNEL_CLEAR_DIAGNOSTICS, (_event, payload: { alias: string }) => {
+    tunnelManager.clearDiagnostics(payload.alias);
+  });
 
   return () => {
     ipcMain.removeHandler(IPC.TUNNEL_LIST);
     ipcMain.removeHandler(IPC.TUNNEL_START);
     ipcMain.removeHandler(IPC.TUNNEL_STOP);
     ipcMain.removeHandler(IPC.TUNNEL_LOGS);
+    ipcMain.removeHandler(IPC.TUNNEL_CLEAR_DIAGNOSTICS);
     tunnelManager.disposeAll();
   };
 }

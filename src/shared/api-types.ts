@@ -46,6 +46,7 @@ export interface Api {
     start: (alias: string) => Promise<void>;
     stop: (alias: string) => Promise<void>;
     logs: (alias: string) => Promise<string[]>;
+    clearDiagnostics: (alias: string) => Promise<void>;
     onStatusChanged: (
       cb: (alias: string, status: TunnelStatus, error?: string) => void,
     ) => () => void;

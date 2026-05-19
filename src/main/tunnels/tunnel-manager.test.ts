@@ -391,6 +391,47 @@ describe('TunnelManager', () => {
     ]);
   });
 
+  it('clears diagnostics for an error tunnel and resets it to stopped', () => {
+    // Given: a tunnel has failed and holds an error state with logs.
+    manager.start('dev');
+    spawnedProcesses[0]?.writeStderr('bind failed\n');
+    spawnedProcesses[0]?.emitExit(255);
+    expect(manager.getRuntimeState('dev')).toMatchObject({
+      status: 'error',
+      lastError: 'bind failed',
+    });
+
+    // When: diagnostics are cleared for that alias.
+    manager.clearDiagnostics('dev');
+
+    // Then: the record is reset to stopped with no error or logs.
+    expect(manager.getRuntimeState('dev')).toMatchObject({
+      status: 'stopped',
+      lastError: undefined,
+      startedAt: undefined,
+      recentLogs: [],
+    });
+  });
+
+  it('does not clear diagnostics for a starting or running tunnel', () => {
+    // Given: one tunnel still in startup grace and another that has reached running state.
+    manager.start('dev-starting');
+    manager.start('dev-running');
+    // Advance only enough to promote dev-running; dev-starting was started after dev-running
+    // so both share the same timer origin — start dev-running first, then dev-starting to keep
+    // them independent by using separate manager instances is complex; instead verify the
+    // guard by checking that clearDiagnostics on 'starting' is a no-op before any advancement.
+    manager.clearDiagnostics('dev-starting');
+    expect(manager.getRuntimeState('dev-starting')).toMatchObject({ status: 'starting' });
+
+    // When: the tunnel is promoted to running and clearDiagnostics is called.
+    vi.advanceTimersByTime(1500);
+    manager.clearDiagnostics('dev-running');
+
+    // Then: the running tunnel is unaffected — live processes are not disturbed.
+    expect(manager.getRuntimeState('dev-running')).toMatchObject({ status: 'running' });
+  });
+
   it('returns snapshots that cannot mutate manager state', () => {
     // Given: a tunnel has one recent log line.
     manager.start('dev');
