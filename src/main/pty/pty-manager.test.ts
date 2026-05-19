@@ -74,11 +74,11 @@ describe('PtyManager', () => {
     onCreate = vi.fn<(event: PtyCreateEvent) => void>();
     onDispose = vi.fn<(event: PtyDisposeEvent) => void>();
     onSignal = vi.fn<(event: PtySignalEvent) => void>();
-    manager = new PtyManager(
-      { onData, onExit, onCreate, onDispose, onSignal },
+    manager = new PtyManager({
+      callbacks: { onData, onExit, onCreate, onDispose, onSignal },
       spawn,
-      () => '/Users/tester',
-    );
+      getHomeDirectory: () => '/Users/tester',
+    });
   });
 
   afterEach(() => {
@@ -215,11 +215,11 @@ describe('PtyManager', () => {
 
   it('does not require an onSignal callback', () => {
     // Given: a manager constructed without the optional signal callback.
-    const managerWithoutSignal = new PtyManager(
-      { onData, onExit, onCreate, onDispose },
+    const managerWithoutSignal = new PtyManager({
+      callbacks: { onData, onExit, onCreate, onDispose },
       spawn,
-      () => '/Users/tester',
-    );
+      getHomeDirectory: () => '/Users/tester',
+    });
     managerWithoutSignal.create({ cwd: '/Users/tester' });
 
     // When / Then: signal-bearing output is still safe to observe.
@@ -233,11 +233,11 @@ describe('PtyManager', () => {
     const firstPty = createFakePty();
     const secondPty = createFakePty();
     spawn = vi.fn<PtySpawn>().mockReturnValueOnce(firstPty).mockReturnValueOnce(secondPty);
-    manager = new PtyManager(
-      { onData, onExit, onCreate, onDispose, onSignal },
+    manager = new PtyManager({
+      callbacks: { onData, onExit, onCreate, onDispose, onSignal },
       spawn,
-      () => '/Users/tester',
-    );
+      getHomeDirectory: () => '/Users/tester',
+    });
     const firstId = manager.create({ cwd: '/Users/tester' });
     const secondId = manager.create({ cwd: '/Users/tester' });
 

@@ -5,7 +5,7 @@ import * as nodePty from 'node-pty';
 import type { IDisposable, IPty } from 'node-pty';
 import { buildPtyProcessEnv } from './pty-env';
 import { TerminalSignalParser } from './terminal-signal-parser';
-import type { PtyCreateOptions, PtyManagerCallbacks, PtySpawn } from './types';
+import type { PtyCreateOptions, PtyManagerCallbacks, PtyManagerOptions, PtySpawn } from './types';
 
 interface PtyRecord {
   proc: IPty;
@@ -22,12 +22,15 @@ interface PtyRecord {
  */
 export class PtyManager {
   private readonly ptys = new Map<string, PtyRecord>();
+  private readonly callbacks: PtyManagerCallbacks;
+  private readonly spawn: PtySpawn;
+  private readonly getHomeDirectory: () => string;
 
-  public constructor(
-    private readonly callbacks: PtyManagerCallbacks,
-    private readonly spawn: PtySpawn = nodePty.spawn,
-    private readonly getHomeDirectory: () => string = homedir,
-  ) {}
+  public constructor(options: PtyManagerOptions) {
+    this.callbacks = options.callbacks;
+    this.spawn = options.spawn ?? nodePty.spawn;
+    this.getHomeDirectory = options.getHomeDirectory ?? homedir;
+  }
 
   /**
    * Starts a shell-backed PTY and returns the runtime id used by renderer IPC calls.

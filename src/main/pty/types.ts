@@ -53,3 +53,9 @@ export interface PtyManagerCallbacks {
 }
 
 export type PtySpawn = typeof nodePty.spawn;
+
+export interface PtyManagerOptions {
+  callbacks: PtyManagerCallbacks;
+  spawn?: PtySpawn;
+  getHomeDirectory?: () => string;
+}
