@@ -413,23 +413,34 @@ describe('TunnelManager', () => {
     });
   });
 
-  it('does not clear diagnostics for a starting or running tunnel', () => {
-    // Given: one tunnel still in startup grace and another that has reached running state.
-    manager.start('dev-starting');
-    manager.start('dev-running');
-    // Advance only enough to promote dev-running; dev-starting was started after dev-running
-    // so both share the same timer origin — start dev-running first, then dev-starting to keep
-    // them independent by using separate manager instances is complex; instead verify the
-    // guard by checking that clearDiagnostics on 'starting' is a no-op before any advancement.
-    manager.clearDiagnostics('dev-starting');
-    expect(manager.getRuntimeState('dev-starting')).toMatchObject({ status: 'starting' });
+  it('leaves a starting tunnel completely untouched when clearDiagnostics is called', () => {
+    // Given: a tunnel is mid-startup with one buffered log line.
+    manager.start('dev');
+    spawnedProcesses[0]?.writeStderr('warming up\n');
+    const before = manager.getRuntimeState('dev');
+    expect(before).toMatchObject({ status: 'starting' });
 
-    // When: the tunnel is promoted to running and clearDiagnostics is called.
+    // When: clearDiagnostics is invoked on the starting tunnel.
+    manager.clearDiagnostics('dev');
+
+    // Then: every observable field is preserved — no live state is disturbed.
+    expect(manager.getRuntimeState('dev')).toEqual(before);
+  });
+
+  it('leaves a running tunnel completely untouched when clearDiagnostics is called', () => {
+    // Given: a tunnel has been promoted to running and has accumulated a log line.
+    manager.start('dev');
+    now = 1500;
     vi.advanceTimersByTime(1500);
-    manager.clearDiagnostics('dev-running');
+    spawnedProcesses[0]?.writeStdout('serving\n');
+    const before = manager.getRuntimeState('dev');
+    expect(before).toMatchObject({ status: 'running', pid: 1000, startedAt: 1500 });
 
-    // Then: the running tunnel is unaffected — live processes are not disturbed.
-    expect(manager.getRuntimeState('dev-running')).toMatchObject({ status: 'running' });
+    // When: clearDiagnostics is invoked on the running tunnel.
+    manager.clearDiagnostics('dev');
+
+    // Then: every observable field is preserved — the live process is not disturbed.
+    expect(manager.getRuntimeState('dev')).toEqual(before);
   });
 
   it('returns snapshots that cannot mutate manager state', () => {

@@ -133,8 +133,17 @@ export class TunnelManager {
    * Resets an error tunnel's diagnostic fields in-place without emitting a status event.
    *
    * Only applies when `status` is `'error'`; no-ops for `starting` or `running` to avoid
-   * interfering with a live process. Does not call `onStatusChanged` — the renderer store is
-   * updated by the IPC handler after this call returns.
+   * interfering with a live process.
+   *
+   * Unlike other state transitions, this method intentionally does **not** call
+   * `callbacks.onStatusChanged`. The renderer store mirrors the reset locally after its IPC
+   * call resolves, and emitting a `'stopped'` event here would race that local update.
+   *
+   * Note on fields not reset here: `pid` and `lastStderrLine` are also nulled out, but only
+   * defensively — `handleProcessError` / `handleProcessExit` always run before a record can
+   * reach `'error'`, and those paths already clear `pid` and flush pending log buffers. The
+   * explicit resets keep the contract obvious to future callers that might invoke
+   * `clearDiagnostics` from a new code path.
    */
   public clearDiagnostics(alias: string): void {
     const record = this.records.get(alias);
@@ -146,6 +155,8 @@ export class TunnelManager {
     record.lastError = undefined;
     record.recentLogs = [];
     record.startedAt = undefined;
+    record.pid = undefined;
+    record.lastStderrLine = undefined;
   }
 
   /**
