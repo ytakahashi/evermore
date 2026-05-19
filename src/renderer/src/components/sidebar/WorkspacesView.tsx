@@ -76,6 +76,7 @@ export function WorkspacesView(): React.JSX.Element {
   const createWorkspace = useWorkspaceStore((state) => state.createWorkspace);
   const deleteWorkspace = useWorkspaceStore((state) => state.deleteWorkspace);
   const renameWorkspace = useWorkspaceStore((state) => state.renameWorkspace);
+  const renameWorkspaceTab = useWorkspaceStore((state) => state.renameWorkspaceTab);
   const selectWorkspacePane = useWorkspaceStore((state) => state.selectWorkspacePane);
   const selectWorkspaceTab = useWorkspaceStore((state) => state.selectWorkspaceTab);
   const setActiveWorkspace = useWorkspaceStore((state) => state.setActiveWorkspace);
@@ -93,6 +94,14 @@ export function WorkspacesView(): React.JSX.Element {
   const [renameDraft, setRenameDraft] = useState('');
   const renameInputRef = useRef<HTMLInputElement | null>(null);
   const renameCancelledRef = useRef(false);
+
+  // Tab inline rename state (kept separate from workspace rename so the two editors are independent).
+  // The owning workspaceId is held alongside the tabId so the rename targets the correct workspace
+  // even if the active workspace changes while the editor is open.
+  const [editingTab, setEditingTab] = useState<{ workspaceId: string; tabId: string } | null>(null);
+  const [tabRenameDraft, setTabRenameDraft] = useState('');
+  const tabRenameInputRef = useRef<HTMLInputElement | null>(null);
+  const tabRenameCancelledRef = useRef(false);
 
   // Keep tree disclosure state local to the sidebar so it never becomes persisted workspace data.
   const [collapsedWorkspaceIds, setCollapsedWorkspaceIds] = useState<Set<string>>(() => new Set());
@@ -128,6 +137,12 @@ export function WorkspacesView(): React.JSX.Element {
     renameInputRef.current?.focus();
     renameInputRef.current?.select();
   }, [editingWorkspaceId]);
+
+  useEffect(() => {
+    if (!editingTab) return;
+    tabRenameInputRef.current?.focus();
+    tabRenameInputRef.current?.select();
+  }, [editingTab]);
 
   // --- Create handlers ---
 
@@ -200,6 +215,38 @@ export function WorkspacesView(): React.JSX.Element {
       // Set before cancelRenaming so the blur fired on DOM removal sees it.
       renameCancelledRef.current = true;
       cancelRenaming();
+    }
+  };
+
+  // --- Tab rename handlers ---
+
+  const startRenamingTab = (workspaceId: string, tabId: string, name: string): void => {
+    setEditingTab({ workspaceId, tabId });
+    setTabRenameDraft(name);
+  };
+
+  const cancelRenamingTab = (): void => {
+    tabRenameCancelledRef.current = false;
+    setEditingTab(null);
+    setTabRenameDraft('');
+  };
+
+  const commitRenamingTab = (): void => {
+    if (editingTab && !tabRenameCancelledRef.current) {
+      renameWorkspaceTab(editingTab.workspaceId, editingTab.tabId, tabRenameDraft);
+    }
+    cancelRenamingTab();
+  };
+
+  const handleTabRenameKeyDown = (event: KeyboardEvent<HTMLInputElement>): void => {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      commitRenamingTab();
+    } else if (event.key === 'Escape') {
+      event.preventDefault();
+      // Set before cancelRenamingTab so the blur fired on DOM removal sees it.
+      tabRenameCancelledRef.current = true;
+      cancelRenamingTab();
     }
   };
 
@@ -334,6 +381,8 @@ export function WorkspacesView(): React.JSX.Element {
                   {workspace.tabs.map((tab) => {
                     const paneCount = countPaneLeaves(tab.layout);
                     const isActiveTab = isActive && tab.id === workspace.activeTabId;
+                    const isEditingTab =
+                      editingTab?.workspaceId === workspace.id && editingTab.tabId === tab.id;
                     const label = `${tab.name} (${formatPaneCount(paneCount)})`;
                     const paneOrder = flattenLayout(tab.layout).panes;
 
@@ -341,32 +390,49 @@ export function WorkspacesView(): React.JSX.Element {
                       <div key={tab.id} className="space-y-0.5">
                         <div className="pl-6">
                           <div className="group flex w-full items-center gap-1">
-                            <button
-                              aria-current={isActiveTab ? 'page' : undefined}
-                              className={`flex min-w-0 flex-1 items-center gap-1 rounded-md py-1 pl-3 pr-2 text-left text-sm ${
-                                isActiveTab
-                                  ? 'bg-tab-active text-foreground'
-                                  : 'text-muted hover:bg-raised/50'
-                              }`}
-                              type="button"
-                              onClick={() => {
-                                selectWorkspaceTab(workspace.id, tab.id);
-                                closeSettings();
-                              }}
-                            >
-                              <Hash
-                                size={14}
-                                className={isActiveTab ? 'text-brand' : 'text-subtle'}
+                            {isEditingTab ? (
+                              <input
+                                ref={tabRenameInputRef}
+                                aria-label={`Rename ${tab.name}`}
+                                className="mx-2 min-w-0 flex-1 rounded border border-brand/60 bg-panel px-1.5 py-0.5 text-xs text-foreground outline-none"
+                                value={tabRenameDraft}
+                                onBlur={commitRenamingTab}
+                                onChange={(event) => {
+                                  setTabRenameDraft(event.target.value);
+                                }}
+                                onKeyDown={handleTabRenameKeyDown}
                               />
-                              <span className="truncate">{label}</span>
-                            </button>
+                            ) : (
+                              <button
+                                aria-current={isActiveTab ? 'page' : undefined}
+                                className={`flex min-w-0 flex-1 items-center gap-1 rounded-md py-1 pl-3 pr-2 text-left text-sm ${
+                                  isActiveTab
+                                    ? 'bg-tab-active text-foreground'
+                                    : 'text-muted hover:bg-raised/50'
+                                }`}
+                                type="button"
+                                onClick={() => {
+                                  selectWorkspaceTab(workspace.id, tab.id);
+                                  closeSettings();
+                                }}
+                                onDoubleClick={() => {
+                                  startRenamingTab(workspace.id, tab.id, tab.name);
+                                }}
+                              >
+                                <Hash
+                                  size={14}
+                                  className={isActiveTab ? 'text-brand' : 'text-subtle'}
+                                />
+                                <span className="truncate">{label}</span>
+                              </button>
+                            )}
                             <button
                               aria-label={`Close ${tab.name}`}
                               className="invisible flex size-5 shrink-0 items-center justify-center rounded text-subtle hover:bg-raised hover:text-danger disabled:cursor-default disabled:opacity-40 group-hover:visible"
                               // `closeWorkspaceTab` is the single source of truth for the
                               // "at least one tab" invariant; this disabled guard is a UI hint to
                               // avoid showing a clickable button that would silently no-op.
-                              disabled={workspace.tabs.length <= 1}
+                              disabled={workspace.tabs.length <= 1 || isEditingTab}
                               title={
                                 workspace.tabs.length > 1
                                   ? `Close ${tab.name}`

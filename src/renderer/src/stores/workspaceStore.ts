@@ -32,6 +32,7 @@ export interface WorkspaceStoreState {
   addTab: () => void;
   addWorkspaceTab: (workspaceId: string) => void;
   renameTab: (tabId: string, name: string) => void;
+  renameWorkspaceTab: (workspaceId: string, tabId: string, name: string) => void;
   openSshHostTab: (alias: string) => void;
   selectWorkspacePane: (workspaceId: string, tabId: string, paneId: string) => void;
   selectWorkspaceTab: (workspaceId: string, tabId: string) => void;
@@ -470,8 +471,22 @@ export function createWorkspaceStore(
       },
       renameTab: (tabId: string, name: string): void => {
         const workspace = selectActiveWorkspace(get());
+        if (!workspace) {
+          return;
+        }
+
+        get().renameWorkspaceTab(workspace.id, tabId, name);
+      },
+      renameWorkspaceTab: (workspaceId: string, tabId: string, name: string): void => {
         const trimmedName = name.trim();
-        if (!workspace || !trimmedName) {
+        if (!trimmedName) {
+          return;
+        }
+
+        const workspace = get().workspaces.find(
+          (currentWorkspace) => currentWorkspace.id === workspaceId,
+        );
+        if (!workspace) {
           return;
         }
 

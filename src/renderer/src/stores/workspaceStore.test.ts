@@ -804,6 +804,38 @@ describe('workspaceStore', () => {
     expect(workspaceApi.update).not.toHaveBeenCalled();
   });
 
+  it('renames a tab in a non-active workspace via renameWorkspaceTab', async () => {
+    // Given: two workspaces are loaded with workspace-1 active.
+    vi.useFakeTimers();
+    const workspace2 = createWorkspace('workspace-2', '/Users/tester/2');
+    workspaceApi.list = vi.fn(() =>
+      Promise.resolve({
+        workspaces: [workspace, workspace2],
+        activeWorkspaceId: 'workspace-1',
+      }),
+    );
+    const useStore = createWorkspaceStore({ workspaceApi, debounceMs: 50, now: () => now });
+    await useStore.getState().loadWorkspaces();
+    const inactiveTabId = workspace2.tabs[0]!.id;
+
+    // When: the inactive workspace's tab is renamed.
+    useStore.getState().renameWorkspaceTab('workspace-2', inactiveTabId, '  build  ');
+    await vi.advanceTimersByTimeAsync(50);
+
+    // Then: the inactive workspace's tab name is updated and persisted (the active workspace is untouched).
+    const inactiveWorkspace = useStore
+      .getState()
+      .workspaces.find((current) => current.id === 'workspace-2');
+    expect(inactiveWorkspace?.tabs[0]?.name).toBe('build');
+    expect(useStore.getState().activeWorkspaceId).toBe('workspace-1');
+    expect(workspaceApi.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 'workspace-2',
+        tabs: [expect.objectContaining({ id: inactiveTabId, name: 'build' })],
+      }),
+    );
+  });
+
   it('closes a tab, removes its pane, and keeps the final tab open', async () => {
     // Given: a loaded workspace with two tabs.
     vi.useFakeTimers();

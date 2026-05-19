@@ -552,6 +552,77 @@ describe('WorkspacesView', () => {
     expect(workspaceUpdate).not.toHaveBeenCalled();
   });
 
+  it('renames a tab with Enter and persists the new name', async () => {
+    // Given: the sidebar shows a tab on the active workspace.
+    render(<WorkspacesView />);
+
+    // When: the user double-clicks the tab row and confirms a new name with Enter.
+    fireEvent.doubleClick(screen.getByRole('button', { name: 'zsh (1 pane)' }));
+    const input = screen.getByRole('textbox', { name: 'Rename zsh' });
+    fireEvent.change(input, { target: { value: '  build  ' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+    await vi.advanceTimersByTimeAsync(300);
+
+    // Then: the trimmed name replaces the tab label and the workspace update is persisted.
+    expect(screen.getByRole('button', { name: 'build (1 pane)' })).toBeInTheDocument();
+    expect(workspaceUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 'workspace-1',
+        tabs: [expect.objectContaining({ id: 'workspace-1-tab-1', name: 'build' })],
+      }),
+    );
+  });
+
+  it('commits a tab rename on blur', async () => {
+    // Given: the tab name editor is open.
+    render(<WorkspacesView />);
+    fireEvent.doubleClick(screen.getByRole('button', { name: 'zsh (1 pane)' }));
+    const input = screen.getByRole('textbox', { name: 'Rename zsh' });
+
+    // When: the user changes the title and moves focus away.
+    fireEvent.change(input, { target: { value: 'build' } });
+    fireEvent.blur(input);
+    await vi.advanceTimersByTimeAsync(300);
+
+    // Then: blur finalizes the rename.
+    expect(screen.getByRole('button', { name: 'build (1 pane)' })).toBeInTheDocument();
+    expect(workspaceUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 'workspace-1',
+        tabs: [expect.objectContaining({ id: 'workspace-1-tab-1', name: 'build' })],
+      }),
+    );
+  });
+
+  it('cancels tab rename with Escape and does not persist when blur follows', async () => {
+    // Given: the tab name editor is open with a modified draft.
+    render(<WorkspacesView />);
+    fireEvent.doubleClick(screen.getByRole('button', { name: 'zsh (1 pane)' }));
+    const input = screen.getByRole('textbox', { name: 'Rename zsh' });
+    fireEvent.change(input, { target: { value: 'build' } });
+
+    // When: Escape is pressed followed by the blur that browsers fire on DOM removal.
+    fireEvent.keyDown(input, { key: 'Escape' });
+    fireEvent.blur(input);
+    await vi.advanceTimersByTimeAsync(300);
+
+    // Then: the original name is preserved and no update is persisted.
+    expect(screen.getByRole('button', { name: 'zsh (1 pane)' })).toBeInTheDocument();
+    expect(workspaceUpdate).not.toHaveBeenCalled();
+  });
+
+  it('disables the tab close button while a tab is being renamed', () => {
+    // Given: a workspace with multiple tabs so close would normally be enabled.
+    render(<WorkspacesView />);
+    expect(screen.getByRole('button', { name: 'Close server' })).toBeEnabled();
+
+    // When: the user enters rename mode on that tab.
+    fireEvent.doubleClick(screen.getByRole('button', { name: 'server (2 panes)' }));
+
+    // Then: the close button on the editing tab is disabled.
+    expect(screen.getByRole('button', { name: 'Close server' })).toBeDisabled();
+  });
+
   it('deletes a workspace when confirmed and switches active to the first remaining', async () => {
     // Given: the confirmation dialog accepts automatically.
     vi.spyOn(window, 'confirm').mockReturnValue(true);
