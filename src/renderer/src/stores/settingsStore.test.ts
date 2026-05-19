@@ -25,6 +25,9 @@ function makeSettingsApi(initial: AppSettings = structuredClone(DEFAULT_APP_SETT
           ? { ...state.current.shortcuts, ...patch.shortcuts }
           : state.current.shortcuts,
         app: patch.app ? { ...state.current.app, ...patch.app } : state.current.app,
+        shellIntegration: patch.shellIntegration
+          ? { ...state.current.shellIntegration, ...patch.shellIntegration }
+          : state.current.shellIntegration,
       };
       return Promise.resolve(structuredClone(state.current));
     }),
@@ -89,7 +92,34 @@ describe('createSettingsStore', () => {
       paneInfo: undefined,
       shortcuts: undefined,
       app: undefined,
+      shellIntegration: undefined,
     });
+  });
+
+  it('applies a shellIntegration patch optimistically and flushes it through the api', async () => {
+    // Given: a loaded store with auto-injection defaulting to ON.
+    const { api } = makeSettingsApi();
+    const useStore = createSettingsStore({ settingsApi: api, debounceMs: 20 });
+    await useStore.getState().loadSettings();
+    expect(useStore.getState().settings?.shellIntegration.autoInject).toBe(true);
+
+    // When: the user toggles auto-injection off.
+    const flush = useStore.getState().updateSettings({ shellIntegration: { autoInject: false } });
+
+    // Then: local state reflects the change immediately, before the debounce fires.
+    expect(useStore.getState().settings?.shellIntegration.autoInject).toBe(false);
+    expect(api.update).not.toHaveBeenCalled();
+
+    // When: the debounce elapses.
+    await vi.advanceTimersByTimeAsync(40);
+    const confirmed = await flush;
+
+    // Then: the api receives the shellIntegration section and the post-write state confirms it.
+    expect(api.update).toHaveBeenCalledOnce();
+    expect(api.update).toHaveBeenCalledWith(
+      expect.objectContaining({ shellIntegration: { autoInject: false } }),
+    );
+    expect(confirmed?.shellIntegration.autoInject).toBe(false);
   });
 
   it('reconciles local state with the post-write settings returned by main', async () => {

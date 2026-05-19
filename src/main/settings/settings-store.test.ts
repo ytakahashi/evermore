@@ -326,4 +326,48 @@ describe('SettingsStore', () => {
     // Then: the persisted value is left intact.
     expect(next.paneInfo.pollIntervalMs).toBe(DEFAULT_APP_SETTINGS.paneInfo.pollIntervalMs);
   });
+
+  it('defaults shellIntegration.autoInject to true when storage is empty', () => {
+    // Given: a freshly created store on top of an empty payload.
+
+    // When: the renderer reads settings.
+    const result = store.get();
+
+    // Then: auto-inject ships ON by default (Phase 5 design).
+    expect(result.shellIntegration.autoInject).toBe(true);
+  });
+
+  it('persists an explicit shellIntegration.autoInject=false update', () => {
+    // Given: defaults are in storage.
+
+    // When: the user disables auto-injection.
+    const next = store.update({ shellIntegration: { autoInject: false } });
+
+    // Then: the value flips and the file mirrors it without touching unrelated sections.
+    expect(next.shellIntegration.autoInject).toBe(false);
+    expect((storage.payload as AppSettings).shellIntegration.autoInject).toBe(false);
+    expect(next.terminal).toEqual(DEFAULT_APP_SETTINGS.terminal);
+  });
+
+  it('normalizes a typoed shellIntegration.autoInject value back to the default', () => {
+    // Given: a hand-edited settings.json with a non-boolean value.
+    storage.payload = { shellIntegration: { autoInject: 'yes' } };
+
+    // When: the store reloads from disk.
+    const next = store.reload();
+
+    // Then: the canonical default is restored.
+    expect(next.shellIntegration.autoInject).toBe(DEFAULT_APP_SETTINGS.shellIntegration.autoInject);
+  });
+
+  it('fills in a missing shellIntegration section with defaults when read from storage', () => {
+    // Given: a legacy settings.json predating the shellIntegration section.
+    storage.payload = { terminal: { cursorStyle: 'block' } };
+
+    // When: the store reloads from disk.
+    const next = store.reload();
+
+    // Then: the section is populated with defaults so downstream consumers can read it.
+    expect(next.shellIntegration).toEqual(DEFAULT_APP_SETTINGS.shellIntegration);
+  });
 });

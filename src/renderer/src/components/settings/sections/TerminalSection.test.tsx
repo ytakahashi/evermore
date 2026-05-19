@@ -12,6 +12,9 @@ function mergeSettings(current: AppSettings, patch: SettingsUpdate): AppSettings
     paneInfo: patch.paneInfo ? { ...current.paneInfo, ...patch.paneInfo } : current.paneInfo,
     shortcuts: patch.shortcuts ? { ...current.shortcuts, ...patch.shortcuts } : current.shortcuts,
     app: patch.app ? { ...current.app, ...patch.app } : current.app,
+    shellIntegration: patch.shellIntegration
+      ? { ...current.shellIntegration, ...patch.shellIntegration }
+      : current.shellIntegration,
   };
 }
 
@@ -72,6 +75,7 @@ describe('TerminalSection', () => {
       paneInfo: undefined,
       shortcuts: undefined,
       app: undefined,
+      shellIntegration: undefined,
     });
   });
 
@@ -90,6 +94,7 @@ describe('TerminalSection', () => {
       paneInfo: undefined,
       shortcuts: undefined,
       app: undefined,
+      shellIntegration: undefined,
     });
   });
 
@@ -128,6 +133,7 @@ describe('TerminalSection', () => {
       paneInfo: undefined,
       shortcuts: undefined,
       app: undefined,
+      shellIntegration: undefined,
     });
   });
 

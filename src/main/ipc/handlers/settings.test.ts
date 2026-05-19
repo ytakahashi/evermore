@@ -75,6 +75,24 @@ describe('registerSettingsHandlers', () => {
     expect(settingsStore.get().terminal.cursorStyle).toBe('block');
   });
 
+  it('persists a shellIntegration.autoInject update across the IPC boundary', async () => {
+    // Given: handlers are registered with defaults (autoInject defaults to true).
+    registerSettingsHandlers({ settingsStore });
+    expect(settingsStore.get().shellIntegration.autoInject).toBe(true);
+
+    // When: the renderer invokes settings:update to disable auto-injection.
+    const result = (await findHandler(IPC.SETTINGS_UPDATE)?.(
+      {},
+      { settings: { shellIntegration: { autoInject: false } } },
+    )) as AppSettings;
+
+    // Then: the returned value and the underlying store both reflect the disabled state. This
+    // catches the regression where the IPC payload whitelist drops the shellIntegration section
+    // and silently leaves auto-injection enabled.
+    expect(result.shellIntegration.autoInject).toBe(false);
+    expect(settingsStore.get().shellIntegration.autoInject).toBe(false);
+  });
+
   it('returns runtime-reconciled settings after update', async () => {
     // Given: runtime settings application falls back to a different hotkey value.
     const applyRuntimeSettings = vi.fn((_settings: AppSettings) => {

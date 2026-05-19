@@ -37,6 +37,9 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   app: {
     quitConfirm: 'running-only',
   },
+  shellIntegration: {
+    autoInject: true,
+  },
 };
 
 /**
@@ -52,5 +55,6 @@ export function cloneDefaultSettings(): AppSettings {
       keybindings: { ...DEFAULT_APP_SETTINGS.shortcuts.keybindings },
     },
     app: { ...DEFAULT_APP_SETTINGS.app },
+    shellIntegration: { ...DEFAULT_APP_SETTINGS.shellIntegration },
   };
 }

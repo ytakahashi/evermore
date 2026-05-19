@@ -167,4 +167,13 @@ export interface AppSettings {
   app: {
     quitConfirm: 'always' | 'never' | 'running-only';
   };
+  shellIntegration: {
+    /**
+     * When true, Evermore injects its zsh shell integration into newly spawned PTYs by overriding
+     * `ZDOTDIR` to an Evermore-managed directory that forwards to the user's rc files and then
+     * sources the Evermore snippet. Has no effect on shells other than zsh, on already-running
+     * PTYs, or on subshells started inside an Evermore PTY.
+     */
+    autoInject: boolean;
+  };
 }
