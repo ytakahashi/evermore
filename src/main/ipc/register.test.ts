@@ -69,8 +69,8 @@ vi.mock('../pane-info/pane-info-tracker', () => ({
 }));
 
 vi.mock('../pty/pty-manager', () => ({
-  PtyManager: vi.fn().mockImplementation(function (callbacks: PtyManagerCallbacks) {
-    ptyManagerMock.callbacks = callbacks;
+  PtyManager: vi.fn().mockImplementation(function (options: { callbacks: PtyManagerCallbacks }) {
+    ptyManagerMock.callbacks = options.callbacks;
     return {};
   }),
 }));

@@ -64,30 +64,32 @@ export function registerIpcHandlers(options: RegisterIpcHandlersOptions): Regist
     return settings;
   };
   const ptyManager = new PtyManager({
-    onData: (event) => {
-      const window = options.getWindow();
-      // PTY processes are owned by main, so their callbacks can outlive a BrowserWindow. Drop
-      // late events instead of letting a closed window turn process output into an app error.
-      if (window && !window.isDestroyed()) {
-        window.webContents.send(IPC.PTY_DATA, event);
-      }
-    },
-    onExit: (event) => {
-      const window = options.getWindow();
-      // Exit notifications are best-effort UI updates; the manager has already cleaned up the
-      // process record, so there is nothing to recover if no renderer is present.
-      if (window && !window.isDestroyed()) {
-        window.webContents.send(IPC.PTY_EXIT, event);
-      }
-    },
-    onCreate: ({ id, pid, cwd }) => {
-      paneInfoTracker.register(id, pid, cwd);
-    },
-    onDispose: ({ id }) => {
-      paneInfoTracker.unregister(id);
-    },
-    onSignal: ({ id, signal }) => {
-      paneInfoTracker.applySignal(id, signal);
+    callbacks: {
+      onData: (event) => {
+        const window = options.getWindow();
+        // PTY processes are owned by main, so their callbacks can outlive a BrowserWindow. Drop
+        // late events instead of letting a closed window turn process output into an app error.
+        if (window && !window.isDestroyed()) {
+          window.webContents.send(IPC.PTY_DATA, event);
+        }
+      },
+      onExit: (event) => {
+        const window = options.getWindow();
+        // Exit notifications are best-effort UI updates; the manager has already cleaned up the
+        // process record, so there is nothing to recover if no renderer is present.
+        if (window && !window.isDestroyed()) {
+          window.webContents.send(IPC.PTY_EXIT, event);
+        }
+      },
+      onCreate: ({ id, pid, cwd }) => {
+        paneInfoTracker.register(id, pid, cwd);
+      },
+      onDispose: ({ id }) => {
+        paneInfoTracker.unregister(id);
+      },
+      onSignal: ({ id, signal }) => {
+        paneInfoTracker.applySignal(id, signal);
+      },
     },
   });
   const tunnelManager = new TunnelManager({
