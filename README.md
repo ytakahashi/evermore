@@ -1,22 +1,42 @@
 # Evermore
 
-Evermore is a simple terminal workspace for developers, built with Electron and React.
+Evermore is a smart terminal workspace that gives you an at-a-glance view of the state of your
+terminals and connections.
 
 ## Features
 
-- Workspace sidebar to manage and focus workspaces, tabs, and individual panes
-- Split-pane terminal area with pane full-screen functionality to focus on a single process
-- Persistent workspace and tab layout state backed by main-process PTY ownership
-- SSH host discovery from `~/.ssh/config`, including `Include` expansion
-- SSH host detail expansion showing resolved directives (via `ssh -G`)
-- SSH host shortcuts that open terminal tabs with `ssh <alias>`
-- SSH tunnel runtime state for hosts with `LocalForward`, `RemoteForward`, or `DynamicForward`
-- Tunnel start/stop controls, status updates, and recent log snapshots
+### Core Features
+
+Even without any shell configuration, Evermore provides a highly informative workspace:
+
+- **Persistent Workspace Layouts**: The sidebar workspace, tab structure, and split-pane terminal
+  layouts are persisted across sessions.
+- **Pane Status Indicators**: Sidebar lists reflect whether a terminal pane is currently `running`
+  or `idle`, using system-level process monitoring.
+- **Active Process & Command Labels**: Sidebar pane items display the name of the active foreground
+  program (e.g., `node`, `ssh`) or the last command line inferred from keystrokes.
+- **SSH Config & Tunnel Management**:
+  - Displays host shortcuts discovered from `~/.ssh/config`.
+  - Shows resolved connection details (via `ssh -G`) and opens a terminal with one click.
+  - Starts and stops SSH tunnels (LocalForward / RemoteForward / DynamicForward) with real-time
+    port-forwarding state.
+
+### Shell-Integrated Features (Zsh)
+
+Zsh shell integration gives the workspace UI shell-level accuracy and responsiveness:
+
+- **Auto-Injection**: Enabled by default; starting a Zsh pane automatically sets up integration.
+- **Real-Time Directory Sync**: The pane's cwd updates instantly as you change directories.
+- **Exact Command & Alias Labels**: Pane labels in the sidebar display the exact command line you
+  typed (such as `pnpm run dev`), rather than generic process names (such as `node`).
 
 ## Recommended Setup
 
-There are several recommended setups for the shell and SSH configuration. While these are not
-mandatory, they would enhance the user experience.
-
-Open **Settings > Recommended setup** in Evermore to copy the optional OSC 7 shell snippet for cwd
-tracking and SSH config snippet for tunnel reliability.
+- **Zsh Auto-Injection**: Enabled by default. You can toggle this behavior under **Settings >
+  Advanced features**.
+- **SSH Config (Tunnel Reliability)**: Open **Settings > Recommended setup** to view and copy
+  recommended SSH options (such as keep-alives) that keep background port-forwarding tunnels
+  reliable.
+- **Manual Shell Setup (Fallback)**: Copy the manual shell integration snippet from **Settings >
+  Recommended setup** if you run custom shells or subshells, or prefer to configure shell
+  integration manually.
