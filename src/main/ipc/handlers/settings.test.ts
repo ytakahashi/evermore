@@ -3,7 +3,7 @@ import { DEFAULT_APP_SETTINGS } from '../../../shared/settings-defaults';
 import { IPC } from '../../../shared/ipc-channels';
 import type { AppSettings } from '../../../shared/types';
 import { SettingsStore } from '../../settings/settings-store';
-import type { SettingsStorageAdapter } from '../../settings/types';
+import type { PersistedSettings, SettingsStorageAdapter } from '../../settings/types';
 import { registerSettingsHandlers } from './settings';
 
 const ipcMainMock = vi.hoisted(() => ({
@@ -25,7 +25,7 @@ class MemorySettingsStorageAdapter implements SettingsStorageAdapter {
     return this.payload;
   }
 
-  public setSettings(settings: AppSettings): void {
+  public setSettings(settings: PersistedSettings): void {
     this.payload = settings;
   }
 
