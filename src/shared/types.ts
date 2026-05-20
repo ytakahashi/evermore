@@ -161,6 +161,14 @@ export interface AppSettings {
      * Action id -> Accelerator. The bindings are persisted only; the runtime that reads them and
      * binds the actual key handlers is not yet implemented, so editing this map currently has no
      * effect on the running app.
+     *
+     * Resolution semantics (applied by the main-process settings layer):
+     *  - The resolved map carries the merged view of defaults overlaid with user-provided entries.
+     *  - An empty-string value (`""`) means "explicitly unbound": the action has no binding even if
+     *    the default would have set one. Runtime consumers must treat `""` as "no binding" rather
+     *    than attempting to register an empty accelerator.
+     *  - On disk, only fields that diverge from defaults are persisted (sparse); an absent key in
+     *    the on-disk file means "use the default for that action".
      */
     keybindings: Record<string, string>;
   };

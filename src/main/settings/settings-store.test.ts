@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { DEFAULT_APP_SETTINGS } from '../../shared/settings-defaults';
 import type { AppSettings } from '../../shared/types';
 import { SettingsStore } from './settings-store';
-import type { SettingsStorageAdapter } from './types';
+import type { PersistedSettings, SettingsStorageAdapter } from './types';
 
 class MemorySettingsStorageAdapter implements SettingsStorageAdapter {
   public payload: unknown;
@@ -17,7 +17,7 @@ class MemorySettingsStorageAdapter implements SettingsStorageAdapter {
     return this.payload;
   }
 
-  public setSettings(settings: AppSettings): void {
+  public setSettings(settings: PersistedSettings): void {
     this.payload = settings;
   }
 
@@ -35,30 +35,30 @@ describe('SettingsStore', () => {
     store = new SettingsStore({ storage });
   });
 
-  it('initializes with defaults when storage is empty', () => {
+  it('initializes with defaults in memory and persists an empty file when storage is empty', () => {
     // Given: a freshly created store on top of an empty payload.
 
     // When: the renderer reads settings.
     const result = store.get();
 
-    // Then: defaults are returned and persisted back so the file reflects the canonical shape.
+    // Then: defaults are returned in-memory while disk stays empty — defaults are not persisted.
     expect(result).toEqual(DEFAULT_APP_SETTINGS);
-    expect(storage.payload).toEqual(DEFAULT_APP_SETTINGS);
+    expect(storage.payload).toEqual({});
   });
 
-  it('persists an update and returns the resulting full settings', () => {
+  it('persists only the changed field while returning the resulting full settings', () => {
     // Given: defaults are in storage.
 
     // When: the renderer updates one nested field.
     const next = store.update({ terminal: { cursorStyle: 'underline' } });
 
-    // Then: the returned object reflects the change and the file mirrors it.
+    // Then: the returned object is fully populated, but the on-disk payload contains only the diff.
     expect(next.terminal.cursorStyle).toBe('underline');
     expect(next.terminal.cursorBlink).toBe(DEFAULT_APP_SETTINGS.terminal.cursorBlink);
-    expect((storage.payload as AppSettings).terminal.cursorStyle).toBe('underline');
+    expect(storage.payload).toEqual({ terminal: { cursorStyle: 'underline' } });
   });
 
-  it('normalizes invalid update values before persisting', () => {
+  it('normalizes invalid update values and keeps the file empty when no field actually changed', () => {
     // Given: a malformed value reaches the store through an IPC boundary or future UI bug.
 
     // When: the update is applied.
@@ -66,11 +66,9 @@ describe('SettingsStore', () => {
       terminal: { cursorStyle: 'circle' as AppSettings['terminal']['cursorStyle'] },
     });
 
-    // Then: the invalid value is rejected before it reaches disk.
+    // Then: the invalid value is rejected, so no field differs from defaults and the file stays empty.
     expect(next.terminal.cursorStyle).toBe(DEFAULT_APP_SETTINGS.terminal.cursorStyle);
-    expect((storage.payload as AppSettings).terminal.cursorStyle).toBe(
-      DEFAULT_APP_SETTINGS.terminal.cursorStyle,
-    );
+    expect(storage.payload).toEqual({});
   });
 
   it('persists non-positive pollIntervalMs values so polling can be disabled', () => {
@@ -79,9 +77,9 @@ describe('SettingsStore', () => {
     // When: poll interval is set to zero.
     const next = store.update({ paneInfo: { pollIntervalMs: 0 } });
 
-    // Then: the disable value is kept.
+    // Then: the disable value is kept and only the diff lands on disk.
     expect(next.paneInfo.pollIntervalMs).toBe(0);
-    expect((storage.payload as AppSettings).paneInfo.pollIntervalMs).toBe(0);
+    expect(storage.payload).toEqual({ paneInfo: { pollIntervalMs: 0 } });
   });
 
   it('notifies subscribers after a successful update', () => {
@@ -105,9 +103,9 @@ describe('SettingsStore', () => {
     // When: the user resets to defaults.
     const next = store.reset();
 
-    // Then: defaults are restored both in memory and on disk.
+    // Then: defaults are restored in memory and the on-disk file is emptied.
     expect(next).toEqual(DEFAULT_APP_SETTINGS);
-    expect(storage.payload).toEqual(DEFAULT_APP_SETTINGS);
+    expect(storage.payload).toEqual({});
   });
 
   it('reload() re-reads and normalizes the current settings payload', () => {
@@ -296,8 +294,8 @@ describe('SettingsStore', () => {
     expect(next.shortcuts.activateAppHotkey).toBeNull();
   });
 
-  it('drops non-string keybinding entries when read from storage', () => {
-    // Given: persisted keybindings contain valid and malformed entries.
+  it('drops non-string keybinding entries while preserving "" as an explicit unbind', () => {
+    // Given: persisted keybindings contain valid, non-string, and explicit-unbind entries.
     storage.payload = {
       shortcuts: {
         keybindings: {
@@ -311,9 +309,10 @@ describe('SettingsStore', () => {
     // When: the store reloads from disk.
     const next = store.reload();
 
-    // Then: only non-empty string accelerators survive.
+    // Then: non-strings are dropped; `""` survives as the "explicitly unbound" signal.
     expect(next.shortcuts.keybindings).toEqual({
       'workspace.next': 'Cmd+Shift+]',
+      'pane.split': '',
     });
   });
 
@@ -343,9 +342,9 @@ describe('SettingsStore', () => {
     // When: the user disables auto-injection.
     const next = store.update({ shellIntegration: { autoInject: false } });
 
-    // Then: the value flips and the file mirrors it without touching unrelated sections.
+    // Then: the value flips and the file mirrors only that single field.
     expect(next.shellIntegration.autoInject).toBe(false);
-    expect((storage.payload as AppSettings).shellIntegration.autoInject).toBe(false);
+    expect(storage.payload).toEqual({ shellIntegration: { autoInject: false } });
     expect(next.terminal).toEqual(DEFAULT_APP_SETTINGS.terminal);
   });
 
@@ -358,6 +357,87 @@ describe('SettingsStore', () => {
 
     // Then: the canonical default is restored.
     expect(next.shellIntegration.autoInject).toBe(DEFAULT_APP_SETTINGS.shellIntegration.autoInject);
+  });
+
+  it('omits fields whose update value matches the default', () => {
+    // Given: the user has drifted one field away from defaults.
+    store.update({ terminal: { cursorStyle: 'underline' } });
+    expect(storage.payload).toEqual({ terminal: { cursorStyle: 'underline' } });
+
+    // When: the user reverts the field to its default value.
+    store.update({ terminal: { cursorStyle: DEFAULT_APP_SETTINGS.terminal.cursorStyle } });
+
+    // Then: the file is empty again — defaults are not materialized on disk.
+    expect(storage.payload).toEqual({});
+  });
+
+  it('persists activateAppHotkey=null as an explicit field to record the "disabled" intent', () => {
+    // Given: defaults are in storage and the default hotkey is a non-null accelerator.
+
+    // When: the user disables the global hotkey.
+    const next = store.update({ shortcuts: { activateAppHotkey: null } });
+
+    // Then: null reaches both memory and disk (distinct from "field absent, fall back to default").
+    expect(next.shortcuts.activateAppHotkey).toBeNull();
+    expect(storage.payload).toEqual({ shortcuts: { activateAppHotkey: null } });
+  });
+
+  it('persists only the user-set keybinding entries that differ from defaults', () => {
+    // Given: defaults are in storage (no keybindings by default).
+
+    // When: the user sets a binding.
+    store.update({ shortcuts: { keybindings: { 'workspace.next': 'Cmd+Shift+]' } } });
+
+    // Then: only the changed entry is persisted.
+    expect(storage.payload).toEqual({
+      shortcuts: { keybindings: { 'workspace.next': 'Cmd+Shift+]' } },
+    });
+  });
+
+  it('drops a no-op unbind ("" against an undefined default) instead of persisting noise', () => {
+    // Given: defaults define no keybinding for this action.
+
+    // When: the user "unbinds" an action the default never bound.
+    store.update({ shortcuts: { keybindings: { 'workspace.next': '' } } });
+
+    // Then: the file stays empty — unbinding nothing is a no-op rather than a recorded change.
+    expect(storage.payload).toEqual({});
+  });
+
+  it('canonicalizes a hand-edited no-op unbind to the empty file on reload', () => {
+    // Given: settings.json has been hand-edited with a meaningless unbind entry.
+    storage.payload = { shortcuts: { keybindings: { 'workspace.next': '' } } };
+
+    // When: the store reloads from disk.
+    store.reload();
+
+    // Then: the unbind is treated as a no-op against the empty defaults and the file is cleaned.
+    expect(storage.payload).toEqual({});
+  });
+
+  it('accepts a hand-edited "" keybinding as an explicit unbind in the resolved settings', () => {
+    // Given: settings.json contains an explicit-unbind entry. With today's empty default map this
+    // is effectively a no-op; the test fixes the resolver's behavior for the future case where the
+    // default map gains entries (where `""` would suppress the default binding).
+    storage.payload = { shortcuts: { keybindings: { 'workspace.next': '' } } };
+
+    // When: the store reloads from disk.
+    const next = store.reload();
+
+    // Then: the empty-string accelerator surfaces in the resolved in-memory settings.
+    expect(next.shortcuts.keybindings['workspace.next']).toBe('');
+  });
+
+  it('canonicalizes a fully-populated legacy file down to its sparse form on construction', () => {
+    // Given: a settings.json from before sparse persistence — every default is materialized.
+    storage.payload = structuredClone(DEFAULT_APP_SETTINGS);
+
+    // When: the SettingsStore boots against that file.
+    const local = new SettingsStore({ storage });
+
+    // Then: the in-memory shape is unchanged, but disk is emptied because nothing diverges.
+    expect(local.get()).toEqual(DEFAULT_APP_SETTINGS);
+    expect(storage.payload).toEqual({});
   });
 
   it('fills in a missing shellIntegration section with defaults when read from storage', () => {

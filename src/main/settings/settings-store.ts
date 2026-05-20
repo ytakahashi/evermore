@@ -4,7 +4,7 @@ import Store from 'electron-store';
 import type { SettingsUpdate } from '../../shared/api-types';
 import { cloneDefaultSettings, DEFAULT_APP_SETTINGS } from '../../shared/settings-defaults';
 import type { AppSettings, FontWeight } from '../../shared/types';
-import type { SettingsStorageAdapter, SettingsStoreOptions } from './types';
+import type { PersistedSettings, SettingsStorageAdapter, SettingsStoreOptions } from './types';
 
 /**
  * Returns the settings directory under `~/.config/evermore`. We keep this separate from
@@ -24,9 +24,13 @@ class ElectronSettingsStorageAdapter implements SettingsStorageAdapter {
       // electron-store appends `.json` automatically, so the resulting file is
       // <directory>/settings.json. The AppSettings object is stored at the JSON root rather than
       // under a wrapper key so the file stays straightforward for hand-editing.
+      //
+      // We deliberately do NOT pass a `defaults` option: defaults belong to the runtime layer
+      // (see `readCurrentSettings` and `DEFAULT_APP_SETTINGS`). Persisting defaults would force
+      // every fresh install to materialize the full settings tree on disk, masking which fields
+      // the user actually changed and freezing today's defaults into each user's file.
       name: 'settings',
       cwd: directory,
-      defaults: cloneDefaultSettings() as unknown as Record<string, unknown>,
     });
   }
 
@@ -34,7 +38,7 @@ class ElectronSettingsStorageAdapter implements SettingsStorageAdapter {
     return this.store.store;
   }
 
-  public setSettings(settings: AppSettings): void {
+  public setSettings(settings: PersistedSettings): void {
     this.store.store = structuredClone(settings) as unknown as Record<string, unknown>;
   }
 
@@ -89,7 +93,9 @@ function pickKeybindings(value: unknown): Record<string, string> {
 
   const result: Record<string, string> = {};
   for (const [actionId, accelerator] of Object.entries(value)) {
-    if (typeof accelerator === 'string' && accelerator.length > 0) {
+    // Empty string is a valid value: it means "the user explicitly unbound this action" so the
+    // default binding for that id should not apply. Non-string entries (e.g. numbers) are dropped.
+    if (typeof accelerator === 'string') {
       result[actionId] = accelerator;
     }
   }
@@ -174,7 +180,14 @@ function readCurrentSettings(raw: unknown): AppSettings {
         shortcutsRaw.activateAppHotkey,
         defaults.shortcuts.activateAppHotkey,
       ),
-      keybindings: pickKeybindings(shortcutsRaw.keybindings),
+      // Layer user overrides on top of defaults so default bindings apply unless explicitly
+      // overridden. A user-provided empty string surfaces here as `""` and signals "explicitly
+      // unbound"; downstream runtime consumers must treat `""` as "no binding" rather than
+      // attempting to register an empty accelerator.
+      keybindings: {
+        ...defaults.shortcuts.keybindings,
+        ...pickKeybindings(shortcutsRaw.keybindings),
+      },
     },
     app: {
       quitConfirm: pickQuitConfirm(appRaw.quitConfirm, defaults.app.quitConfirm),
@@ -193,6 +206,101 @@ function mergeSection<T extends Record<string, unknown>>(current: T, patch: Part
     }
     (result as Record<string, unknown>)[key] = value;
   }
+  return result;
+}
+
+/**
+ * Returns the entries of `current` whose values differ from `defaultValue`, by `Object.is`
+ * comparison on each top-level field. The result preserves field types via `Partial<T>`.
+ *
+ * Used to project the in-memory {@link AppSettings} down to its sparse on-disk form so that
+ * `settings.json` only contains fields the user actively changed.
+ */
+function diffPrimitives<T extends object>(current: T, defaultValue: T): Partial<T> {
+  const result: Partial<T> = {};
+  for (const key of Object.keys(defaultValue) as Array<keyof T>) {
+    if (!Object.is(current[key], defaultValue[key])) {
+      result[key] = current[key];
+    }
+  }
+  return result;
+}
+
+/**
+ * Returns only the keybinding entries whose accelerator differs from the default for that action id.
+ *
+ * Semantics:
+ *  - Same value as default: dropped (already implied by defaults at read time).
+ *  - Different non-empty value: kept (an override).
+ *  - Empty string against a defined default: kept (an explicit unbind).
+ *  - Empty string against an undefined default: dropped (no-op — unbinding nothing is meaningless).
+ */
+function diffKeybindings(
+  current: Record<string, string>,
+  defaultValue: Record<string, string>,
+): Record<string, string> {
+  const result: Record<string, string> = {};
+  for (const [actionId, accelerator] of Object.entries(current)) {
+    const defaultAccel = defaultValue[actionId];
+    if (defaultAccel === accelerator) {
+      continue;
+    }
+    if (defaultAccel === undefined && accelerator === '') {
+      continue;
+    }
+    result[actionId] = accelerator;
+  }
+  return result;
+}
+
+/**
+ * Projects the in-memory {@link AppSettings} to its sparse on-disk form by stripping fields that
+ * match `DEFAULT_APP_SETTINGS`. Sections that match defaults entirely are omitted; an unmodified
+ * settings tree returns `{}`.
+ *
+ * `activateAppHotkey: null` (= globally disabled) is intentionally kept when defaults expect a
+ * non-null accelerator: `null` and the default string are different values, so the field is
+ * persisted explicitly to record the user's intent rather than letting defaults fill it back in.
+ */
+function diffAgainstDefaults(settings: AppSettings): PersistedSettings {
+  const defaults = DEFAULT_APP_SETTINGS;
+  const result: PersistedSettings = {};
+
+  const terminal = diffPrimitives(settings.terminal, defaults.terminal);
+  if (Object.keys(terminal).length > 0) {
+    result.terminal = terminal;
+  }
+
+  const paneInfo = diffPrimitives(settings.paneInfo, defaults.paneInfo);
+  if (Object.keys(paneInfo).length > 0) {
+    result.paneInfo = paneInfo;
+  }
+
+  const shortcutsDiff: Partial<AppSettings['shortcuts']> = {};
+  if (!Object.is(settings.shortcuts.activateAppHotkey, defaults.shortcuts.activateAppHotkey)) {
+    shortcutsDiff.activateAppHotkey = settings.shortcuts.activateAppHotkey;
+  }
+  const keybindings = diffKeybindings(
+    settings.shortcuts.keybindings,
+    defaults.shortcuts.keybindings,
+  );
+  if (Object.keys(keybindings).length > 0) {
+    shortcutsDiff.keybindings = keybindings;
+  }
+  if (Object.keys(shortcutsDiff).length > 0) {
+    result.shortcuts = shortcutsDiff;
+  }
+
+  const app = diffPrimitives(settings.app, defaults.app);
+  if (Object.keys(app).length > 0) {
+    result.app = app;
+  }
+
+  const shellIntegration = diffPrimitives(settings.shellIntegration, defaults.shellIntegration);
+  if (Object.keys(shellIntegration).length > 0) {
+    result.shellIntegration = shellIntegration;
+  }
+
   return result;
 }
 
@@ -246,9 +354,10 @@ export class SettingsStore {
   public constructor(options: SettingsStoreOptions = {}) {
     this.storage = options.storage ?? new ElectronSettingsStorageAdapter();
     this.settings = readCurrentSettings(this.storage.getSettings());
-    // Persist normalized values so a hand-edited settings.json with typoed keys gets canonicalized
-    // on first launch. Legacy shape migrations are intentionally not supported.
-    this.storage.setSettings(this.settings);
+    // Persist the normalized diff so a hand-edited settings.json with typoed or default-valued keys
+    // gets canonicalized to its sparse form on first launch. Legacy shape migrations are
+    // intentionally not supported.
+    this.storage.setSettings(diffAgainstDefaults(this.settings));
   }
 
   /** Returns the latest in-memory settings snapshot. */
@@ -265,7 +374,7 @@ export class SettingsStore {
   public update(patch: SettingsUpdate): AppSettings {
     const next = readCurrentSettings(applySettingsPatch(this.settings, patch));
     this.settings = next;
-    this.storage.setSettings(next);
+    this.storage.setSettings(diffAgainstDefaults(next));
     this.notify();
     return next;
   }
@@ -274,7 +383,8 @@ export class SettingsStore {
   public reset(): AppSettings {
     const next = cloneDefaultSettings();
     this.settings = next;
-    this.storage.setSettings(next);
+    // Defaults diffed against themselves yields `{}`, so the on-disk file is emptied on reset.
+    this.storage.setSettings(diffAgainstDefaults(next));
     this.notify();
     return next;
   }
@@ -287,7 +397,9 @@ export class SettingsStore {
    */
   public reload(): AppSettings {
     this.settings = readCurrentSettings(this.storage.getSettings());
-    this.storage.setSettings(this.settings);
+    // Re-canonicalize the file to its sparse form so an external edit containing default-valued
+    // fields or typos is cleaned up on the next reload.
+    this.storage.setSettings(diffAgainstDefaults(this.settings));
     this.notify();
     return this.settings;
   }
