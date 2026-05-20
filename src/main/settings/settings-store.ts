@@ -142,6 +142,7 @@ function readCurrentSettings(raw: unknown): AppSettings {
   const paneInfoRaw = isPlainObject(raw.paneInfo) ? raw.paneInfo : {};
   const shortcutsRaw = isPlainObject(raw.shortcuts) ? raw.shortcuts : {};
   const appRaw = isPlainObject(raw.app) ? raw.app : {};
+  const shellIntegrationRaw = isPlainObject(raw.shellIntegration) ? raw.shellIntegration : {};
 
   const terminal: AppSettings['terminal'] = {
     cursorStyle: pickCursorStyle(terminalRaw.cursorStyle, defaults.terminal.cursorStyle),
@@ -177,6 +178,9 @@ function readCurrentSettings(raw: unknown): AppSettings {
     },
     app: {
       quitConfirm: pickQuitConfirm(appRaw.quitConfirm, defaults.app.quitConfirm),
+    },
+    shellIntegration: {
+      autoInject: pickBoolean(shellIntegrationRaw.autoInject, defaults.shellIntegration.autoInject),
     },
   };
 }
@@ -218,6 +222,12 @@ function applySettingsPatch(current: AppSettings, patch: SettingsUpdate): AppSet
           patch.app as Record<string, unknown>,
         ) as AppSettings['app'])
       : current.app,
+    shellIntegration: patch.shellIntegration
+      ? (mergeSection(
+          current.shellIntegration as Record<string, unknown>,
+          patch.shellIntegration as Record<string, unknown>,
+        ) as AppSettings['shellIntegration'])
+      : current.shellIntegration,
   };
 }
 

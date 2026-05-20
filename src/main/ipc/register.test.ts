@@ -36,6 +36,14 @@ const ptyManagerMock = vi.hoisted(() => ({
   callbacks: undefined as PtyManagerCallbacks | undefined,
 }));
 
+const shellIntegrationInjectorMock = vi.hoisted(() => ({
+  setAutoInject: vi.fn<(enabled: boolean) => void>(),
+  envExtrasForShell: vi.fn<(shell: string, baseEnv: NodeJS.ProcessEnv) => undefined>(
+    () => undefined,
+  ),
+  getDirectory: vi.fn<() => string>(() => '/tmp/evermore-zdotdir'),
+}));
+
 const tunnelManagerMock = vi.hoisted(() => ({
   callbacks: undefined as TunnelManagerCallbacks | undefined,
   disposeAll: vi.fn<() => void>(),
@@ -44,6 +52,12 @@ const tunnelManagerMock = vi.hoisted(() => ({
   logs: vi.fn<(alias: string) => string[]>(),
   start: vi.fn<(alias: string) => void>(),
   stop: vi.fn<(alias: string) => void>(),
+}));
+
+vi.mock('electron', () => ({
+  app: {
+    getPath: vi.fn((_name: string) => '/tmp/evermore-userdata'),
+  },
 }));
 
 vi.mock('../hotkey/hotkey-manager', () => ({
@@ -72,6 +86,16 @@ vi.mock('../pty/pty-manager', () => ({
   PtyManager: vi.fn().mockImplementation(function (options: { callbacks: PtyManagerCallbacks }) {
     ptyManagerMock.callbacks = options.callbacks;
     return {};
+  }),
+}));
+
+vi.mock('../shell-integration/injector', () => ({
+  ShellIntegrationInjector: vi.fn().mockImplementation(function () {
+    return {
+      setAutoInject: shellIntegrationInjectorMock.setAutoInject,
+      envExtrasForShell: shellIntegrationInjectorMock.envExtrasForShell,
+      getDirectory: shellIntegrationInjectorMock.getDirectory,
+    };
   }),
 }));
 
@@ -177,6 +201,8 @@ describe('registerIpcHandlers', () => {
     paneInfoTrackerMock.register.mockClear();
     paneInfoTrackerMock.unregister.mockClear();
     ptyManagerMock.callbacks = undefined;
+    shellIntegrationInjectorMock.setAutoInject.mockClear();
+    shellIntegrationInjectorMock.envExtrasForShell.mockClear();
   });
 
   it('broadcasts tunnel status and log events to the current window', () => {
@@ -316,5 +342,45 @@ describe('registerIpcHandlers', () => {
 
     // Then: no event is sent to the destroyed renderer.
     expect(window.webContents.send).not.toHaveBeenCalled();
+  });
+
+  it('applies the initial shellIntegration.autoInject value to the injector at startup', () => {
+    // Given: a settings store that reports auto-inject ON.
+    const settingsStore = createSettingsStore();
+
+    // When: IPC runtime is registered (applyRuntimeSettings runs once with the initial settings).
+    registerIpcHandlers({
+      getWindow: () => null,
+      settingsStore: settingsStore as unknown as SettingsStore,
+    });
+
+    // Then: the injector receives the persisted value via the initial runtime apply.
+    expect(shellIntegrationInjectorMock.setAutoInject).toHaveBeenCalledWith(
+      DEFAULT_APP_SETTINGS.shellIntegration.autoInject,
+    );
+  });
+
+  it('forwards subsequent settings updates to the injector via applyRuntimeSettings', async () => {
+    // Given: IPC runtime is registered and `applyRuntimeSettings` is captured from the settings
+    // handler registration call.
+    const settingsStore = createSettingsStore();
+    const { registerSettingsHandlers } = await import('./handlers/settings');
+    registerIpcHandlers({
+      getWindow: () => null,
+      settingsStore: settingsStore as unknown as SettingsStore,
+    });
+    const settingsHandlerCall = vi.mocked(registerSettingsHandlers).mock.calls.at(-1);
+    const applyRuntimeSettings = settingsHandlerCall?.[0]?.applyRuntimeSettings;
+    expect(applyRuntimeSettings).toBeDefined();
+    shellIntegrationInjectorMock.setAutoInject.mockClear();
+
+    // When: the user disables auto-injection.
+    applyRuntimeSettings?.({
+      ...DEFAULT_APP_SETTINGS,
+      shellIntegration: { autoInject: false },
+    });
+
+    // Then: the injector flips off so the next PTY spawn does not auto-inject.
+    expect(shellIntegrationInjectorMock.setAutoInject).toHaveBeenCalledWith(false);
   });
 });

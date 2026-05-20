@@ -14,6 +14,9 @@ function mergeSettings(current: AppSettings, patch: SettingsUpdate): AppSettings
     paneInfo: patch.paneInfo ? { ...current.paneInfo, ...patch.paneInfo } : current.paneInfo,
     shortcuts: patch.shortcuts ? { ...current.shortcuts, ...patch.shortcuts } : current.shortcuts,
     app: patch.app ? { ...current.app, ...patch.app } : current.app,
+    shellIntegration: patch.shellIntegration
+      ? { ...current.shellIntegration, ...patch.shellIntegration }
+      : current.shellIntegration,
   };
 }
 
@@ -75,6 +78,7 @@ describe('Phase C settings sections', () => {
       paneInfo: { pollIntervalMs: 0 },
       shortcuts: undefined,
       app: undefined,
+      shellIntegration: undefined,
     });
   });
 
@@ -93,6 +97,7 @@ describe('Phase C settings sections', () => {
       paneInfo: undefined,
       shortcuts: undefined,
       app: { quitConfirm: 'always' },
+      shellIntegration: undefined,
     });
   });
 
@@ -139,6 +144,7 @@ describe('Phase C settings sections', () => {
       paneInfo: undefined,
       shortcuts: { activateAppHotkey: 'Command+Option+Shift+,' },
       app: undefined,
+      shellIntegration: undefined,
     });
   });
 });

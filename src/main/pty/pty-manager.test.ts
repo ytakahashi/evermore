@@ -1,5 +1,6 @@
 import type { IPty, IPtyForkOptions, IDisposable } from 'node-pty';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { ShellIntegrationInjector } from '../shell-integration/injector';
 import { PtyManager } from './pty-manager';
 import { TerminalSignalParser } from './terminal-signal-parser';
 import type {
@@ -105,6 +106,70 @@ describe('PtyManager', () => {
     );
     expect(onData).toHaveBeenCalledWith({ id, data: 'hello' });
     expect(onCreate).toHaveBeenCalledWith({ id, pid: 1234, cwd: '/Users/tester' });
+  });
+
+  it('merges shell-integration env extras into the spawn env when an injector is provided', () => {
+    // Given: a fake injector that asks for the standard ZDOTDIR injection keys.
+    const injectorExtras = {
+      ZDOTDIR: '/tmp/evermore-zdotdir',
+      EVERMORE_INJECT_ZDOTDIR: '/tmp/evermore-zdotdir',
+      EVERMORE_ORIGINAL_ZDOTDIR_SET: '0',
+      EVERMORE_ORIGINAL_ZDOTDIR: '',
+    };
+    const envExtrasForShell = vi.fn<
+      (shell: string, baseEnv: NodeJS.ProcessEnv) => Record<string, string>
+    >(() => injectorExtras);
+    const injector = {
+      envExtrasForShell,
+      setAutoInject: vi.fn(),
+      getDirectory: vi.fn(() => '/tmp/evermore-zdotdir'),
+    } as unknown as ShellIntegrationInjector;
+    const managerWithInjector = new PtyManager({
+      callbacks: { onData, onExit, onCreate, onDispose, onSignal },
+      spawn,
+      getHomeDirectory: () => '/Users/tester',
+      shellIntegrationInjector: injector,
+    });
+
+    // When: the manager spawns a PTY with a pane-level ZDOTDIR override.
+    managerWithInjector.create({
+      cwd: '/Users/tester',
+      env: { ZDOTDIR: '/Users/tester/.config/zsh' },
+    });
+
+    // Then: the injector saw the pane-level override as the baseEnv ZDOTDIR, and its extras
+    // override that value in the final spawn env. TERM_PROGRAM=Evermore still wins on top.
+    const baseEnvSeenByInjector = envExtrasForShell.mock.calls[0]?.[1];
+    expect(baseEnvSeenByInjector?.['ZDOTDIR']).toBe('/Users/tester/.config/zsh');
+    const spawnedEnv = spawn.mock.calls[0]?.[2]?.env ?? {};
+    expect(spawnedEnv['ZDOTDIR']).toBe('/tmp/evermore-zdotdir');
+    expect(spawnedEnv['EVERMORE_INJECT_ZDOTDIR']).toBe('/tmp/evermore-zdotdir');
+    expect(spawnedEnv['EVERMORE_ORIGINAL_ZDOTDIR_SET']).toBe('0');
+    expect(spawnedEnv['TERM_PROGRAM']).toBe('Evermore');
+  });
+
+  it('does not inject any ZDOTDIR keys when the injector returns undefined', () => {
+    // Given: an injector that opts out (e.g. auto-inject is off, or the shell is bash).
+    const injector = {
+      envExtrasForShell: vi.fn(() => undefined),
+      setAutoInject: vi.fn(),
+      getDirectory: vi.fn(() => '/tmp/evermore-zdotdir'),
+    } as unknown as ShellIntegrationInjector;
+    const managerWithInjector = new PtyManager({
+      callbacks: { onData, onExit, onCreate, onDispose, onSignal },
+      spawn,
+      getHomeDirectory: () => '/Users/tester',
+      shellIntegrationInjector: injector,
+    });
+
+    // When: a PTY is created with no ZDOTDIR in the pane env.
+    managerWithInjector.create({ cwd: '/Users/tester' });
+
+    // Then: no Evermore-specific ZDOTDIR keys leak into the spawn env.
+    const spawnedEnv = spawn.mock.calls[0]?.[2]?.env ?? {};
+    expect(spawnedEnv['EVERMORE_INJECT_ZDOTDIR']).toBeUndefined();
+    expect(spawnedEnv['EVERMORE_ORIGINAL_ZDOTDIR_SET']).toBeUndefined();
+    expect(spawnedEnv['EVERMORE_ORIGINAL_ZDOTDIR']).toBeUndefined();
   });
 
   it('sets TERM_PROGRAM=Evermore so the shell integration snippet identifies Evermore panes', () => {

@@ -3,6 +3,7 @@ import { existsSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import * as nodePty from 'node-pty';
 import type { IDisposable, IPty } from 'node-pty';
+import type { ShellIntegrationInjector } from '../shell-integration/injector';
 import { buildPtyProcessEnv } from './pty-env';
 import { TerminalSignalParser } from './terminal-signal-parser';
 import type { PtyCreateOptions, PtyManagerCallbacks, PtyManagerOptions, PtySpawn } from './types';
@@ -25,11 +26,13 @@ export class PtyManager {
   private readonly callbacks: PtyManagerCallbacks;
   private readonly spawn: PtySpawn;
   private readonly getHomeDirectory: () => string;
+  private readonly shellIntegrationInjector: ShellIntegrationInjector | undefined;
 
   public constructor(options: PtyManagerOptions) {
     this.callbacks = options.callbacks;
     this.spawn = options.spawn ?? nodePty.spawn;
     this.getHomeDirectory = options.getHomeDirectory ?? homedir;
+    this.shellIntegrationInjector = options.shellIntegrationInjector;
   }
 
   /**
@@ -47,13 +50,27 @@ export class PtyManager {
     // If a user runs an exotic shell that rejects `-l`, this would need to branch on the shell
     // name. Login mode also runs `~/.zprofile`; any TTY-unsafe output there can leak into the
     // initial pane render, but in practice profile files are quiet.
+    // Build the pre-injection view of env so the shell-integration injector can record the user's
+    // pre-Evermore ZDOTDIR even when a pane-level override carries one. The injector merges its
+    // own keys on top of this view, and `buildPtyProcessEnv` applies them last so they survive
+    // the PATH/locale normalization.
+    const paneEnv: Record<string, string> = options.env ?? {};
+    const preInjectionEnv: NodeJS.ProcessEnv = { ...process.env, ...paneEnv };
+    const shellIntegrationExtras = this.shellIntegrationInjector?.envExtrasForShell(
+      shell,
+      preInjectionEnv,
+    );
+
     const proc = this.spawn(shell, ['-l'], {
       name: 'xterm-256color',
       cols: options.cols ?? 80,
       rows: options.rows ?? 24,
       cwd: resolvedCwd,
       env: {
-        ...buildPtyProcessEnv(process.env, options.env),
+        ...buildPtyProcessEnv(process.env, {
+          ...paneEnv,
+          ...(shellIntegrationExtras ?? {}),
+        }),
         TERM: 'xterm-256color',
         COLORTERM: 'truecolor',
         // Override any inherited TERM_PROGRAM (e.g. iTerm.app / WezTerm when Evermore was launched

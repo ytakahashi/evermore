@@ -58,6 +58,9 @@ function mergePatchIntoSettings(current: AppSettings, patch: SettingsUpdate): Ap
     paneInfo: patch.paneInfo ? { ...current.paneInfo, ...patch.paneInfo } : current.paneInfo,
     shortcuts: patch.shortcuts ? { ...current.shortcuts, ...patch.shortcuts } : current.shortcuts,
     app: patch.app ? { ...current.app, ...patch.app } : current.app,
+    shellIntegration: patch.shellIntegration
+      ? { ...current.shellIntegration, ...patch.shellIntegration }
+      : current.shellIntegration,
   };
 }
 
@@ -147,6 +150,9 @@ export function createSettingsStore(
             ? { ...pendingPatch.shortcuts, ...patch.shortcuts }
             : pendingPatch.shortcuts,
           app: patch.app ? { ...pendingPatch.app, ...patch.app } : pendingPatch.app,
+          shellIntegration: patch.shellIntegration
+            ? { ...pendingPatch.shellIntegration, ...patch.shellIntegration }
+            : pendingPatch.shellIntegration,
         };
 
         const flushPromise = new Promise<AppSettings | null>((resolve) => {

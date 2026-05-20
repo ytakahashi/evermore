@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { X } from 'lucide-react';
 import { useUiStore } from '../../stores/uiStore';
 import { AboutSection } from './sections/AboutSection';
+import { AdvancedFeaturesSection } from './sections/AdvancedFeaturesSection';
 import { ApplicationSection } from './sections/ApplicationSection';
 import { PaneInfoSection } from './sections/PaneInfoSection';
 import { RecommendedSetupSection } from './sections/RecommendedSetupSection';
@@ -14,6 +15,7 @@ type SettingsSectionId =
   | 'shortcuts'
   | 'application'
   | 'recommendedSetup'
+  | 'advancedFeatures'
   | 'about';
 
 interface SectionDefinition {
@@ -28,6 +30,7 @@ const SECTIONS: readonly SectionDefinition[] = [
   { id: 'shortcuts', label: 'Shortcuts', Component: ShortcutsSection },
   { id: 'application', label: 'Application', Component: ApplicationSection },
   { id: 'recommendedSetup', label: 'Recommended setup', Component: RecommendedSetupSection },
+  { id: 'advancedFeatures', label: 'Advanced features', Component: AdvancedFeaturesSection },
   { id: 'about', label: 'About', Component: AboutSection },
 ];
 
