@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
-import { ChevronRight, Folder, Hash, Plus, Terminal, X } from 'lucide-react';
+import { ChevronRight, Folder, Hash, Plus, Terminal, X, Zap } from 'lucide-react';
 import { countPaneLeaves, flattenLayout } from '../../../../shared/pane-layout';
 import { getPathBasename, getTruncatedPathLabel } from '../../../../shared/path-label';
 import type { Pane, PaneRuntimeInfo } from '../../../../shared/types';
@@ -16,6 +16,49 @@ interface PaneSummaryProps {
   isActivePane: boolean;
   onClick: () => void;
   pane: Pane;
+}
+
+function PaneLeadingIcon({
+  info,
+  isActivePane,
+}: {
+  info?: PaneRuntimeInfo;
+  isActivePane: boolean;
+}): React.JSX.Element {
+  if (info?.processActivity === 'running') {
+    switch (info.foregroundSession.kind) {
+      case 'ssh':
+        return (
+          <span
+            aria-label="ssh session"
+            className={`mt-0.5 shrink-0 ${isActivePane ? 'text-yellow-400' : 'text-subtle/70'}`}
+            title="SSH session"
+          >
+            <Zap aria-hidden="true" size={13} />
+          </span>
+        );
+
+      case 'other':
+      case 'none':
+        // Defensive inclusion of `none`: running + none should not be emitted by PaneInfoTracker,
+        // but falling back to the regular Terminal icon is safest for inconsistent snapshots.
+        break;
+
+      default: {
+        // Compile-time exhaustiveness; runtime falls through to the default Terminal icon.
+        const _exhaustive: never = info.foregroundSession.kind;
+        void _exhaustive;
+        break;
+      }
+    }
+  }
+
+  return (
+    <Terminal
+      size={13}
+      className={`mt-0.5 shrink-0 ${isActivePane ? 'text-brand' : 'text-subtle/70'}`}
+    />
+  );
 }
 
 function PaneSummary({ info, isActivePane, onClick, pane }: PaneSummaryProps): React.JSX.Element {
@@ -37,10 +80,7 @@ function PaneSummary({ info, isActivePane, onClick, pane }: PaneSummaryProps): R
           type="button"
           onClick={onClick}
         >
-          <Terminal
-            size={13}
-            className={`mt-0.5 shrink-0 ${isActivePane ? 'text-brand' : 'text-subtle/70'}`}
-          />
+          <PaneLeadingIcon info={info} isActivePane={isActivePane} />
           {isRunning && (
             <span
               aria-label="running"
