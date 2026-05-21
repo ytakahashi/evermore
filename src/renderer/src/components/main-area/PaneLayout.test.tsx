@@ -1,7 +1,9 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { DEFAULT_APP_SETTINGS } from '../../../../shared/settings-defaults';
 import type { Workspace } from '../../../../shared/types';
 import { usePaneInfoStore } from '../../stores/paneInfoStore';
+import { useSettingsStore } from '../../stores/settingsStore';
 import { useUiStore } from '../../stores/uiStore';
 import { useWorkspaceStore } from '../../stores/workspaceStore';
 import { PaneLayout } from './PaneLayout';
@@ -81,6 +83,7 @@ describe('PaneLayout', () => {
       error: null,
     });
     usePaneInfoStore.setState({ infosByPtyId: {}, isLoading: false, error: null });
+    useSettingsStore.setState({ settings: null });
     useUiStore.setState({ fullscreenPaneId: null });
     Reflect.deleteProperty(window, 'api');
     vi.useRealTimers();
@@ -265,6 +268,129 @@ describe('PaneLayout', () => {
     // Then: the renderer-side paneInfo cache no longer holds the dead PTY entry.
     expect(usePaneInfoStore.getState().infosByPtyId).toEqual({});
     expect(useWorkspaceStore.getState().workspaces[0]?.panes[0]?.ptyId).toBeUndefined();
+  });
+
+  it('removes the pane via closePaneOnExit when its PTY exits and the setting is on', () => {
+    // Given: a tab with two panes, both having live PTY ids, and the close-pane-on-exit default.
+    const splitWorkspace: Workspace = {
+      ...workspace,
+      tabs: [
+        {
+          id: 'tab-1',
+          name: 'zsh',
+          layout: {
+            type: 'split',
+            direction: 'vertical',
+            ratio: 0.5,
+            children: [
+              { type: 'leaf', paneId: 'pane-1' },
+              { type: 'leaf', paneId: 'pane-2' },
+            ],
+          },
+          activePaneId: 'pane-1',
+        },
+      ],
+      panes: [
+        { id: 'pane-1', cwd: '/Users/tester/one', ptyId: 'pty-1' },
+        { id: 'pane-2', cwd: '/Users/tester/two', ptyId: 'pty-2' },
+      ],
+    };
+    useWorkspaceStore.setState({
+      workspaces: [splitWorkspace],
+      activeWorkspaceId: splitWorkspace.id,
+      isLoading: false,
+      error: null,
+    });
+    useSettingsStore.setState({ settings: DEFAULT_APP_SETTINGS });
+    const currentTab = splitWorkspace.tabs[0];
+    if (!currentTab) {
+      throw new Error('Expected test tab.');
+    }
+    render(
+      <PaneLayout
+        isActiveTab
+        layout={currentTab.layout}
+        panes={splitWorkspace.panes}
+        tab={currentTab}
+      />,
+    );
+
+    // When: the first pane's PTY exit is simulated by clearing its PTY id.
+    const clearButtons = screen.getAllByTestId('terminal-clear-pty');
+    const firstClearButton = clearButtons[0];
+    if (!firstClearButton) {
+      throw new Error('Expected clear button for pane-1.');
+    }
+    fireEvent.click(firstClearButton);
+
+    // Then: the pane is removed from the workspace layout and panes array.
+    const updatedWorkspace = useWorkspaceStore.getState().workspaces[0];
+    expect(updatedWorkspace?.panes.map((pane) => pane.id)).toEqual(['pane-2']);
+    expect(updatedWorkspace?.tabs[0]?.layout).toEqual({ type: 'leaf', paneId: 'pane-2' });
+  });
+
+  it('keeps the pane mounted when close-pane-on-exit is turned off', () => {
+    // Given: a tab with two panes and the close-pane-on-exit toggle disabled.
+    const splitWorkspace: Workspace = {
+      ...workspace,
+      tabs: [
+        {
+          id: 'tab-1',
+          name: 'zsh',
+          layout: {
+            type: 'split',
+            direction: 'vertical',
+            ratio: 0.5,
+            children: [
+              { type: 'leaf', paneId: 'pane-1' },
+              { type: 'leaf', paneId: 'pane-2' },
+            ],
+          },
+          activePaneId: 'pane-1',
+        },
+      ],
+      panes: [
+        { id: 'pane-1', cwd: '/Users/tester/one', ptyId: 'pty-1' },
+        { id: 'pane-2', cwd: '/Users/tester/two', ptyId: 'pty-2' },
+      ],
+    };
+    useWorkspaceStore.setState({
+      workspaces: [splitWorkspace],
+      activeWorkspaceId: splitWorkspace.id,
+      isLoading: false,
+      error: null,
+    });
+    useSettingsStore.setState({
+      settings: {
+        ...DEFAULT_APP_SETTINGS,
+        terminal: { ...DEFAULT_APP_SETTINGS.terminal, closePaneOnExit: false },
+      },
+    });
+    const currentTab = splitWorkspace.tabs[0];
+    if (!currentTab) {
+      throw new Error('Expected test tab.');
+    }
+    render(
+      <PaneLayout
+        isActiveTab
+        layout={currentTab.layout}
+        panes={splitWorkspace.panes}
+        tab={currentTab}
+      />,
+    );
+
+    // When: the first pane's PTY exit is simulated.
+    const clearButtons = screen.getAllByTestId('terminal-clear-pty');
+    const firstClearButton = clearButtons[0];
+    if (!firstClearButton) {
+      throw new Error('Expected clear button for pane-1.');
+    }
+    fireEvent.click(firstClearButton);
+
+    // Then: the pane stays in the layout; only its PTY id is cleared.
+    const updatedWorkspace = useWorkspaceStore.getState().workspaces[0];
+    expect(updatedWorkspace?.panes.map((pane) => pane.id)).toEqual(['pane-1', 'pane-2']);
+    expect(updatedWorkspace?.panes[0]?.ptyId).toBeUndefined();
   });
 
   it('does not mark panes in inactive tabs as active terminals', () => {

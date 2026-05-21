@@ -146,6 +146,13 @@ export interface AppSettings {
     fontFamily: string;
     fontWeight: FontWeight;
     fontWeightBold: FontWeight;
+    /**
+     * When true, a pane is automatically removed once its PTY exits (e.g., the shell exits via
+     * `exit` or Ctrl-D). If the exiting pane is the last pane in its tab, the tab is closed too,
+     * unless it is the only tab in the workspace — in that case the pane stays mounted with the
+     * `[process exited ...]` message so the workspace never becomes empty.
+     */
+    closePaneOnExit: boolean;
   };
   paneInfo: {
     /** ps polling interval in ms; values <= 0 disable polling. */

@@ -43,6 +43,13 @@ export interface WorkspaceStoreState {
   setPanePtyId: (paneId: string, ptyId: string | null) => void;
   splitPane: (paneId: string, direction: SplitDirection) => void;
   closePane: (paneId: string) => void;
+  /**
+   * Closes a pane in response to its PTY exiting. Behaves like {@link closePane} when the tab has
+   * more than one pane. When the exiting pane is the last one in its tab, the tab is closed via
+   * {@link closeWorkspaceTab}, unless it is the only tab in the workspace — in that case the pane
+   * is intentionally left in place so the workspace never becomes empty.
+   */
+  closePaneOnExit: (paneId: string) => void;
   resizeSplit: (path: number[], ratio: number) => void;
   updatePaneCwd: (paneId: string, cwd: string) => void;
   /**
@@ -743,32 +750,74 @@ export function createWorkspaceStore(
         });
       },
       closePane: (paneId: string): void => {
-        const workspace = selectActiveWorkspace(get());
-        const tab = selectActiveTab(get());
-        if (!workspace || !tab) {
+        let targetWorkspace: Workspace | null = null;
+        let targetTab: Tab | null = null;
+
+        for (const workspace of get().workspaces) {
+          const tab = workspace.tabs.find((t) => collectPaneIds(t.layout).includes(paneId));
+          if (tab) {
+            targetWorkspace = workspace;
+            targetTab = tab;
+            break;
+          }
+        }
+
+        if (!targetWorkspace || !targetTab) {
           return;
         }
 
-        const removedLayout = removePaneLayout(tab.layout, paneId);
+        const removedLayout = removePaneLayout(targetTab.layout, paneId);
         if (!removedLayout.removed || !removedLayout.layout) {
           return;
         }
 
         const remainingPaneIds = new Set(collectPaneIds(removedLayout.layout));
         const activePaneId =
-          tab.activePaneId && remainingPaneIds.has(tab.activePaneId)
-            ? tab.activePaneId
+          targetTab.activePaneId && remainingPaneIds.has(targetTab.activePaneId)
+            ? targetTab.activePaneId
             : findFirstPaneId(removedLayout.layout);
         const updatedTab: Tab = {
-          ...tab,
+          ...targetTab,
           layout: removedLayout.layout,
           activePaneId,
         };
 
         get().updateWorkspace({
-          ...replaceTab(workspace, updatedTab),
-          panes: workspace.panes.filter((pane) => pane.id !== paneId),
+          ...replaceTab(targetWorkspace, updatedTab),
+          panes: targetWorkspace.panes.filter((pane) => pane.id !== paneId),
         });
+      },
+      closePaneOnExit: (paneId: string): void => {
+        let targetWorkspace: Workspace | null = null;
+        let targetTab: Tab | null = null;
+
+        for (const workspace of get().workspaces) {
+          const tab = workspace.tabs.find((t) => collectPaneIds(t.layout).includes(paneId));
+          if (tab) {
+            targetWorkspace = workspace;
+            targetTab = tab;
+            break;
+          }
+        }
+
+        if (!targetWorkspace || !targetTab) {
+          return;
+        }
+
+        const paneIds = collectPaneIds(targetTab.layout);
+
+        // Tab still has siblings: behave exactly like the manual close-pane action.
+        if (paneIds.length > 1) {
+          get().closePane(paneId);
+          return;
+        }
+
+        // Last pane in the tab: close the tab itself, unless it is the only tab in the workspace.
+        // `closeWorkspaceTab` already refuses to close the final tab, so the workspace cannot end up
+        // without any tabs through this path.
+        if (targetWorkspace.tabs.length > 1) {
+          get().closeWorkspaceTab(targetWorkspace.id, targetTab.id);
+        }
       },
       resizeSplit: (path: number[], ratio: number): void => {
         const workspace = selectActiveWorkspace(get());

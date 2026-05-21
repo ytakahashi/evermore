@@ -247,6 +247,20 @@ export function TerminalSection(): React.JSX.Element {
           }}
         />
       </SettingRow>
+
+      <SettingRow
+        description="Automatically close a pane when its shell exits (e.g., on Ctrl-D). If the pane is the last one in its tab, the tab is closed too; the final tab in a workspace always stays open."
+        label="Close pane on exit"
+      >
+        <Toggle
+          ariaLabel="Close pane on exit"
+          checked={terminalSettings.closePaneOnExit}
+          label={terminalSettings.closePaneOnExit ? 'On' : 'Off'}
+          onChange={(checked) => {
+            updateTerminalSettings({ closePaneOnExit: checked });
+          }}
+        />
+      </SettingRow>
     </div>
   );
 }

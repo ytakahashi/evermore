@@ -1221,6 +1221,251 @@ describe('workspaceStore', () => {
     });
   });
 
+  it('closePaneOnExit removes a non-final pane like closePane does', async () => {
+    // Given: the active tab contains two panes (one split).
+    vi.useFakeTimers();
+    const ids = ['pane-2'];
+    const useStore = createWorkspaceStore({
+      createId: () => ids.shift() ?? 'fallback-id',
+      workspaceApi,
+      debounceMs: 50,
+      now: () => now,
+    });
+    await useStore.getState().loadWorkspaces();
+    useStore.getState().splitPane('workspace-1-pane-1', 'vertical');
+
+    // When: a non-final pane's PTY exits.
+    useStore.getState().closePaneOnExit('pane-2');
+
+    // Then: the layout collapses just like a manual close would.
+    const updatedWorkspace = selectActiveWorkspace(useStore.getState());
+    expect(updatedWorkspace?.tabs).toHaveLength(1);
+    expect(updatedWorkspace?.tabs[0]?.layout).toEqual({
+      type: 'leaf',
+      paneId: 'workspace-1-pane-1',
+    });
+    expect(updatedWorkspace?.panes.map((pane) => pane.id)).toEqual(['workspace-1-pane-1']);
+  });
+
+  it('closePaneOnExit closes the tab when the exiting pane is the last one in a multi-tab workspace', async () => {
+    // Given: a workspace with two tabs, the active tab holding a single pane.
+    vi.useFakeTimers();
+    const multiTabWorkspace: Workspace = {
+      ...workspace,
+      tabs: [
+        {
+          id: 'tab-1',
+          name: 'zsh',
+          layout: { type: 'leaf', paneId: 'pane-1' },
+          activePaneId: 'pane-1',
+        },
+        {
+          id: 'tab-2',
+          name: 'zsh',
+          layout: { type: 'leaf', paneId: 'pane-2' },
+          activePaneId: 'pane-2',
+        },
+      ],
+      panes: [
+        { id: 'pane-1', cwd: '/Users/tester' },
+        { id: 'pane-2', cwd: '/Users/tester/other' },
+      ],
+      activeTabId: 'tab-1',
+    };
+    workspaceApi.list = vi.fn(() =>
+      Promise.resolve({ workspaces: [multiTabWorkspace], activeWorkspaceId: null }),
+    );
+    const useStore = createWorkspaceStore({ workspaceApi, debounceMs: 50, now: () => now });
+    await useStore.getState().loadWorkspaces();
+
+    // When: the only pane in the active tab exits.
+    useStore.getState().closePaneOnExit('pane-1');
+
+    // Then: the active tab is removed, leaving the other tab and its pane intact.
+    const updatedWorkspace = selectActiveWorkspace(useStore.getState());
+    expect(updatedWorkspace?.tabs.map((tab) => tab.id)).toEqual(['tab-2']);
+    expect(updatedWorkspace?.activeTabId).toBe('tab-2');
+    expect(updatedWorkspace?.panes.map((pane) => pane.id)).toEqual(['pane-2']);
+  });
+
+  it('closePaneOnExit closes the inactive tab when the exiting pane is the last one in that tab', async () => {
+    // Given: a workspace with two tabs, where tab-1 is active but the exiting pane-2 is in the inactive tab-2.
+    vi.useFakeTimers();
+    const multiTabWorkspace: Workspace = {
+      ...workspace,
+      tabs: [
+        {
+          id: 'tab-1',
+          name: 'zsh',
+          layout: { type: 'leaf', paneId: 'pane-1' },
+          activePaneId: 'pane-1',
+        },
+        {
+          id: 'tab-2',
+          name: 'zsh',
+          layout: { type: 'leaf', paneId: 'pane-2' },
+          activePaneId: 'pane-2',
+        },
+      ],
+      panes: [
+        { id: 'pane-1', cwd: '/Users/tester' },
+        { id: 'pane-2', cwd: '/Users/tester/other' },
+      ],
+      activeTabId: 'tab-1',
+    };
+    workspaceApi.list = vi.fn(() =>
+      Promise.resolve({ workspaces: [multiTabWorkspace], activeWorkspaceId: null }),
+    );
+    const useStore = createWorkspaceStore({ workspaceApi, debounceMs: 50, now: () => now });
+    await useStore.getState().loadWorkspaces();
+
+    // When: the only pane in the inactive tab exits.
+    useStore.getState().closePaneOnExit('pane-2');
+
+    // Then: the inactive tab is removed, leaving the active tab intact.
+    const updatedWorkspace = selectActiveWorkspace(useStore.getState());
+    expect(updatedWorkspace?.tabs.map((tab) => tab.id)).toEqual(['tab-1']);
+    expect(updatedWorkspace?.activeTabId).toBe('tab-1');
+    expect(updatedWorkspace?.panes.map((pane) => pane.id)).toEqual(['pane-1']);
+  });
+
+  it('closePaneOnExit removes a non-final pane in an inactive tab like closePane does', async () => {
+    // Given: tab-1 is active. tab-2 contains two panes (one split).
+    vi.useFakeTimers();
+    const ids = ['pane-3'];
+    const useStore = createWorkspaceStore({
+      createId: () => ids.shift() ?? 'fallback-id',
+      workspaceApi,
+      debounceMs: 50,
+      now: () => now,
+    });
+    await useStore.getState().loadWorkspaces();
+    const multiTabWorkspace: Workspace = {
+      ...workspace,
+      tabs: [
+        {
+          id: 'tab-1',
+          name: 'zsh',
+          layout: { type: 'leaf', paneId: 'pane-1' },
+          activePaneId: 'pane-1',
+        },
+        {
+          id: 'tab-2',
+          name: 'zsh',
+          layout: {
+            type: 'split',
+            direction: 'vertical',
+            ratio: 0.5,
+            children: [
+              { type: 'leaf', paneId: 'pane-2' },
+              { type: 'leaf', paneId: 'pane-3' },
+            ],
+          },
+          activePaneId: 'pane-2',
+        },
+      ],
+      panes: [
+        { id: 'pane-1', cwd: '/Users/tester' },
+        { id: 'pane-2', cwd: '/Users/tester/other2' },
+        { id: 'pane-3', cwd: '/Users/tester/other3' },
+      ],
+      activeTabId: 'tab-1',
+    };
+    workspaceApi.list = vi.fn(() =>
+      Promise.resolve({ workspaces: [multiTabWorkspace], activeWorkspaceId: null }),
+    );
+    await useStore.getState().loadWorkspaces();
+
+    // When: a non-final pane in the inactive tab exits.
+    useStore.getState().closePaneOnExit('pane-3');
+
+    // Then: that pane is removed from the inactive tab, leaving the active tab and the other pane in the inactive tab intact.
+    const updatedWorkspace = selectActiveWorkspace(useStore.getState());
+    expect(updatedWorkspace?.tabs).toHaveLength(2);
+    expect(updatedWorkspace?.tabs[1]?.layout).toEqual({
+      type: 'leaf',
+      paneId: 'pane-2',
+    });
+    expect(updatedWorkspace?.panes.map((pane) => pane.id)).toEqual(['pane-1', 'pane-2']);
+  });
+
+  it('closePaneOnExit closes the tab inside an inactive workspace when the exiting pane is the last one in that tab', async () => {
+    // Given: two workspaces exist. workspace-1 is active. workspace-2 is inactive and contains two tabs.
+    vi.useFakeTimers();
+    const activeWorkspace: Workspace = {
+      ...workspace,
+      id: 'workspace-1',
+      tabs: [
+        {
+          id: 'tab-1-1',
+          name: 'zsh',
+          layout: { type: 'leaf', paneId: 'pane-1-1' },
+          activePaneId: 'pane-1-1',
+        },
+      ],
+      panes: [{ id: 'pane-1-1', cwd: '/Users/tester/1' }],
+      activeTabId: 'tab-1-1',
+    };
+    const inactiveWorkspace: Workspace = {
+      ...workspace,
+      id: 'workspace-2',
+      tabs: [
+        {
+          id: 'tab-2-1',
+          name: 'zsh',
+          layout: { type: 'leaf', paneId: 'pane-2-1' },
+          activePaneId: 'pane-2-1',
+        },
+        {
+          id: 'tab-2-2',
+          name: 'zsh',
+          layout: { type: 'leaf', paneId: 'pane-2-2' },
+          activePaneId: 'pane-2-2',
+        },
+      ],
+      panes: [
+        { id: 'pane-2-1', cwd: '/Users/tester/2-1' },
+        { id: 'pane-2-2', cwd: '/Users/tester/2-2' },
+      ],
+      activeTabId: 'tab-2-1',
+    };
+    workspaceApi.list = vi.fn(() =>
+      Promise.resolve({
+        workspaces: [activeWorkspace, inactiveWorkspace],
+        activeWorkspaceId: 'workspace-1',
+      }),
+    );
+    const useStore = createWorkspaceStore({ workspaceApi, debounceMs: 50, now: () => now });
+    await useStore.getState().loadWorkspaces();
+
+    // When: the only pane in the inactive workspace's inactive tab exits.
+    useStore.getState().closePaneOnExit('pane-2-2');
+
+    // Then: the inactive workspace's target tab is removed, active workspace is untouched.
+    const ws1 = useStore.getState().workspaces.find((ws) => ws.id === 'workspace-1');
+    const ws2 = useStore.getState().workspaces.find((ws) => ws.id === 'workspace-2');
+    expect(ws1?.tabs.map((tab) => tab.id)).toEqual(['tab-1-1']);
+    expect(ws2?.tabs.map((tab) => tab.id)).toEqual(['tab-2-1']);
+    expect(ws2?.panes.map((pane) => pane.id)).toEqual(['pane-2-1']);
+  });
+
+  it('closePaneOnExit leaves the workspace untouched when the last pane of the last tab exits', async () => {
+    // Given: a workspace with exactly one tab and one pane.
+    vi.useFakeTimers();
+    const useStore = createWorkspaceStore({ workspaceApi, debounceMs: 50, now: () => now });
+    await useStore.getState().loadWorkspaces();
+    const before = selectActiveWorkspace(useStore.getState());
+
+    // When: that single pane's PTY exits.
+    useStore.getState().closePaneOnExit('workspace-1-pane-1');
+
+    // Then: nothing changes — the empty workspace would otherwise have no pane to show.
+    const after = selectActiveWorkspace(useStore.getState());
+    expect(after?.tabs).toHaveLength(1);
+    expect(after?.tabs[0]?.layout).toEqual(before?.tabs[0]?.layout);
+    expect(after?.panes.map((pane) => pane.id)).toEqual(['workspace-1-pane-1']);
+  });
+
   it('updates split ratio by layout path and clamps extreme values', async () => {
     // Given: the active tab contains one split.
     vi.useFakeTimers();

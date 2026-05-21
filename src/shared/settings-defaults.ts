@@ -26,6 +26,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
     fontFamily: "'SF Mono', 'JetBrains Mono', Menlo, Consolas, monospace",
     fontWeight: '400',
     fontWeightBold: '700',
+    closePaneOnExit: true,
   },
   paneInfo: {
     pollIntervalMs: 1500,
