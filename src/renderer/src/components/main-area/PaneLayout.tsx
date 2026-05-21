@@ -7,7 +7,9 @@ import {
   type SplitRect,
 } from '../../../../shared/pane-layout';
 import type { Pane, PaneLayout as PaneLayoutModel, Tab } from '../../../../shared/types';
+import { DEFAULT_APP_SETTINGS } from '../../../../shared/settings-defaults';
 import { usePaneInfoStore } from '../../stores/paneInfoStore';
+import { useSettingsStore } from '../../stores/settingsStore';
 import { useUiStore } from '../../stores/uiStore';
 import { useWorkspaceStore } from '../../stores/workspaceStore';
 import { TerminalView } from '../terminal/TerminalView';
@@ -112,11 +114,16 @@ function PaneCell({
   tab,
 }: PaneCellProps): React.JSX.Element {
   const closePane = useWorkspaceStore((state) => state.closePane);
+  const closePaneOnExit = useWorkspaceStore((state) => state.closePaneOnExit);
   const setActivePane = useWorkspaceStore((state) => state.setActivePane);
   const setPanePtyId = useWorkspaceStore((state) => state.setPanePtyId);
   const splitPane = useWorkspaceStore((state) => state.splitPane);
   const removePaneInfo = usePaneInfoStore((state) => state.removeInfo);
   const setFullscreenPaneId = useUiStore((state) => state.setFullscreenPaneId);
+  const closePaneOnExitEnabled = useSettingsStore(
+    (state) =>
+      state.settings?.terminal.closePaneOnExit ?? DEFAULT_APP_SETTINGS.terminal.closePaneOnExit,
+  );
 
   const isActive = isActiveTab && tab.activePaneId === pane.id;
   const canClosePane = countPaneLeaves(tab.layout) > 1;
@@ -151,6 +158,12 @@ function PaneCell({
           // does not emit a removal event over IPC.
           if (ptyId === null && pane.ptyId) {
             removePaneInfo(pane.ptyId);
+            if (closePaneOnExitEnabled) {
+              // On PTY exit, drop the pane (and the tab if this was the only pane left). The action
+              // is a no-op when invoked again during unmount because the pane is already gone from
+              // store state, so re-entry from the cleanup path in `useTerminal` is safe.
+              closePaneOnExit(pane.id);
+            }
           }
           setPanePtyId(pane.id, ptyId);
         }}

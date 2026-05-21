@@ -165,6 +165,7 @@ function readCurrentSettings(raw: unknown): AppSettings {
         : defaults.terminal.fontFamily,
     fontWeight: pickFontWeight(terminalRaw.fontWeight, defaults.terminal.fontWeight),
     fontWeightBold: pickFontWeight(terminalRaw.fontWeightBold, defaults.terminal.fontWeightBold),
+    closePaneOnExit: pickBoolean(terminalRaw.closePaneOnExit, defaults.terminal.closePaneOnExit),
   };
 
   return {

@@ -59,6 +59,26 @@ describe('TerminalSection', () => {
     });
   });
 
+  it('toggles close-pane-on-exit and persists the change', async () => {
+    // Given: the terminal settings section is visible with the close-pane-on-exit default of true.
+    render(<TerminalSection />);
+    expect(useSettingsStore.getState().settings?.terminal.closePaneOnExit).toBe(true);
+
+    // When: the user disables close-pane-on-exit.
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Close pane on exit' }));
+
+    // Then: the new value is reflected in the store and persisted after the debounce.
+    expect(useSettingsStore.getState().settings?.terminal.closePaneOnExit).toBe(false);
+    await vi.advanceTimersByTimeAsync(350);
+    expect(fixture.api.update).toHaveBeenCalledWith({
+      terminal: { closePaneOnExit: false },
+      paneInfo: undefined,
+      shortcuts: undefined,
+      app: undefined,
+      shellIntegration: undefined,
+    });
+  });
+
   it('updates font settings through the settings store', async () => {
     // Given: the terminal settings section is visible.
     render(<TerminalSection />);
