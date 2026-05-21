@@ -209,6 +209,52 @@ describe('WorkspacesView', () => {
     // Then: the running command appears once as the summary label (cwd remains in the detail row).
     expect(screen.getByText('pnpm run dev')).toBeInTheDocument();
     expect(screen.getByLabelText('running')).toBeInTheDocument();
+    expect(screen.queryByLabelText('ssh session')).not.toBeInTheDocument();
+  });
+
+  it('shows a zap leading icon and the unchanged running dot for active ssh panes', () => {
+    // Given: the active pane has a PTY runtime info snapshot classified as an SSH session.
+    useWorkspaceStore.setState({
+      workspaces: [
+        workspace1,
+        {
+          ...workspace2,
+          tabs: workspace2.tabs.map((tab) =>
+            tab.id === 'workspace-2-tab-1' ? { ...tab, activePaneId: 'workspace-2-pane-1' } : tab,
+          ),
+        },
+      ],
+      activeWorkspaceId: workspace2.id,
+    });
+    usePaneInfoStore.setState({
+      infosByPtyId: {
+        'pty-server': {
+          ptyId: 'pty-server',
+          processActivity: 'running',
+          foregroundCommand: 'ssh dev',
+          foregroundSession: { kind: 'ssh' },
+          integration: {
+            shell: false,
+            protocols: [],
+            lastSequenceAt: 0,
+            stale: false,
+          },
+          observedAt: 1000,
+        },
+      },
+      isLoading: false,
+      error: null,
+    });
+
+    // When: the workspace sidebar renders.
+    render(<WorkspacesView />);
+
+    // Then: the SSH command appears, the leading icon reflects SSH, and the original running dot
+    // remains visible for the same pane.
+    expect(screen.getByText('ssh dev')).toBeInTheDocument();
+    expect(screen.getByLabelText('ssh session')).toHaveClass('text-yellow-400');
+    expect(screen.getByLabelText('ssh session')).toHaveAttribute('title', 'SSH session');
+    expect(screen.getByLabelText('running')).toBeInTheDocument();
   });
 
   it('collapses and expands workspace contents without persisting sidebar state', () => {
