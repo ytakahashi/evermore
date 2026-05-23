@@ -257,6 +257,75 @@ describe('WorkspacesView', () => {
     expect(screen.getByLabelText('running')).toBeInTheDocument();
   });
 
+  it('shows the agent leading icon when an AI agent is detected as the foreground process', () => {
+    // Given: a pane has a runtime info snapshot reporting a `claude` agent.
+    usePaneInfoStore.setState({
+      infosByPtyId: {
+        'pty-server': {
+          ptyId: 'pty-server',
+          processActivity: 'running',
+          foregroundCommand: 'claude',
+          foregroundSession: { kind: 'other' },
+          integration: {
+            shell: false,
+            protocols: [],
+            lastSequenceAt: 0,
+            stale: false,
+          },
+          agent: {
+            known: 'claude',
+            kind: 'claude',
+            status: 'ready',
+            source: 'command-line',
+            observedAt: 1000,
+          },
+          observedAt: 1000,
+        },
+      },
+      isLoading: false,
+      error: null,
+    });
+
+    // When: the workspace sidebar renders.
+    render(<WorkspacesView />);
+
+    // Then: the agent icon replaces the terminal / ssh icon, and the running dot is preserved.
+    expect(screen.getByLabelText('claude agent')).toBeInTheDocument();
+    expect(screen.queryByLabelText('ssh session')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('running')).toBeInTheDocument();
+  });
+
+  it('keeps the ssh icon when an ssh session is the foreground process even if remote args mention an agent', () => {
+    // Given: a pane is running ssh locally. The tracker would not set `agent` in this state, so the
+    // store snapshot omits it; the test pins the renderer behaviour against that contract.
+    usePaneInfoStore.setState({
+      infosByPtyId: {
+        'pty-server': {
+          ptyId: 'pty-server',
+          processActivity: 'running',
+          foregroundCommand: 'ssh host claude',
+          foregroundSession: { kind: 'ssh' },
+          integration: {
+            shell: false,
+            protocols: [],
+            lastSequenceAt: 0,
+            stale: false,
+          },
+          observedAt: 1000,
+        },
+      },
+      isLoading: false,
+      error: null,
+    });
+
+    // When: the workspace sidebar renders.
+    render(<WorkspacesView />);
+
+    // Then: the SSH icon is shown and no agent icon leaks through.
+    expect(screen.getByLabelText('ssh session')).toBeInTheDocument();
+    expect(screen.queryByLabelText(/agent$/i)).not.toBeInTheDocument();
+  });
+
   it('collapses and expands workspace contents without persisting sidebar state', () => {
     // Given: the sidebar is rendered with all workspaces expanded by default.
     render(<WorkspacesView />);

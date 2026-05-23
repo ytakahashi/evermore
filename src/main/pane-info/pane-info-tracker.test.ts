@@ -842,6 +842,167 @@ describe('PaneInfoTracker', () => {
     expect(listProcesses).toHaveBeenCalledOnce();
   });
 
+  it('reports a ready agent while a known AI agent is the foreground process', async () => {
+    // Given: a pane has a known agent (`claude`) as the foreground process.
+    tracker.register('pty-1', 123, '/tmp');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    rows = [
+      shellRow(456),
+      {
+        pid: 456,
+        ppid: 123,
+        pgid: 456,
+        tpgid: 456,
+        command: '/opt/homebrew/bin/claude',
+        args: '/opt/homebrew/bin/claude',
+      },
+    ];
+
+    // When: the next poll observes the agent.
+    now = 1002;
+    await tracker.poll();
+
+    // Then: the runtime info carries an agent slot in the `ready` state. Working / awaiting-input
+    // require an explicit signal source that command-line detection cannot synthesize, so
+    // command-line detection always reports `ready`.
+    const [info] = tracker.list();
+    expect(info?.agent).toEqual({
+      known: 'claude',
+      kind: 'claude',
+      status: 'ready',
+      source: 'command-line',
+      observedAt: 1002,
+    });
+  });
+
+  it('does not set an agent while an ssh session is the foreground process', async () => {
+    // Given: a pane runs ssh locally; the remote shell can legitimately invoke an agent, but the
+    // local foreground classification is ssh.
+    tracker.register('pty-1', 123, '/tmp');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    rows = [
+      shellRow(789),
+      {
+        pid: 789,
+        ppid: 123,
+        pgid: 789,
+        tpgid: 789,
+        command: '/usr/bin/ssh',
+        args: '/usr/bin/ssh host claude',
+      },
+    ];
+
+    // When: the next poll classifies the foreground session as ssh.
+    now = 1002;
+    await tracker.poll();
+
+    // Then: even though the args mention `claude`, no local agent is reported. Remote-agent
+    // surfacing would need its own runtime field rather than overloading the local one.
+    const [info] = tracker.list();
+    expect(info?.foregroundSession.kind).toBe('ssh');
+    expect(info?.agent).toBeUndefined();
+  });
+
+  it('clears the agent when the foreground process returns to the shell prompt', async () => {
+    // Given: a pane is observed running `claude`.
+    tracker.register('pty-1', 123, '/tmp');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    rows = [
+      shellRow(456),
+      {
+        pid: 456,
+        ppid: 123,
+        pgid: 456,
+        tpgid: 456,
+        command: 'claude',
+        args: 'claude',
+      },
+    ];
+    now = 1002;
+    await tracker.poll();
+    expect(tracker.list()[0]?.agent?.known).toBe('claude');
+
+    // When: ps sees the pane back at the shell prompt.
+    rows = [shellRow(123)];
+    now = 1003;
+    await tracker.poll();
+
+    // Then: the agent slot is cleared so the sidebar falls back to the terminal icon.
+    expect(tracker.list()[0]?.agent).toBeUndefined();
+  });
+
+  it('preserves observedAt while the detected agent identity is unchanged', async () => {
+    // Given: `claude` is detected.
+    tracker.register('pty-1', 123, '/tmp');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    rows = [
+      shellRow(456),
+      {
+        pid: 456,
+        ppid: 123,
+        pgid: 456,
+        tpgid: 456,
+        command: 'claude',
+        args: 'claude',
+      },
+    ];
+    now = 1002;
+    await tracker.poll();
+    const firstObservedAt = tracker.list()[0]?.agent?.observedAt;
+    expect(firstObservedAt).toBe(1002);
+
+    // When: another poll observes the same agent.
+    now = 1003;
+    await tracker.poll();
+
+    // Then: observedAt is held steady so the renderer does not re-render on no-op observations.
+    expect(tracker.list()[0]?.agent?.observedAt).toBe(firstObservedAt);
+  });
+
+  it('updates the agent when the foreground command switches to a different known agent', async () => {
+    // Given: `claude` is detected.
+    tracker.register('pty-1', 123, '/tmp');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    rows = [
+      shellRow(456),
+      {
+        pid: 456,
+        ppid: 123,
+        pgid: 456,
+        tpgid: 456,
+        command: 'claude',
+        args: 'claude',
+      },
+    ];
+    now = 1002;
+    await tracker.poll();
+
+    // When: the foreground process becomes `codex` (the user exited claude and started codex
+    // without an intervening shell-prompt-start, which can happen when shell integration is off).
+    rows = [
+      shellRow(457),
+      {
+        pid: 457,
+        ppid: 123,
+        pgid: 457,
+        tpgid: 457,
+        command: 'codex',
+        args: 'codex',
+      },
+    ];
+    now = 1003;
+    await tracker.poll();
+
+    // Then: the agent slot updates to codex with a refreshed observedAt.
+    expect(tracker.list()[0]?.agent).toEqual({
+      known: 'codex',
+      kind: 'codex',
+      status: 'ready',
+      source: 'command-line',
+      observedAt: 1003,
+    });
+  });
+
   it('disables recurring polling when pollIntervalMs is non-positive', async () => {
     // Given: a tracker with recurring polling enabled.
     vi.useFakeTimers();

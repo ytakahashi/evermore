@@ -3,11 +3,13 @@ import type {
   PaneRuntimeSignalLifecycleSource,
 } from '../../shared/pane-runtime-signal';
 import type {
+  PaneAgentInfo,
   PaneIntegrationInfo,
   PaneIntegrationProtocol,
   PaneProcessActivity,
   PaneRuntimeInfo,
 } from '../../shared/types';
+import { detectAgentFromCommand } from './agent-detection';
 import { classifyForegroundSession } from './foreground-session';
 import { isIntegrationStale } from './integration-staleness';
 import { observePaneActivity, ProcessInspector } from './process-inspector';
@@ -346,6 +348,12 @@ export class PaneInfoTracker {
     // Prefer the in-flight command so the sidebar reflects the live shell-integration command
     // before its `D` arrives; otherwise fall back to the most recent finished command.
     const activeCommand = process.currentCommand ?? process.lastCommand;
+    process.agent = this.computeAgent(
+      process,
+      processActivity,
+      foregroundCommand,
+      options.observedAt,
+    );
     const nextInfo: PaneRuntimeInfo = {
       ptyId: process.ptyId,
       processActivity,
@@ -361,6 +369,57 @@ export class PaneInfoTracker {
     };
 
     this.upsertInfo(nextInfo, options.emit);
+  }
+
+  /**
+   * Derives the agent slot from the foreground command line.
+   *
+   * Returns `undefined` when the pane is idle or while an SSH session is in the foreground — the
+   * remote shell may legitimately invoke an agent, but the local pane's classification input is
+   * limited to local foreground args (per the same invariant that keeps `foregroundSession` stable
+   * across SSH). A future remote-agent surface would need its own field rather than overloading
+   * this one.
+   *
+   * When the detection result matches the previous snapshot, the prior `observedAt` is preserved
+   * so the renderer does not re-render on signal events that did not change the agent identity.
+   * Agent transitions that skip a shell-prompt-start boundary (e.g. exiting `claude` and starting
+   * `codex` in the same prompt while shell integration is unavailable) are intentionally not
+   * specialized here: the helper simply overwrites the slot on every recompute, so the indicator
+   * does not visibly reset between back-to-back known agents.
+   */
+  private computeAgent(
+    process: RegisteredPaneProcess,
+    processActivity: PaneProcessActivity,
+    foregroundCommand: string | undefined,
+    observedAt: number,
+  ): PaneAgentInfo | undefined {
+    if (processActivity === 'idle' || process.foregroundSession.kind === 'ssh') {
+      return undefined;
+    }
+
+    const detected = detectAgentFromCommand(foregroundCommand);
+    if (!detected) {
+      return undefined;
+    }
+
+    const previous = process.agent;
+    if (
+      previous &&
+      previous.known === detected.known &&
+      previous.kind === detected.kind &&
+      previous.status === 'ready' &&
+      previous.source === 'command-line'
+    ) {
+      return previous;
+    }
+
+    return {
+      known: detected.known,
+      kind: detected.kind,
+      status: 'ready',
+      source: 'command-line',
+      observedAt,
+    };
   }
 
   private computeProcessActivity(process: RegisteredPaneProcess): PaneProcessActivity {
