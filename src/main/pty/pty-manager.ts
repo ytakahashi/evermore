@@ -71,6 +71,8 @@ export class PtyManager {
           ...paneEnv,
           ...(shellIntegrationExtras ?? {}),
         }),
+        EVERMORE_PTY_ID: id,
+        ...(options.paneId ? { EVERMORE_PANE_ID: options.paneId } : {}),
         TERM: 'xterm-256color',
         COLORTERM: 'truecolor',
         // Override any inherited TERM_PROGRAM (e.g. iTerm.app / WezTerm when Evermore was launched
@@ -111,7 +113,15 @@ export class PtyManager {
    * Writes user input from the renderer into the PTY if it is still alive.
    */
   public write(id: string, data: string): void {
-    this.ptys.get(id)?.proc.write(data);
+    const record = this.ptys.get(id);
+    if (!record) {
+      return;
+    }
+
+    record.proc.write(data);
+    if (data !== '') {
+      this.callbacks.onUserInput?.({ id });
+    }
   }
 
   /**

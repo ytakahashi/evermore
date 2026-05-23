@@ -9,7 +9,7 @@ import type {
 
 export interface Api {
   pty: {
-    create: (opts: { cwd: string; shell?: string }) => Promise<string>;
+    create: (opts: { cwd: string; paneId?: string; shell?: string }) => Promise<string>;
     write: (id: string, data: string) => Promise<void>;
     resize: (id: string, cols: number, rows: number) => Promise<void>;
     dispose: (id: string) => Promise<void>;

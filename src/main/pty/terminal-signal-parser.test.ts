@@ -217,6 +217,82 @@ describe('TerminalSignalParser', () => {
     expect(signals).toEqual([]);
   });
 
+  it('emits Evermore OSC 777 agent events with normalized agent names', () => {
+    // Given: Evermore namespaced OSC 777 payloads from an agent hook.
+    const payload = JSON.stringify({
+      v: 1,
+      type: 'agent-status',
+      agent: ' Claude ',
+      status: 'awaiting-input',
+      message: 'Permission needed',
+      event: 'permission_request',
+      cwd: '/Users/tester/project',
+      toolName: 'write_file',
+      toolInput: { file_path: 'src/main.ts' },
+      extra: 'allowed',
+    });
+
+    // When: the terminal output is parsed.
+    const signals = collectSignals([`\x1b]777;evermore;${payload}\x07`]);
+
+    // Then: the payload is validated and emitted without affecting raw terminal output handling.
+    expect(signals).toEqual([
+      {
+        type: 'agent-event',
+        source: 'evermore-osc777',
+        event: {
+          v: 1,
+          type: 'agent-status',
+          agent: 'claude',
+          status: 'awaiting-input',
+          message: 'Permission needed',
+          event: 'permission_request',
+          cwd: '/Users/tester/project',
+          toolName: 'write_file',
+          toolInput: { file_path: 'src/main.ts' },
+        },
+      },
+    ]);
+  });
+
+  it('drops invalid Evermore OSC 777 agent event payloads', () => {
+    // Given: unsupported or malformed agent-event payloads plus an unrelated OSC 777 notify.
+    const invalidPayloads = [
+      '{"v":1,"type":"agent-status","agent":"claude","status":"running"',
+      JSON.stringify({ v: 2, type: 'agent-status', agent: 'claude', status: 'running' }),
+      JSON.stringify({ v: 1, type: 'notify', agent: 'claude', status: 'running' }),
+      JSON.stringify({ v: 1, type: 'agent-status', agent: '   ', status: 'running' }),
+      JSON.stringify({ v: 1, type: 'agent-status', agent: 'claude', status: 'thinking' }),
+    ];
+    const data = [
+      ...invalidPayloads.map((payload) => `\x1b]777;evermore;${payload}\x07`),
+      '\x1b]777;notify;Title;Body\x07',
+    ];
+
+    // When: the terminal output is parsed.
+    const signals = collectSignals(data);
+
+    // Then: no agent-event signal is emitted for invalid or unsupported variants.
+    expect(signals).toEqual([]);
+  });
+
+  it('drops oversized Evermore OSC 777 agent event payloads before JSON parsing', () => {
+    // Given: a syntactically valid payload that exceeds the agent-event byte limit.
+    const payload = JSON.stringify({
+      v: 1,
+      type: 'agent-status',
+      agent: 'claude',
+      status: 'running',
+      message: 'x'.repeat(8200),
+    });
+
+    // When: the payload is parsed.
+    const signals = collectSignals([`\x1b]777;evermore;${payload}\x07`]);
+
+    // Then: it is dropped as a whole.
+    expect(signals).toEqual([]);
+  });
+
   it('discards oversized OSC payloads until their terminator and resumes afterward', () => {
     // Given: an oversized OSC payload that contains a nested OSC-looking sequence before BEL.
     const data = [`\x1b]633;E;${'a'.repeat(20)}\x1b]133;A\x07`, '\x1b]133;C\x07'];

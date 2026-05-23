@@ -1,7 +1,9 @@
 import type {
+  EvermoreAgentEvent,
   PaneRuntimeSignal,
   PaneRuntimeSignalLifecycleSource,
 } from '../../shared/pane-runtime-signal';
+import { OSC_777_PAYLOAD_MAX_BYTES } from '../../shared/pane-integration-constants';
 
 const ESC = '\x1b';
 const BEL = '\x07';
@@ -174,7 +176,100 @@ function parseOscPayload(payload: string): PaneRuntimeSignal | null {
     return command ? { type: 'shell-command-line', command, source: 'osc633' } : null;
   }
 
+  if (payload.startsWith('777;evermore;')) {
+    const event = parseEvermoreAgentEvent(payload.slice('777;evermore;'.length));
+    return event ? { type: 'agent-event', source: 'evermore-osc777', event } : null;
+  }
+
   return null;
+}
+
+function parseEvermoreAgentEvent(payload: string): EvermoreAgentEvent | null {
+  if (getUtf8ByteLength(payload) > OSC_777_PAYLOAD_MAX_BYTES) {
+    debugDropEvermoreAgentEvent('oversized payload');
+    return null;
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(payload);
+  } catch (_error: unknown) {
+    // Ignore JSON parse errors for malformed agent event payloads
+    // and drop them without disrupting the PTY flow.
+    debugDropEvermoreAgentEvent('malformed JSON');
+    return null;
+  }
+
+  if (!isRecord(parsed)) {
+    debugDropEvermoreAgentEvent('payload is not an object');
+    return null;
+  }
+
+  if (parsed['v'] !== 1) {
+    debugDropEvermoreAgentEvent('unsupported version');
+    return null;
+  }
+
+  if (parsed['type'] !== 'agent-status') {
+    debugDropEvermoreAgentEvent('unsupported event type');
+    return null;
+  }
+
+  const agent = normalizeAgentKind(parsed['agent']);
+  if (!agent) {
+    debugDropEvermoreAgentEvent('missing agent');
+    return null;
+  }
+
+  const status = parsed['status'];
+  if (status !== 'running' && status !== 'awaiting-input' && status !== 'complete') {
+    debugDropEvermoreAgentEvent('unsupported status');
+    return null;
+  }
+
+  return {
+    v: 1,
+    type: 'agent-status',
+    agent,
+    status,
+    ...optionalStringField(parsed, 'message'),
+    ...optionalStringField(parsed, 'event'),
+    ...optionalStringField(parsed, 'sessionId'),
+    ...optionalStringField(parsed, 'cwd'),
+    ...optionalStringField(parsed, 'toolName'),
+    ...(Object.hasOwn(parsed, 'toolInput') ? { toolInput: parsed['toolInput'] } : {}),
+  };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function normalizeAgentKind(value: unknown): string | null {
+  if (typeof value !== 'string') {
+    return null;
+  }
+
+  const normalized = value.trim().toLowerCase();
+  return normalized === '' ? null : normalized;
+}
+
+function optionalStringField(
+  payload: Record<string, unknown>,
+  field: 'message' | 'event' | 'sessionId' | 'cwd' | 'toolName',
+): Partial<Pick<EvermoreAgentEvent, typeof field>> {
+  const value = payload[field];
+  return typeof value === 'string' ? { [field]: value } : {};
+}
+
+const UTF8_ENCODER = new TextEncoder();
+
+function getUtf8ByteLength(value: string): number {
+  return UTF8_ENCODER.encode(value).byteLength;
+}
+
+function debugDropEvermoreAgentEvent(reason: string): void {
+  console.debug(`[Evermore] Ignored OSC 777 agent event: ${reason}`);
 }
 
 function parseLifecycleSignal(payload: string): PaneRuntimeSignal | null {

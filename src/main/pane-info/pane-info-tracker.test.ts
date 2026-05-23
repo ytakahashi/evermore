@@ -1077,6 +1077,274 @@ describe('PaneInfoTracker', () => {
     });
   });
 
+  it('applies Evermore agent events atomically and normalizes complete to ready', () => {
+    // Given: a known agent command is running under shell integration.
+    tracker.register('pty-1', 123, '/tmp');
+    now = 1002;
+    tracker.applySignal('pty-1', {
+      type: 'shell-command-line',
+      command: 'claude',
+      source: 'osc633',
+    });
+    tracker.applySignal('pty-1', { type: 'shell-command-started', source: 'osc133' });
+    onChanged.mockClear();
+
+    // When: the agent reports it is awaiting input.
+    now = 1003;
+    tracker.applySignal('pty-1', {
+      type: 'agent-event',
+      source: 'evermore-osc777',
+      event: {
+        v: 1,
+        type: 'agent-status',
+        agent: 'claude',
+        status: 'awaiting-input',
+        message: 'Permission needed',
+        event: 'permission_request',
+      },
+    });
+
+    // Then: agent and attention are emitted together in one runtime snapshot.
+    expect(onChanged).toHaveBeenCalledTimes(1);
+    expect(tracker.list()[0]).toMatchObject({
+      agent: {
+        known: 'claude',
+        kind: 'claude',
+        status: 'awaiting-input',
+        source: 'agent-protocol',
+        observedAt: 1003,
+        detail: {
+          event: 'permission_request',
+          message: 'Permission needed',
+        },
+      },
+      attention: {
+        kind: 'awaiting-input',
+        source: 'agent-protocol',
+        observedAt: 1003,
+      },
+      integration: {
+        protocols: ['osc633', 'osc133', 'osc777', 'evermore'],
+      },
+    });
+
+    // When: the agent reports completion.
+    now = 1004;
+    tracker.applySignal('pty-1', {
+      type: 'agent-event',
+      source: 'evermore-osc777',
+      event: {
+        v: 1,
+        type: 'agent-status',
+        agent: 'claude',
+        status: 'complete',
+      },
+    });
+
+    // Then: the external complete status is stored internally as ready and attention is cleared.
+    expect(tracker.list()[0]).toMatchObject({
+      agent: {
+        known: 'claude',
+        kind: 'claude',
+        status: 'ready',
+        source: 'agent-protocol',
+        observedAt: 1004,
+      },
+    });
+    expect(tracker.list()[0]?.attention).toBeUndefined();
+  });
+
+  it('lets agent-protocol status outrank command-line detection until the next shell command starts', async () => {
+    // Given: ps observes a known agent and an explicit protocol event marks it running.
+    tracker.register('pty-1', 123, '/tmp');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    rows = [
+      shellRow(456),
+      {
+        pid: 456,
+        ppid: 123,
+        pgid: 456,
+        tpgid: 456,
+        command: 'claude',
+        args: 'claude',
+      },
+    ];
+    now = 1002;
+    await tracker.poll();
+    now = 1003;
+    tracker.applySignal('pty-1', {
+      type: 'agent-event',
+      source: 'evermore-osc777',
+      event: {
+        v: 1,
+        type: 'agent-status',
+        agent: 'claude',
+        status: 'running',
+      },
+    });
+
+    // When: another ps poll sees the same command-line agent.
+    now = 1004;
+    await tracker.poll();
+
+    // Then: command-line detection does not downgrade the explicit running status to ready.
+    expect(tracker.list()[0]?.agent).toMatchObject({
+      known: 'claude',
+      kind: 'claude',
+      status: 'running',
+      source: 'agent-protocol',
+      observedAt: 1003,
+    });
+
+    // When: the next local shell command starts.
+    now = 1005;
+    tracker.applySignal('pty-1', {
+      type: 'shell-command-line',
+      command: 'pnpm test',
+      source: 'osc633',
+    });
+    tracker.applySignal('pty-1', { type: 'shell-command-started', source: 'osc133' });
+
+    // Then: the protocol-owned agent state is cleared.
+    expect(tracker.list()[0]?.agent).toBeUndefined();
+  });
+
+  it('clears only awaiting-input attention when user input is written', () => {
+    // Given: an explicit awaiting-input event is active.
+    tracker.register('pty-1', 123, '/tmp');
+    now = 1002;
+    tracker.applySignal('pty-1', { type: 'shell-command-started', source: 'osc133' });
+    tracker.applySignal('pty-1', {
+      type: 'agent-event',
+      source: 'evermore-osc777',
+      event: {
+        v: 1,
+        type: 'agent-status',
+        agent: 'claude',
+        status: 'awaiting-input',
+      },
+    });
+
+    // When: renderer-originated user input is observed.
+    now = 1003;
+    tracker.notifyUserInput('pty-1');
+
+    // Then: attention clears while agent status remains whatever the explicit protocol last said.
+    expect(tracker.list()[0]?.attention).toBeUndefined();
+    expect(tracker.list()[0]?.agent).toMatchObject({
+      known: 'claude',
+      status: 'awaiting-input',
+      source: 'agent-protocol',
+    });
+  });
+
+  it('updates agent observedAt on source/status changes but preserves it across redundant re-emits', async () => {
+    // Given: a known agent is detected from the command line.
+    tracker.register('pty-1', 123, '/tmp');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    rows = [
+      shellRow(456),
+      {
+        pid: 456,
+        ppid: 123,
+        pgid: 456,
+        tpgid: 456,
+        command: 'claude',
+        args: 'claude',
+      },
+    ];
+    now = 1002;
+    await tracker.poll();
+
+    // Then: command-line detection seeds agent at the poll time.
+    expect(tracker.list()[0]?.agent).toMatchObject({
+      known: 'claude',
+      kind: 'claude',
+      status: 'ready',
+      source: 'command-line',
+      observedAt: 1002,
+    });
+
+    // When: an agent-protocol event arrives with the same known agent and the running status.
+    now = 1003;
+    tracker.applySignal('pty-1', {
+      type: 'agent-event',
+      source: 'evermore-osc777',
+      event: {
+        v: 1,
+        type: 'agent-status',
+        agent: 'claude',
+        status: 'running',
+      },
+    });
+
+    // Then: the source / status change bumps observedAt to the event time.
+    expect(tracker.list()[0]?.agent).toMatchObject({
+      source: 'agent-protocol',
+      status: 'running',
+      observedAt: 1003,
+    });
+
+    // When: the same agent-protocol running status is re-emitted.
+    now = 1004;
+    tracker.applySignal('pty-1', {
+      type: 'agent-event',
+      source: 'evermore-osc777',
+      event: {
+        v: 1,
+        type: 'agent-status',
+        agent: 'claude',
+        status: 'running',
+      },
+    });
+
+    // Then: observedAt is preserved because kind and status are unchanged.
+    expect(tracker.list()[0]?.agent).toMatchObject({
+      source: 'agent-protocol',
+      status: 'running',
+      observedAt: 1003,
+    });
+  });
+
+  it('ignores remote Evermore agent events while ssh is the foreground session', async () => {
+    // Given: ps classifies the local foreground session as ssh.
+    tracker.register('pty-1', 123, '/tmp');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    rows = [
+      shellRow(456),
+      {
+        pid: 456,
+        ppid: 123,
+        pgid: 456,
+        tpgid: 456,
+        command: '/usr/bin/ssh',
+        args: '/usr/bin/ssh host',
+      },
+    ];
+    now = 1002;
+    await tracker.poll();
+
+    // When: a remote shell emits an Evermore agent event.
+    now = 1003;
+    tracker.applySignal('pty-1', {
+      type: 'agent-event',
+      source: 'evermore-osc777',
+      event: {
+        v: 1,
+        type: 'agent-status',
+        agent: 'claude',
+        status: 'awaiting-input',
+      },
+    });
+
+    // Then: local pane agent / attention state remains empty, while protocol observation is kept.
+    const [info] = tracker.list();
+    expect(info?.foregroundSession.kind).toBe('ssh');
+    expect(info?.agent).toBeUndefined();
+    expect(info?.attention).toBeUndefined();
+    expect(info?.integration.protocols).toEqual(['osc777', 'evermore']);
+  });
+
   it('disables recurring polling when pollIntervalMs is non-positive', async () => {
     // Given: a tracker with recurring polling enabled.
     vi.useFakeTimers();

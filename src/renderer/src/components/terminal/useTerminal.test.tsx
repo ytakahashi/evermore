@@ -105,7 +105,9 @@ vi.mock('@xterm/addon-unicode11', () => ({
 }));
 
 interface PtyApiMock {
-  create: ReturnType<typeof vi.fn<(options: { cwd: string; shell?: string }) => Promise<string>>>;
+  create: ReturnType<
+    typeof vi.fn<(options: { cwd: string; paneId?: string; shell?: string }) => Promise<string>>
+  >;
   write: ReturnType<typeof vi.fn<(id: string, data: string) => Promise<void>>>;
   resize: ReturnType<typeof vi.fn<(id: string, cols: number, rows: number) => Promise<void>>>;
   dispose: ReturnType<typeof vi.fn<(id: string) => Promise<void>>>;
@@ -118,6 +120,7 @@ interface TestTerminalProps {
   initialCommand?: string;
   isActive?: boolean;
   onPtyIdChange?: (ptyId: string | null) => void;
+  paneId?: string;
 }
 
 function TestTerminal({
@@ -125,12 +128,14 @@ function TestTerminal({
   initialCommand,
   isActive = true,
   onPtyIdChange,
+  paneId = 'pane-1',
 }: TestTerminalProps): React.JSX.Element {
   const { containerRef } = useTerminal({
     cwd,
     initialCommand,
     isActive,
     onPtyIdChange,
+    paneId,
     shell: '/bin/zsh',
   });
 
@@ -253,6 +258,7 @@ describe('useTerminal', () => {
     await waitFor(() => {
       expect(ptyApi.create).toHaveBeenCalledWith({
         cwd: '/Users/tester/project',
+        paneId: 'pane-1',
         shell: '/bin/zsh',
       });
       expect(ptyApi.resize).toHaveBeenCalledWith('pty-1', 132, 43);
@@ -590,6 +596,7 @@ describe('useTerminal', () => {
     await waitFor(() => {
       expect(ptyApi.create).toHaveBeenCalledWith({
         cwd: '/Users/tester/project',
+        paneId: 'pane-1',
         shell: '/bin/zsh',
       });
     });

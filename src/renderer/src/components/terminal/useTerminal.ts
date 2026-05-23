@@ -18,6 +18,7 @@ interface UseTerminalOptions {
   initialCommand?: string;
   isActive?: boolean;
   onPtyIdChange?: (ptyId: string | null) => void;
+  paneId?: string;
   shell?: string;
 }
 
@@ -252,28 +253,34 @@ export function useTerminal(options: UseTerminalOptions): UseTerminalResult {
     // main-process pane runtime feed and reach the workspace store via `usePaneInfoBridge`; this
     // hook intentionally never restarts the running shell because of prop drift.
     const initialOptions = initialOptionsRef.current;
-    void ptyApi.create({ cwd: initialOptions.cwd, shell: initialOptions.shell }).then((id) => {
-      if (disposed) {
-        // PTY creation crosses the IPC boundary and can complete after React has unmounted this
-        // pane. Disposing the late process prevents orphan shells when users close panes quickly.
-        void ptyApi.dispose(id);
-        return;
-      }
+    void ptyApi
+      .create({
+        cwd: initialOptions.cwd,
+        paneId: initialOptions.paneId,
+        shell: initialOptions.shell,
+      })
+      .then((id) => {
+        if (disposed) {
+          // PTY creation crosses the IPC boundary and can complete after React has unmounted this
+          // pane. Disposing the late process prevents orphan shells when users close panes quickly.
+          void ptyApi.dispose(id);
+          return;
+        }
 
-      ptyIdRef.current = id;
-      onPtyIdChangeRef.current?.(id);
-      fitAndResize();
-      focusIfActive();
+        ptyIdRef.current = id;
+        onPtyIdChangeRef.current?.(id);
+        fitAndResize();
+        focusIfActive();
 
-      const initialCommand = initialOptions.initialCommand;
-      if (initialCommand && !initialCommandWrittenPtyIdsRef.current.has(id)) {
-        initialCommandWrittenPtyIdsRef.current.add(id);
-        void window.api?.paneInfo?.notifyCommand(id, initialCommand);
-        // Fire-and-forget: IPC failures here surface through subsequent terminal silence;
-        // retrying would risk replaying the command twice if the PTY is still alive.
-        void ptyApi.write(id, `${initialCommand}\r`);
-      }
-    });
+        const initialCommand = initialOptions.initialCommand;
+        if (initialCommand && !initialCommandWrittenPtyIdsRef.current.has(id)) {
+          initialCommandWrittenPtyIdsRef.current.add(id);
+          void window.api?.paneInfo?.notifyCommand(id, initialCommand);
+          // Fire-and-forget: IPC failures here surface through subsequent terminal silence;
+          // retrying would risk replaying the command twice if the PTY is still alive.
+          void ptyApi.write(id, `${initialCommand}\r`);
+        }
+      });
 
     return () => {
       disposed = true;

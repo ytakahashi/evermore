@@ -35,10 +35,11 @@ function PaneLeadingIcon({
   // two cases are mutually exclusive in practice. The order here just makes the precedence
   // explicit if a future change relaxes that invariant.
   if (info?.agent) {
+    const animationClass = getAgentIconAnimationClass(info);
     return (
       <span
         aria-label={info.agent.known ? `${info.agent.known} agent` : 'ai agent'}
-        className="mt-0.5 shrink-0"
+        className={`mt-0.5 shrink-0 ${animationClass}`}
         title={info.agent.known ?? info.agent.kind ?? 'AI agent'}
       >
         <SparklesIcon agent={info.agent.known} paneIndex={paneIndex} />
@@ -80,6 +81,18 @@ function PaneLeadingIcon({
       className={`mt-0.5 shrink-0 ${isActivePane ? 'text-brand' : 'text-subtle/70'}`}
     />
   );
+}
+
+function getAgentIconAnimationClass(info: PaneRuntimeInfo): string {
+  if (info.attention?.kind === 'awaiting-input' || info.agent?.status === 'awaiting-input') {
+    return 'animate-ping';
+  }
+
+  if (info.agent?.status === 'running') {
+    return 'animate-pulse';
+  }
+
+  return '';
 }
 
 function PaneSummary({

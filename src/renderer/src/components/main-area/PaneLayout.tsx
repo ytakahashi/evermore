@@ -151,6 +151,7 @@ function PaneCell({
         cwd={pane.cwd}
         initialCommand={pane.initialCommand}
         isActive={isActive}
+        paneId={pane.id}
         onPtyIdChange={(ptyId) => {
           // The PTY id is cleared on process exit and on unmount. Drop the matching paneInfo entry
           // here so the renderer cache does not accumulate entries for retired PTYs over a long

@@ -327,9 +327,10 @@ describe('WorkspacesView', () => {
     // When: the workspace sidebar renders.
     render(<WorkspacesView />);
 
-    // Then: the working dot replaces the running dot.
+    // Then: the working dot replaces the running dot, and the agent icon pulses too.
     const indicator = screen.getByLabelText('working');
     expect(indicator).toHaveClass('bg-accent', 'animate-pulse');
+    expect(screen.getByLabelText('claude agent')).toHaveClass('animate-pulse');
     expect(screen.queryByLabelText('running')).not.toBeInTheDocument();
   });
 
@@ -365,9 +366,10 @@ describe('WorkspacesView', () => {
     // When: the workspace sidebar renders.
     render(<WorkspacesView />);
 
-    // Then: the awaiting-input dot is shown.
+    // Then: the awaiting-input dot and agent icon both ping.
     const indicator = screen.getByLabelText('awaiting input');
-    expect(indicator).toHaveClass('bg-danger');
+    expect(indicator).toHaveClass('bg-danger', 'animate-ping');
+    expect(screen.getByLabelText('claude agent')).toHaveClass('animate-ping');
     expect(screen.queryByLabelText('running')).not.toBeInTheDocument();
   });
 
