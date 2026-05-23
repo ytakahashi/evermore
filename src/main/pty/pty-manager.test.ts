@@ -65,6 +65,7 @@ describe('PtyManager', () => {
   let onCreate: ReturnType<typeof vi.fn<(event: PtyCreateEvent) => void>>;
   let onDispose: ReturnType<typeof vi.fn<(event: PtyDisposeEvent) => void>>;
   let onSignal: ReturnType<typeof vi.fn<(event: PtySignalEvent) => void>>;
+  let onUserInput: ReturnType<typeof vi.fn<(event: { id: string }) => void>>;
   let manager: PtyManager;
 
   beforeEach(() => {
@@ -75,8 +76,9 @@ describe('PtyManager', () => {
     onCreate = vi.fn<(event: PtyCreateEvent) => void>();
     onDispose = vi.fn<(event: PtyDisposeEvent) => void>();
     onSignal = vi.fn<(event: PtySignalEvent) => void>();
+    onUserInput = vi.fn<(event: { id: string }) => void>();
     manager = new PtyManager({
-      callbacks: { onData, onExit, onCreate, onDispose, onSignal },
+      callbacks: { onData, onExit, onCreate, onDispose, onSignal, onUserInput },
       spawn,
       getHomeDirectory: () => '/Users/tester',
     });
@@ -193,6 +195,18 @@ describe('PtyManager', () => {
     }
   });
 
+  it('injects Evermore PTY and pane identifiers into the spawn env', () => {
+    // Given: a pane-scoped PTY create request.
+
+    // When: the manager spawns the PTY.
+    const id = manager.create({ cwd: '/Users/tester', paneId: 'pane-1' });
+
+    // Then: hooks inside the shell can identify both the runtime PTY and persisted pane.
+    const spawnedEnv = spawn.mock.calls[0]?.[2]?.env ?? {};
+    expect(spawnedEnv['EVERMORE_PTY_ID']).toBe(id);
+    expect(spawnedEnv['EVERMORE_PANE_ID']).toBe('pane-1');
+  });
+
   it('writes and resizes the active PTY', () => {
     // Given: a live PTY id owned by the manager.
     const id = manager.create({ cwd: '/Users/tester' });
@@ -203,7 +217,21 @@ describe('PtyManager', () => {
 
     // Then: node-pty receives sanitized operations for that process.
     expect(fakePty.write).toHaveBeenCalledWith('ls\r');
+    expect(onUserInput).toHaveBeenCalledWith({ id });
     expect(fakePty.resize).toHaveBeenCalledWith(120, 33);
+  });
+
+  it('does not emit user-input observations for unknown PTYs or empty writes', () => {
+    // Given: a live PTY id owned by the manager.
+    const id = manager.create({ cwd: '/Users/tester' });
+    onUserInput.mockClear();
+
+    // When: an empty write and an unknown write are requested.
+    manager.write(id, '');
+    manager.write('missing', 'ignored');
+
+    // Then: no user-input observation is emitted.
+    expect(onUserInput).not.toHaveBeenCalled();
   });
 
   it('disposes a PTY and ignores later operations for that id', () => {

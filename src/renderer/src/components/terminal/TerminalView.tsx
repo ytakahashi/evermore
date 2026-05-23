@@ -7,6 +7,7 @@ interface TerminalViewProps {
   initialCommand?: string;
   isActive?: boolean;
   onPtyIdChange?: (ptyId: string | null) => void;
+  paneId?: string;
   shell?: string;
 }
 
@@ -18,6 +19,7 @@ export function TerminalView({
   initialCommand,
   isActive = false,
   onPtyIdChange,
+  paneId,
   shell,
 }: TerminalViewProps): React.JSX.Element {
   const { containerRef } = useTerminal({
@@ -25,6 +27,7 @@ export function TerminalView({
     initialCommand,
     isActive,
     onPtyIdChange,
+    paneId,
     shell,
   });
 

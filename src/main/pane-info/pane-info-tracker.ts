@@ -1,4 +1,5 @@
 import type {
+  EvermoreAgentEvent,
   PaneRuntimeSignal,
   PaneRuntimeSignalLifecycleSource,
 } from '../../shared/pane-runtime-signal';
@@ -104,6 +105,7 @@ export class PaneInfoTracker {
         // the invariant explicit instead of relying on finishCurrentCommand's early return.
         if (!isInSshShellLifecycle(process)) {
           this.finishCurrentCommand(process, now);
+          this.clearAgentProtocolState(process);
         }
         break;
 
@@ -114,6 +116,7 @@ export class PaneInfoTracker {
       case 'shell-command-started':
         this.applyLifecycleProtocol(process, signal.source, now);
         if (!isInSshShellLifecycle(process)) {
+          this.clearAgentProtocolState(process);
           process.currentCommand = {
             line: process.shellIntegrationCommandLine ?? '',
             startedAt: now,
@@ -152,6 +155,10 @@ export class PaneInfoTracker {
           }
         }
         break;
+
+      case 'agent-event':
+        this.applyAgentEvent(process, signal.event, now);
+        break;
     }
 
     this.recomputeInfo(process, { emit: true, observedAt: now });
@@ -173,6 +180,26 @@ export class PaneInfoTracker {
     }
 
     process.fallbackSubmittedCommand = trimmedCommand;
+    this.recomputeInfo(process, { emit: true, observedAt: this.now() });
+  }
+
+  /**
+   * Observes renderer-originated input written to a PTY.
+   *
+   * This intentionally clears only explicit awaiting-input attention. Agent status itself is left
+   * unchanged because user keystrokes do not prove whether the agent resumed, completed, or is
+   * still validating the response.
+   */
+  public notifyUserInput(ptyId: string): void {
+    const process = this.processes.get(ptyId);
+    // The kind guard is structurally redundant today because PaneAttentionInfo.kind is the
+    // literal 'awaiting-input'. It is kept so that future kinds added to the union cannot
+    // accidentally be cleared by user input through this path.
+    if (!process?.attention || process.attention.kind !== 'awaiting-input') {
+      return;
+    }
+
+    process.attention = undefined;
     this.recomputeInfo(process, { emit: true, observedAt: this.now() });
   }
 
@@ -331,6 +358,56 @@ export class PaneInfoTracker {
     process.integration.lastSequenceAt = now;
   }
 
+  private applyAgentEvent(
+    process: RegisteredPaneProcess,
+    event: EvermoreAgentEvent,
+    now: number,
+  ): void {
+    appendProtocolOnce(process.integration, 'osc777');
+    appendProtocolOnce(process.integration, 'evermore');
+    process.integration.lastSequenceAt = now;
+
+    if (isInSshShellLifecycle(process)) {
+      return;
+    }
+
+    const status = event.status === 'complete' ? 'ready' : event.status;
+    const nextAgent: PaneAgentInfo = {
+      ...agentInfoFromKind(event.agent),
+      status,
+      source: 'agent-protocol',
+      observedAt: this.computeAgentEventObservedAt(process.agent, event.agent, status, now),
+      ...agentDetailFromEvent(event),
+    };
+
+    process.agent = nextAgent;
+    process.attention =
+      status === 'awaiting-input'
+        ? {
+            kind: 'awaiting-input',
+            source: 'agent-protocol',
+            observedAt: now,
+          }
+        : undefined;
+  }
+
+  private computeAgentEventObservedAt(
+    previous: PaneAgentInfo | undefined,
+    kind: string,
+    status: PaneAgentInfo['status'],
+    now: number,
+  ): number {
+    if (
+      previous?.source === 'agent-protocol' &&
+      previous.kind === kind &&
+      previous.status === status
+    ) {
+      return previous.observedAt;
+    }
+
+    return now;
+  }
+
   private finishCurrentCommand(
     process: RegisteredPaneProcess,
     finishedAt: number,
@@ -356,6 +433,11 @@ export class PaneInfoTracker {
     process.shellIntegrationCommandLine = undefined;
   }
 
+  private clearAgentProtocolState(process: RegisteredPaneProcess): void {
+    process.agent = undefined;
+    process.attention = undefined;
+  }
+
   private recomputeInfo(
     process: RegisteredPaneProcess,
     options: { emit: boolean; observedAt: number },
@@ -376,6 +458,11 @@ export class PaneInfoTracker {
     // Prefer the in-flight command so the sidebar reflects the live shell-integration command
     // before its `D` arrives; otherwise fall back to the most recent finished command.
     const activeCommand = process.currentCommand ?? process.lastCommand;
+    if (processActivity === 'idle' || isInSshShellLifecycle(process)) {
+      // computeAgent re-derives process.agent; process.attention has no equivalent helper,
+      // so the idle/ssh clear lives here.
+      process.attention = undefined;
+    }
     process.agent = this.computeAgent(
       process,
       processActivity,
@@ -423,6 +510,10 @@ export class PaneInfoTracker {
   ): PaneAgentInfo | undefined {
     if (processActivity === 'idle' || isInSshShellLifecycle(process)) {
       return undefined;
+    }
+
+    if (process.agent?.source === 'agent-protocol') {
+      return process.agent;
     }
 
     const detected = detectAgentFromCommand(foregroundCommand);
@@ -500,6 +591,33 @@ export class PaneInfoTracker {
       this.callbacks.onChanged({ info: nextInfo });
     }
   }
+}
+
+function agentInfoFromKind(kind: string): Pick<PaneAgentInfo, 'known' | 'kind'> {
+  switch (kind) {
+    case 'claude':
+      return { known: 'claude', kind };
+    case 'codex':
+      return { known: 'codex', kind };
+    case 'cursor':
+    case 'cursor-agent':
+    case 'agent':
+      return { known: 'cursor', kind };
+    case 'antigravity':
+    case 'agy':
+      return { known: 'antigravity', kind };
+    default:
+      return { kind };
+  }
+}
+
+function agentDetailFromEvent(event: EvermoreAgentEvent): Partial<Pick<PaneAgentInfo, 'detail'>> {
+  const detail = {
+    ...(event.event ? { event: event.event } : {}),
+    ...(event.message ? { message: event.message } : {}),
+  };
+
+  return Object.keys(detail).length > 0 ? { detail } : {};
 }
 
 /**

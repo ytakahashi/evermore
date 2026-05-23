@@ -12,7 +12,27 @@ export type PaneRuntimeSignal =
       source: PaneRuntimeSignalLifecycleSource;
       exitCode?: number;
     }
-  | { type: 'shell-command-line'; command: string; source: PaneRuntimeSignalCommandSource };
+  | { type: 'shell-command-line'; command: string; source: PaneRuntimeSignalCommandSource }
+  | { type: 'agent-event'; source: 'evermore-osc777'; event: EvermoreAgentEvent };
+
+/**
+ * Versioned JSON payload emitted by Evermore-aware AI agent hooks through OSC 777.
+ *
+ * The external protocol accepts `complete` because hook authors naturally describe turn
+ * completion that way. `PaneInfoTracker` normalizes it to internal `agent.status === 'ready'`.
+ */
+export interface EvermoreAgentEvent {
+  v: 1;
+  type: 'agent-status';
+  agent: string;
+  status: 'running' | 'awaiting-input' | 'complete';
+  message?: string;
+  event?: string;
+  sessionId?: string;
+  cwd?: string;
+  toolName?: string;
+  toolInput?: unknown;
+}
 
 /**
  * Known sources for cwd-bearing terminal runtime signals.

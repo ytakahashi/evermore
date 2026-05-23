@@ -37,7 +37,7 @@ ipcRenderer.on(IPC.PANE_INFO_CHANGED, (_: unknown, payload: PaneRuntimeInfo) => 
 
 const api = {
   pty: {
-    create: (opts: { cwd: string; shell?: string }): Promise<string> =>
+    create: (opts: { cwd: string; paneId?: string; shell?: string }): Promise<string> =>
       ipcRenderer.invoke(IPC.PTY_CREATE, opts),
     write: (id: string, data: string): Promise<void> =>
       ipcRenderer.invoke(IPC.PTY_WRITE, { id, data }),

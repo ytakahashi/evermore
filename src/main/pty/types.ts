@@ -4,6 +4,7 @@ import type { ShellIntegrationInjector } from '../shell-integration/injector';
 
 export interface PtyCreateOptions {
   cwd: string;
+  paneId?: string;
   shell?: string;
   env?: Record<string, string>;
   cols?: number;
@@ -51,6 +52,10 @@ export interface PtyManagerCallbacks {
    * Emitted when the terminal signal parser observes a known OSC sequence.
    */
   onSignal?: (event: PtySignalEvent) => void;
+  /**
+   * Emitted when renderer-originated user input is written to a live PTY.
+   */
+  onUserInput?: (event: { id: string }) => void;
 }
 
 export type PtySpawn = typeof nodePty.spawn;

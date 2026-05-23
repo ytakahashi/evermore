@@ -90,6 +90,7 @@ describe('getPaneRunningIndicator', () => {
       }),
     );
     expect(indicator?.className).toContain('bg-danger');
+    expect(indicator?.className).toContain('animate-ping');
     expect(indicator?.label).toBe('awaiting input');
   });
 
@@ -107,6 +108,7 @@ describe('getPaneRunningIndicator', () => {
       }),
     );
     expect(indicator?.className).toContain('bg-danger');
+    expect(indicator?.className).toContain('animate-ping');
     expect(indicator?.label).toBe('awaiting input');
   });
 });

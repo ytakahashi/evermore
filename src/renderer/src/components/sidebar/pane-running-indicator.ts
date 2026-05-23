@@ -15,7 +15,7 @@ export interface PaneRunningIndicator {
 const BASE_DOT_CLASSES = 'mt-1.5 size-1.5 shrink-0 rounded-full';
 
 const INDICATOR_AWAITING_INPUT: PaneRunningIndicator = {
-  className: `${BASE_DOT_CLASSES} bg-danger`,
+  className: `${BASE_DOT_CLASSES} bg-danger animate-ping`,
   label: 'awaiting input',
   title: 'Awaiting input',
 };
@@ -36,7 +36,7 @@ const INDICATOR_RUNNING: PaneRunningIndicator = {
  * Picks the running-state dot for a pane based on the merged runtime info.
  *
  * Priority (highest first):
- * 1. `attention.kind === 'awaiting-input'` or `agent.status === 'awaiting-input'` — red dot
+ * 1. `attention.kind === 'awaiting-input'` or `agent.status === 'awaiting-input'` — red ping dot
  * 2. `agent.status === 'running'` — blue pulsing dot
  * 3. Any other running state (`agent.status === 'ready'` or non-agent running) — green dot
  *

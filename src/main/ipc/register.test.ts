@@ -28,6 +28,7 @@ const disposeMocks = vi.hoisted(() => ({
 
 const paneInfoTrackerMock = vi.hoisted(() => ({
   applySignal: vi.fn<(ptyId: string, signal: PaneRuntimeSignal) => void>(),
+  notifyUserInput: vi.fn<(ptyId: string) => void>(),
   register: vi.fn<(ptyId: string, shellPid: number, cwd: string) => void>(),
   unregister: vi.fn<(ptyId: string) => void>(),
 }));
@@ -75,6 +76,7 @@ vi.mock('../pane-info/pane-info-tracker', () => ({
       applySignal: paneInfoTrackerMock.applySignal,
       dispose: disposeMocks.paneInfoTrackerDispose,
       list: vi.fn(() => []),
+      notifyUserInput: paneInfoTrackerMock.notifyUserInput,
       register: paneInfoTrackerMock.register,
       setPollIntervalMs: vi.fn(),
       unregister: paneInfoTrackerMock.unregister,
@@ -198,6 +200,7 @@ describe('registerIpcHandlers', () => {
     tunnelManagerMock.start.mockClear();
     tunnelManagerMock.stop.mockClear();
     paneInfoTrackerMock.applySignal.mockClear();
+    paneInfoTrackerMock.notifyUserInput.mockClear();
     paneInfoTrackerMock.register.mockClear();
     paneInfoTrackerMock.unregister.mockClear();
     ptyManagerMock.callbacks = undefined;
@@ -301,6 +304,21 @@ describe('registerIpcHandlers', () => {
 
     // Then: the pane info tracker receives the signal as the primary observer.
     expect(paneInfoTrackerMock.applySignal).toHaveBeenCalledWith('pty-1', signal);
+  });
+
+  it('forwards PTY user input observations to the pane info tracker', () => {
+    // Given: IPC runtime is registered and ptyManager exposes its callback bundle.
+    registerIpcHandlers({
+      getWindow: () => null,
+      settingsStore: createSettingsStore() as unknown as SettingsStore,
+    });
+    expect(ptyManagerMock.callbacks).toBeDefined();
+
+    // When: renderer-originated input is written to the PTY.
+    ptyManagerMock.callbacks?.onUserInput?.({ id: 'pty-1' });
+
+    // Then: the pane info tracker receives the observation for attention clearing.
+    expect(paneInfoTrackerMock.notifyUserInput).toHaveBeenCalledWith('pty-1');
   });
 
   it('registers created PTYs with the pane info tracker using the resolved cwd', () => {

@@ -104,6 +104,9 @@ export function registerIpcHandlers(options: RegisterIpcHandlersOptions): Regist
       onSignal: ({ id, signal }) => {
         paneInfoTracker.applySignal(id, signal);
       },
+      onUserInput: ({ id }) => {
+        paneInfoTracker.notifyUserInput(id);
+      },
     },
   });
   const tunnelManager = new TunnelManager({
