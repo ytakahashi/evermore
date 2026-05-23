@@ -295,6 +295,82 @@ describe('WorkspacesView', () => {
     expect(screen.getByLabelText('running')).toBeInTheDocument();
   });
 
+  it('shows the working dot when the agent reports it is processing a turn', () => {
+    // Given: a pane has a runtime info snapshot where the agent status is `running`.
+    usePaneInfoStore.setState({
+      infosByPtyId: {
+        'pty-server': {
+          ptyId: 'pty-server',
+          processActivity: 'running',
+          foregroundCommand: 'claude',
+          foregroundSession: { kind: 'other' },
+          integration: {
+            shell: false,
+            protocols: [],
+            lastSequenceAt: 0,
+            stale: false,
+          },
+          agent: {
+            known: 'claude',
+            kind: 'claude',
+            status: 'running',
+            source: 'agent-protocol',
+            observedAt: 1000,
+          },
+          observedAt: 1000,
+        },
+      },
+      isLoading: false,
+      error: null,
+    });
+
+    // When: the workspace sidebar renders.
+    render(<WorkspacesView />);
+
+    // Then: the working dot replaces the running dot.
+    const indicator = screen.getByLabelText('working');
+    expect(indicator).toHaveClass('bg-accent', 'animate-pulse');
+    expect(screen.queryByLabelText('running')).not.toBeInTheDocument();
+  });
+
+  it('shows the awaiting-input dot when the agent reports it is waiting on the user', () => {
+    // Given: a pane has an agent status requesting user input.
+    usePaneInfoStore.setState({
+      infosByPtyId: {
+        'pty-server': {
+          ptyId: 'pty-server',
+          processActivity: 'running',
+          foregroundCommand: 'claude',
+          foregroundSession: { kind: 'other' },
+          integration: {
+            shell: false,
+            protocols: [],
+            lastSequenceAt: 0,
+            stale: false,
+          },
+          agent: {
+            known: 'claude',
+            kind: 'claude',
+            status: 'awaiting-input',
+            source: 'agent-protocol',
+            observedAt: 1000,
+          },
+          observedAt: 1000,
+        },
+      },
+      isLoading: false,
+      error: null,
+    });
+
+    // When: the workspace sidebar renders.
+    render(<WorkspacesView />);
+
+    // Then: the awaiting-input dot is shown.
+    const indicator = screen.getByLabelText('awaiting input');
+    expect(indicator).toHaveClass('bg-danger');
+    expect(screen.queryByLabelText('running')).not.toBeInTheDocument();
+  });
+
   it('keeps the ssh icon when an ssh session is the foreground process even if remote args mention an agent', () => {
     // Given: a pane is running ssh locally. The tracker would not set `agent` in this state, so the
     // store snapshot omits it; the test pins the renderer behaviour against that contract.

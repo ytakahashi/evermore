@@ -66,6 +66,48 @@ describe('detectAgentFromCommand', () => {
     });
   });
 
+  it('skips boolean flags after a wrapper', () => {
+    // Given: a wrapper invoked with a flag that takes no value.
+    // When / Then: the flag is skipped and the agent token after it is detected.
+    expect(detectAgentFromCommand('sudo -E claude')).toEqual({ known: 'claude', kind: 'claude' });
+    expect(detectAgentFromCommand('sudo -H -E claude')).toEqual({
+      known: 'claude',
+      kind: 'claude',
+    });
+    expect(detectAgentFromCommand('env -i codex')).toEqual({ known: 'codex', kind: 'codex' });
+  });
+
+  it('skips value-taking flags and their value after a wrapper', () => {
+    // Given: wrappers whose flags consume a separate value token before the command.
+    // When / Then: both the flag and its value are skipped and the command is detected.
+    expect(detectAgentFromCommand('sudo -u root claude')).toEqual({
+      known: 'claude',
+      kind: 'claude',
+    });
+    expect(detectAgentFromCommand('env -u FOO claude')).toEqual({
+      known: 'claude',
+      kind: 'claude',
+    });
+    expect(detectAgentFromCommand('env -u FOO -C /tmp codex')).toEqual({
+      known: 'codex',
+      kind: 'codex',
+    });
+  });
+
+  it('skips long options bundled with their value in a single token', () => {
+    // Given: `--long=value` packs the flag and value into one token; the leading `-` is enough to
+    // skip it via the generic flag rule.
+    // When / Then: the agent that follows is still detected.
+    expect(detectAgentFromCommand('env --unset=FOO codex')).toEqual({
+      known: 'codex',
+      kind: 'codex',
+    });
+    expect(detectAgentFromCommand('sudo --preserve-env=PATH claude')).toEqual({
+      known: 'claude',
+      kind: 'claude',
+    });
+  });
+
   it('keeps the original basename in `kind` for cursor-agent vs agent', () => {
     // Given: Cursor publishes two basenames for the same product.
     // When: each is detected.

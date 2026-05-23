@@ -842,6 +842,80 @@ describe('PaneInfoTracker', () => {
     expect(listProcesses).toHaveBeenCalledOnce();
   });
 
+  it('suppresses subsequent shell-integration signals after an ssh shell-command-line and before ps catches up', async () => {
+    // Given: a fresh pane with no ps observation yet. ssh is launched via shell integration.
+    tracker.register('pty-1', 123, '/tmp');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    now = 1002;
+    tracker.applySignal('pty-1', {
+      type: 'shell-command-line',
+      command: 'ssh host',
+      source: 'osc633',
+    });
+    tracker.applySignal('pty-1', { type: 'shell-command-started', source: 'osc133' });
+
+    // When: remote OSC arrives before the next ps tick. The remote shell emits its own command
+    // line and lifecycle markers, which would otherwise overwrite the local ssh command record and
+    // surface a remote agent.
+    now = 1003;
+    tracker.applySignal('pty-1', {
+      type: 'shell-command-line',
+      command: 'claude',
+      source: 'osc633',
+    });
+    tracker.applySignal('pty-1', { type: 'shell-command-started', source: 'osc133' });
+
+    // Then: the local pane keeps the ssh command record, foregroundCommand reflects ssh (not
+    // claude), and no agent is reported. This pins the race window contract: until ps confirms
+    // the foreground process, the early-detection flag must absorb remote-origin signals.
+    const [info] = tracker.list();
+    expect(info?.foregroundCommand).toBe('ssh host');
+    expect(info?.command).toMatchObject({ line: 'ssh host', source: 'shell-integration' });
+    expect(info?.agent).toBeUndefined();
+  });
+
+  it('releases the ssh early-detection flag on the next ps tick so post-ssh local updates apply normally', async () => {
+    // Given: ssh was launched via shell-integration, so the early-detection flag is active.
+    tracker.register('pty-1', 123, '/tmp');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    now = 1002;
+    tracker.applySignal('pty-1', {
+      type: 'shell-command-line',
+      command: 'ssh host',
+      source: 'osc633',
+    });
+
+    // When: ps observes the shell back at the prompt without ever classifying ssh (for example
+    // because the ssh launch failed instantly). The next ps tick must release the flag so the
+    // pane can accept normal shell-integration updates again.
+    rows = [shellRow(123)];
+    now = 1003;
+    await tracker.poll();
+    expect(tracker.list()[0]).toMatchObject({
+      processActivity: 'idle',
+      command: {
+        line: 'ssh host',
+        source: 'shell-integration',
+        finishedAt: 1003,
+      },
+    });
+    expect(tracker.list()[0]?.foregroundCommand).toBeUndefined();
+
+    // And: a fresh local command-line arrives after the prompt.
+    now = 1004;
+    tracker.applySignal('pty-1', {
+      type: 'shell-command-line',
+      command: 'pnpm test',
+      source: 'osc633',
+    });
+    tracker.applySignal('pty-1', { type: 'shell-command-started', source: 'osc133' });
+
+    // Then: the post-ssh command is recorded normally; the early-detection flag did not stick.
+    const [info] = tracker.list();
+    expect(info?.foregroundCommand).toBe('pnpm test');
+    expect(info?.command).toMatchObject({ line: 'pnpm test', source: 'shell-integration' });
+  });
+
   it('reports a ready agent while a known AI agent is the foreground process', async () => {
     // Given: a pane has a known agent (`claude`) as the foreground process.
     tracker.register('pty-1', 123, '/tmp');

@@ -64,6 +64,7 @@ export class PaneInfoTracker {
       integration: createInitialIntegration(),
       lastProcessActivity: 'idle',
       missedPsCommandStarts: 0,
+      sshShellLifecycleActive: false,
     };
     this.processes.set(ptyId, process);
     this.recomputeInfo(process, {
@@ -101,7 +102,7 @@ export class PaneInfoTracker {
         // local currentCommand/lastCommand state from remote prompt markers. In practice
         // currentCommand is undefined while ssh is the foreground process, but guarding here keeps
         // the invariant explicit instead of relying on finishCurrentCommand's early return.
-        if (process.foregroundSession.kind !== 'ssh') {
+        if (!isInSshShellLifecycle(process)) {
           this.finishCurrentCommand(process, now);
         }
         break;
@@ -112,7 +113,7 @@ export class PaneInfoTracker {
 
       case 'shell-command-started':
         this.applyLifecycleProtocol(process, signal.source, now);
-        if (process.foregroundSession.kind !== 'ssh') {
+        if (!isInSshShellLifecycle(process)) {
           process.currentCommand = {
             line: process.shellIntegrationCommandLine ?? '',
             startedAt: now,
@@ -124,7 +125,7 @@ export class PaneInfoTracker {
 
       case 'shell-command-finished':
         this.applyLifecycleProtocol(process, signal.source, now);
-        if (process.foregroundSession.kind !== 'ssh') {
+        if (!isInSshShellLifecycle(process)) {
           this.finishCurrentCommand(process, now, signal.exitCode);
         }
         break;
@@ -133,9 +134,22 @@ export class PaneInfoTracker {
         appendProtocolOnce(process.integration, signal.source);
         process.integration.shell = true;
         process.integration.lastSequenceAt = now;
-        if (process.foregroundSession.kind !== 'ssh') {
+        if (!isInSshShellLifecycle(process)) {
           process.shellIntegrationCommandLine = signal.command;
           process.missedPsCommandStarts = 0;
+          if (isSshCommandLine(signal.command)) {
+            // The local shell is about to launch ssh; subsequent shell-integration signals are
+            // assumed to originate from the remote shell until the process-table poll catches up
+            // and the regular foregroundSession.kind === 'ssh' guard takes over. Pre-populate
+            // currentCommand so the sidebar reflects the ssh invocation immediately, since the
+            // matching local shell-command-started will be skipped by the same guard.
+            process.sshShellLifecycleActive = true;
+            process.currentCommand = {
+              line: signal.command,
+              startedAt: now,
+              source: 'shell-integration',
+            };
+          }
         }
         break;
     }
@@ -247,6 +261,7 @@ export class PaneInfoTracker {
 
   private updateFromRows(rows: ProcessTableRow[]): void {
     for (const process of this.processes.values()) {
+      const observedAt = this.now();
       const observed = observePaneActivity(rows, process.shellPid);
       const previousActivity = process.lastProcessActivity;
       const foregroundSession = classifyForegroundSession(
@@ -267,14 +282,27 @@ export class PaneInfoTracker {
       // and 133;A. The currentCommand guard is intentionally absent so that
       // shellIntegrationCommandLine is cleared even when 633;E arrived without a matching 133;C.
       if (previousActivity === 'running' && observed.activity === 'idle') {
-        this.finishCurrentCommand(process, this.now());
+        this.finishCurrentCommand(process, observedAt);
+      }
+
+      if (process.sshShellLifecycleActive && foregroundSession.kind !== 'ssh') {
+        // The early SSH guard is active only until ps catches up. If the first ps observation does
+        // not confirm ssh, the local launch failed, exited immediately, or moved to a different
+        // foreground state; close the pre-populated ssh command before releasing the guard.
+        this.finishCurrentCommand(process, observedAt);
       }
 
       process.lastProcessActivity = observed.activity;
       process.lastForegroundCommand = observed.foregroundCommand;
       process.lastForegroundArgs = observed.foregroundArgs;
       process.foregroundSession = foregroundSession;
-      this.recomputeInfo(process, { emit: true, observedAt: this.now() });
+      // ps now has its own observation of the foreground state, so the early-detection guard set
+      // by an ssh shell-command-line is no longer needed. If ps confirms ssh, the
+      // foregroundSession-based guards take over; if ps reports anything else, the local ssh
+      // launch either failed or already exited and the flag must release to avoid suppressing
+      // future legitimate updates.
+      process.sshShellLifecycleActive = false;
+      this.recomputeInfo(process, { emit: true, observedAt });
     }
   }
 
@@ -393,7 +421,7 @@ export class PaneInfoTracker {
     foregroundCommand: string | undefined,
     observedAt: number,
   ): PaneAgentInfo | undefined {
-    if (processActivity === 'idle' || process.foregroundSession.kind === 'ssh') {
+    if (processActivity === 'idle' || isInSshShellLifecycle(process)) {
       return undefined;
     }
 
@@ -472,6 +500,36 @@ export class PaneInfoTracker {
       this.callbacks.onChanged({ info: nextInfo });
     }
   }
+}
+
+/**
+ * Returns whether the pane is currently inside an ssh-bound shell-integration lifecycle.
+ *
+ * This collapses the two SSH suppression sources — the process-table classification and the
+ * shell-command-line early detection — so each call site reads as a single SSH check.
+ */
+function isInSshShellLifecycle(process: RegisteredPaneProcess): boolean {
+  return process.foregroundSession.kind === 'ssh' || process.sshShellLifecycleActive;
+}
+
+/**
+ * Returns whether `commandLine` invokes `ssh` as its leading command token.
+ *
+ * Used by the shell-command-line handler to flag the pane as ssh-bound before the next
+ * process-table poll classifies the foreground session. The match is intentionally narrow — only
+ * the literal `ssh` basename — so aliases or wrappers that resolve to ssh under the hood
+ * (`ss host`, custom scripts) are not detected here; for those cases the process-table classifier
+ * still picks them up once ps observes the resolved path.
+ */
+function isSshCommandLine(commandLine: string): boolean {
+  const trimmed = commandLine.trim();
+  if (!trimmed) {
+    return false;
+  }
+  const firstToken = trimmed.split(/\s+/, 1)[0] ?? '';
+  const slash = firstToken.lastIndexOf('/');
+  const basename = slash >= 0 ? firstToken.slice(slash + 1) : firstToken;
+  return basename === 'ssh';
 }
 
 function createInitialIntegration(): PaneIntegrationInfo {

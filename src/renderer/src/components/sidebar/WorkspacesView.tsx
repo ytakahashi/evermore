@@ -6,6 +6,7 @@ import type { Pane, PaneRuntimeInfo } from '../../../../shared/types';
 import { usePaneInfoStore } from '../../stores/paneInfoStore';
 import { useUiStore } from '../../stores/uiStore';
 import { useWorkspaceStore } from '../../stores/workspaceStore';
+import { getPaneRunningIndicator } from './pane-running-indicator';
 import { SparklesIcon } from './SparklesIcon';
 
 function formatPaneCount(count: number): string {
@@ -89,6 +90,7 @@ function PaneSummary({
   paneIndex,
 }: PaneSummaryProps): React.JSX.Element {
   const isRunning = info?.processActivity === 'running';
+  const indicator = getPaneRunningIndicator(info);
   const label =
     isRunning && info?.foregroundCommand
       ? info.foregroundCommand
@@ -107,11 +109,11 @@ function PaneSummary({
           onClick={onClick}
         >
           <PaneLeadingIcon info={info} isActivePane={isActivePane} paneIndex={paneIndex} />
-          {isRunning && (
+          {indicator && (
             <span
-              aria-label="running"
-              className="mt-1.5 size-1.5 shrink-0 rounded-full bg-success"
-              title="Running"
+              aria-label={indicator.label}
+              className={indicator.className}
+              title={indicator.title}
             />
           )}
           <div className="min-w-0 flex-1">
