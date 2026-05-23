@@ -34,6 +34,14 @@ export interface RegisteredPaneProcess {
   lastForegroundArgs?: string;
   lastProcessActivity: PaneProcessActivity;
   missedPsCommandStarts: number;
+  /**
+   * Set when a local shell-integration command line introduced an `ssh` invocation but the
+   * process-table poll has not yet classified the foreground session as `ssh`. While active, the
+   * tracker treats subsequent shell-integration signals as remote-origin and suppresses local
+   * state updates that they would otherwise drive. Released on the next process-table observation,
+   * after which the regular `foregroundSession.kind === 'ssh'` guard takes over.
+   */
+  sshShellLifecycleActive: boolean;
 }
 
 export interface ProcessTableRow {

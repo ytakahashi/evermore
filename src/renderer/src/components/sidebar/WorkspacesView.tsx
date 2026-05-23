@@ -6,6 +6,8 @@ import type { Pane, PaneRuntimeInfo } from '../../../../shared/types';
 import { usePaneInfoStore } from '../../stores/paneInfoStore';
 import { useUiStore } from '../../stores/uiStore';
 import { useWorkspaceStore } from '../../stores/workspaceStore';
+import { getPaneRunningIndicator } from './pane-running-indicator';
+import { SparklesIcon } from './SparklesIcon';
 
 function formatPaneCount(count: number): string {
   return `${count} ${count === 1 ? 'pane' : 'panes'}`;
@@ -16,15 +18,34 @@ interface PaneSummaryProps {
   isActivePane: boolean;
   onClick: () => void;
   pane: Pane;
+  paneIndex: number;
 }
 
 function PaneLeadingIcon({
   info,
   isActivePane,
+  paneIndex,
 }: {
   info?: PaneRuntimeInfo;
   isActivePane: boolean;
+  paneIndex: number;
 }): React.JSX.Element {
+  // Agent takes precedence over SSH: while a known agent is in the foreground, the tracker
+  // guarantees foregroundSession is not 'ssh' (the SSH guard suppresses agent detection), so the
+  // two cases are mutually exclusive in practice. The order here just makes the precedence
+  // explicit if a future change relaxes that invariant.
+  if (info?.agent) {
+    return (
+      <span
+        aria-label={info.agent.known ? `${info.agent.known} agent` : 'ai agent'}
+        className="mt-0.5 shrink-0"
+        title={info.agent.known ?? info.agent.kind ?? 'AI agent'}
+      >
+        <SparklesIcon agent={info.agent.known} paneIndex={paneIndex} />
+      </span>
+    );
+  }
+
   if (info?.processActivity === 'running') {
     switch (info.foregroundSession.kind) {
       case 'ssh':
@@ -61,8 +82,15 @@ function PaneLeadingIcon({
   );
 }
 
-function PaneSummary({ info, isActivePane, onClick, pane }: PaneSummaryProps): React.JSX.Element {
+function PaneSummary({
+  info,
+  isActivePane,
+  onClick,
+  pane,
+  paneIndex,
+}: PaneSummaryProps): React.JSX.Element {
   const isRunning = info?.processActivity === 'running';
+  const indicator = getPaneRunningIndicator(info);
   const label =
     isRunning && info?.foregroundCommand
       ? info.foregroundCommand
@@ -80,12 +108,12 @@ function PaneSummary({ info, isActivePane, onClick, pane }: PaneSummaryProps): R
           type="button"
           onClick={onClick}
         >
-          <PaneLeadingIcon info={info} isActivePane={isActivePane} />
-          {isRunning && (
+          <PaneLeadingIcon info={info} isActivePane={isActivePane} paneIndex={paneIndex} />
+          {indicator && (
             <span
-              aria-label="running"
-              className="mt-1.5 size-1.5 shrink-0 rounded-full bg-success"
-              title="Running"
+              aria-label={indicator.label}
+              className={indicator.className}
+              title={indicator.title}
             />
           )}
           <div className="min-w-0 flex-1">
@@ -488,7 +516,7 @@ export function WorkspacesView(): React.JSX.Element {
                           </div>
                         </div>
                         <div className="space-y-0.5">
-                          {paneOrder.map(({ paneId }) => {
+                          {paneOrder.map(({ paneId }, paneIndex) => {
                             const pane = workspace.panes.find(
                               (currentPane) => currentPane.id === paneId,
                             );
@@ -504,6 +532,7 @@ export function WorkspacesView(): React.JSX.Element {
                                 info={info}
                                 isActivePane={isActivePane}
                                 pane={pane}
+                                paneIndex={paneIndex}
                                 onClick={() => {
                                   selectWorkspacePane(workspace.id, tab.id, pane.id);
                                   closeSettings();
