@@ -65,19 +65,48 @@ export interface PaneIntegrationInfo {
   stale: boolean;
 }
 
+/**
+ * User-attention state raised by an explicit AI agent signal.
+ *
+ * Only set when an agent protocol signal asks for user input. Cleared by explicit transitions
+ * (the next agent status update, the next shell command start, observed user input, or PTY exit)
+ * rather than by a timeout. Generic bell / notification sources are intentionally not represented
+ * here; if they need to surface in the future, extend `kind` and `source` then.
+ */
 export interface PaneAttentionInfo {
-  kind: 'awaiting-input' | 'bell';
-  source: 'agent-protocol' | 'notification' | 'heuristic';
+  kind: 'awaiting-input';
+  source: 'agent-protocol';
   observedAt: number;
-  expiresAt?: number;
 }
 
+/**
+ * Closed union of AI agents that the sidebar maps to a dedicated icon / color.
+ *
+ * `kind` on {@link PaneAgentInfo} keeps the raw detection value; this type is the curated subset
+ * that drives UI affordances.
+ */
+export type PaneKnownAgent = 'claude' | 'codex' | 'cursor' | 'antigravity';
+
+/**
+ * Information about the AI agent running in the pane's foreground.
+ *
+ * `known` is the closed union used for UI mapping, while `kind` retains the raw basename or
+ * protocol value (useful for telemetry and forward compatibility with agents that are not yet
+ * promoted to the known set). `status === 'ready'` means the agent TUI is alive and sitting at its
+ * input prompt — used both right after launch and after a turn completes, so the UI can map both
+ * to the same indicator.
+ */
 export interface PaneAgentInfo {
-  known?: 'claude' | 'gemini' | 'codex';
+  known?: PaneKnownAgent;
   kind: string | undefined;
-  status?: 'running' | 'thinking' | 'awaiting-input' | 'complete';
-  source: 'command-line' | 'agent-protocol' | 'heuristic';
+  status?: 'ready' | 'running' | 'awaiting-input';
+  source: 'command-line' | 'agent-protocol';
   observedAt: number;
+  /** Optional metadata carried from an agent protocol payload. Unused by command-line detection. */
+  detail?: {
+    event?: string;
+    message?: string;
+  };
 }
 
 export interface PaneRuntimeInfo {
