@@ -186,21 +186,38 @@ export class PaneInfoTracker {
   /**
    * Observes renderer-originated input written to a PTY.
    *
-   * This intentionally clears only explicit awaiting-input attention. Agent status itself is left
-   * unchanged because user keystrokes do not prove whether the agent resumed, completed, or is
-   * still validating the response.
+   * User input means an explicit approval/input prompt has been answered. The answer may have been
+   * approval or rejection, and that result is not observable through the PTY write path, so the
+   * conservative fallback is to leave the agent alive but return it to `ready`. Later explicit
+   * agent protocol signals can still move it back to `running` or confirm `ready`.
+   *
+   * We intentionally do not filter by key kind: navigation/control keys also mean the user has
+   * noticed the awaiting-input prompt. This can briefly render awaiting-input -> ready -> running
+   * when a user navigates before approving, but the next explicit agent signal converges the state.
    */
   public notifyUserInput(ptyId: string): void {
     const process = this.processes.get(ptyId);
-    // The kind guard is structurally redundant today because PaneAttentionInfo.kind is the
-    // literal 'awaiting-input'. It is kept so that future kinds added to the union cannot
-    // accidentally be cleared by user input through this path.
-    if (!process?.attention || process.attention.kind !== 'awaiting-input') {
+    // The attention `kind` comparison is structurally redundant today because
+    // PaneAttentionInfo.kind is the literal 'awaiting-input'. It is kept so that future kinds
+    // added to the union cannot accidentally be cleared by user input through this path.
+    const hasAwaitingInputAttention = process?.attention?.kind === 'awaiting-input';
+    const hasAwaitingInputAgent = process?.agent?.status === 'awaiting-input';
+    if (!process || (!hasAwaitingInputAttention && !hasAwaitingInputAgent)) {
       return;
     }
 
-    process.attention = undefined;
-    this.recomputeInfo(process, { emit: true, observedAt: this.now() });
+    const observedAt = this.now();
+    if (hasAwaitingInputAttention) {
+      process.attention = undefined;
+    }
+    if (hasAwaitingInputAgent && process.agent) {
+      process.agent = {
+        ...process.agent,
+        status: 'ready',
+        observedAt,
+      };
+    }
+    this.recomputeInfo(process, { emit: true, observedAt });
   }
 
   /**
