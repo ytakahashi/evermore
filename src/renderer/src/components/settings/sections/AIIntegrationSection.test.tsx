@@ -36,6 +36,20 @@ describe('AIIntegrationSection', () => {
     expect(screen.getByText(/sidebar shows Claude as running/i)).toBeInTheDocument();
   });
 
+  it('keeps snippet bodies collapsed until the user opens them', () => {
+    // Given: the AI Integration section is visible.
+    render(<AIIntegrationSection />);
+
+    // Then: the long helper script body is not rendered by default.
+    expect(screen.queryByText(/AGENT="\$\{1:-\}"/)).not.toBeInTheDocument();
+
+    // When: the user opens the first snippet accordion.
+    fireEvent.click(screen.getAllByRole('button', { name: /Show snippet/i })[0]);
+
+    // Then: the helper script body becomes visible.
+    expect(screen.getByText(/AGENT="\$\{1:-\}"/)).toBeInTheDocument();
+  });
+
   it('switches between agent-specific hook snippets', () => {
     // Given: the AI Integration section is visible.
     render(<AIIntegrationSection />);

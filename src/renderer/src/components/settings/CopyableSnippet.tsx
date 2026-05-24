@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import type { ReactNode } from 'react';
-import { Check, Copy } from 'lucide-react';
+import { Check, ChevronDown, ChevronRight, Copy } from 'lucide-react';
 
 export interface CopyableSnippetDefinition {
   content: string;
@@ -22,6 +22,8 @@ interface CopyableSnippetProps {
  */
 export function CopyableSnippet({ snippet }: CopyableSnippetProps): React.JSX.Element {
   const [copyState, setCopyState] = useState<CopyState>('idle');
+  const [isOpen, setIsOpen] = useState(false);
+  const contentId = `settings-snippet-${snippet.id}`;
 
   const copySnippet = async (): Promise<void> => {
     if (typeof navigator === 'undefined' || !navigator.clipboard) {
@@ -56,7 +58,19 @@ export function CopyableSnippet({ snippet }: CopyableSnippetProps): React.JSX.El
       </div>
       <div className="rounded bg-raised">
         <div className="flex items-center justify-between gap-3 border-b border-border-subtle px-3 py-2">
-          <span className="font-mono text-xs text-muted">{snippet.language}</span>
+          <button
+            aria-controls={contentId}
+            aria-expanded={isOpen}
+            className="inline-flex min-w-0 items-center gap-1.5 text-left text-xs text-muted hover:text-foreground"
+            onClick={() => {
+              setIsOpen((current) => !current);
+            }}
+            type="button"
+          >
+            {isOpen ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+            <span className="font-mono">{snippet.language}</span>
+            <span>{isOpen ? 'Hide snippet' : 'Show snippet'}</span>
+          </button>
           <button
             aria-label={`Copy ${snippet.title} snippet`}
             className="inline-flex items-center gap-1.5 rounded border border-border bg-background px-2 py-1 text-xs text-foreground transition-colors hover:border-brand hover:bg-panel hover:text-brand disabled:opacity-50"
@@ -70,9 +84,14 @@ export function CopyableSnippet({ snippet }: CopyableSnippetProps): React.JSX.El
             <span>{copyState === 'copied' ? 'Copied' : 'Copy snippet'}</span>
           </button>
         </div>
-        <pre className="overflow-x-auto p-3 font-mono text-xs leading-5 text-foreground">
-          <code>{snippet.content}</code>
-        </pre>
+        {isOpen ? (
+          <pre
+            className="overflow-x-auto p-3 font-mono text-xs leading-5 text-foreground"
+            id={contentId}
+          >
+            <code>{snippet.content}</code>
+          </pre>
+        ) : null}
       </div>
       {copyState === 'error' ? <div className="mt-2 text-xs text-danger">Copy failed</div> : null}
     </article>
