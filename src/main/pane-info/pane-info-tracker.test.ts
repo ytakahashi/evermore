@@ -1209,7 +1209,7 @@ describe('PaneInfoTracker', () => {
     expect(tracker.list()[0]?.agent).toBeUndefined();
   });
 
-  it('clears only awaiting-input attention when user input is written', () => {
+  it('returns awaiting-input agents to ready when user input is written', () => {
     // Given: an explicit awaiting-input event is active.
     tracker.register('pty-1', 123, '/tmp');
     now = 1002;
@@ -1227,14 +1227,135 @@ describe('PaneInfoTracker', () => {
 
     // When: renderer-originated user input is observed.
     now = 1003;
+    onChanged.mockClear();
     tracker.notifyUserInput('pty-1');
 
-    // Then: attention clears while agent status remains whatever the explicit protocol last said.
+    // Then: attention clears and the agent falls back to ready because the approval result is not
+    // observable through the PTY write path.
     expect(tracker.list()[0]?.attention).toBeUndefined();
     expect(tracker.list()[0]?.agent).toMatchObject({
       known: 'claude',
-      status: 'awaiting-input',
+      status: 'ready',
       source: 'agent-protocol',
+      observedAt: 1003,
+    });
+    expect(onChanged).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not change running or ready agent status when user input is written', () => {
+    // Given: an explicit running event is active.
+    tracker.register('pty-1', 123, '/tmp');
+    now = 1002;
+    tracker.applySignal('pty-1', { type: 'shell-command-started', source: 'osc133' });
+    tracker.applySignal('pty-1', {
+      type: 'agent-event',
+      source: 'evermore-osc777',
+      event: {
+        v: 1,
+        type: 'agent-status',
+        agent: 'claude',
+        status: 'running',
+      },
+    });
+
+    // When: renderer-originated user input is observed.
+    now = 1003;
+    onChanged.mockClear();
+    tracker.notifyUserInput('pty-1');
+
+    // Then: running state is preserved and no redundant runtime snapshot is emitted.
+    expect(tracker.list()[0]?.agent).toMatchObject({
+      known: 'claude',
+      status: 'running',
+      source: 'agent-protocol',
+      observedAt: 1002,
+    });
+    expect(onChanged).not.toHaveBeenCalled();
+
+    // When: the agent reports completion and another user input is observed.
+    now = 1004;
+    tracker.applySignal('pty-1', {
+      type: 'agent-event',
+      source: 'evermore-osc777',
+      event: {
+        v: 1,
+        type: 'agent-status',
+        agent: 'claude',
+        status: 'complete',
+      },
+    });
+    now = 1005;
+    onChanged.mockClear();
+    tracker.notifyUserInput('pty-1');
+
+    // Then: ready state is also preserved without an emit.
+    expect(tracker.list()[0]?.agent).toMatchObject({
+      known: 'claude',
+      status: 'ready',
+      source: 'agent-protocol',
+      observedAt: 1004,
+    });
+    expect(onChanged).not.toHaveBeenCalled();
+  });
+
+  it('allows explicit agent events to overwrite the ready fallback after user input', () => {
+    // Given: awaiting-input has fallen back to ready after user input.
+    tracker.register('pty-1', 123, '/tmp');
+    now = 1002;
+    tracker.applySignal('pty-1', { type: 'shell-command-started', source: 'osc133' });
+    tracker.applySignal('pty-1', {
+      type: 'agent-event',
+      source: 'evermore-osc777',
+      event: {
+        v: 1,
+        type: 'agent-status',
+        agent: 'claude',
+        status: 'awaiting-input',
+      },
+    });
+    now = 1003;
+    tracker.notifyUserInput('pty-1');
+
+    // When: the agent later reports that it is running.
+    now = 1004;
+    tracker.applySignal('pty-1', {
+      type: 'agent-event',
+      source: 'evermore-osc777',
+      event: {
+        v: 1,
+        type: 'agent-status',
+        agent: 'claude',
+        status: 'running',
+      },
+    });
+
+    // Then: explicit protocol status still wins over the fallback.
+    expect(tracker.list()[0]?.agent).toMatchObject({
+      known: 'claude',
+      status: 'running',
+      source: 'agent-protocol',
+      observedAt: 1004,
+    });
+
+    // When: the agent reports completion.
+    now = 1005;
+    tracker.applySignal('pty-1', {
+      type: 'agent-event',
+      source: 'evermore-osc777',
+      event: {
+        v: 1,
+        type: 'agent-status',
+        agent: 'claude',
+        status: 'complete',
+      },
+    });
+
+    // Then: complete still normalizes to ready.
+    expect(tracker.list()[0]?.agent).toMatchObject({
+      known: 'claude',
+      status: 'ready',
+      source: 'agent-protocol',
+      observedAt: 1005,
     });
   });
 
