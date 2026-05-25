@@ -41,13 +41,12 @@ With AI agent hooks configured, the sidebar reflects per-pane agent status in re
 
 ## Recommended Setup
 
-- **Zsh Auto-Injection (zsh)**: Enabled by default. You can toggle this behavior under **Settings >
-  Advanced features**.
 - **SSH Config**: Open **Settings > Recommended setup** to view and copy recommended SSH tunnel
   reliability configuration (such as keep-alives) that keep background port-forwarding tunnels
   reliable.
-- **Manual Shell Setup (Fallback)**: Copy the Shell integration (zsh) snippet from **Settings >
-  Recommended setup** if you run custom shells or subshells, or prefer to configure shell
-  integration manually.
+- **Zsh Auto-Injection**: Enabled by default. You can toggle this behavior under **Settings >
+  Advanced features**.
+- **Manual Shell Setup**: Copy the Shell integration (zsh) snippet from **Settings > Recommended
+  setup** if you run custom shells or subshells, or prefer to configure shell integration manually.
 - **AI Agent Hooks**: Open **Settings > AI Integration** to copy the Evermore agent status helper
   and agent hook snippets.
