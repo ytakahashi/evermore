@@ -45,4 +45,7 @@ export const IPC = {
   // Window
   WINDOW_IS_FULLSCREEN: 'window:is-fullscreen',
   WINDOW_FULLSCREEN_CHANGED: 'window:fullscreen-changed', // main -> renderer
+
+  // Shortcuts (main -> renderer: dispatched from the application menu)
+  SHORTCUT_INVOKE: 'shortcut:invoke',
 } as const;

@@ -78,6 +78,9 @@ describe('App', () => {
           isFullScreen: vi.fn(() => Promise.resolve(false)),
           onFullScreenChanged: vi.fn(() => vi.fn()),
         },
+        shortcuts: {
+          onInvoke: vi.fn(() => vi.fn()),
+        },
       } as unknown as Window['api'],
     });
   });

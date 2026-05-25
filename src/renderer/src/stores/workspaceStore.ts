@@ -1,4 +1,5 @@
 import { create, type StoreApi, type UseBoundStore } from 'zustand';
+import { flattenLayout, type PaneRect } from '../../../shared/pane-layout';
 import { getPathBasename } from '../../../shared/path-label';
 import type { Pane, PaneLayout, Tab, Workspace } from '../../../shared/types';
 
@@ -7,9 +8,17 @@ const DEFAULT_CWD_SAVE_DEBOUNCE_MS = 1000;
 const DEFAULT_SPLIT_RATIO = 0.5;
 const MAX_SPLIT_RATIO = 0.85;
 const MIN_SPLIT_RATIO = 0.15;
+/**
+ * Tolerance for comparing pane edge positions in container-percentage units. `flattenLayout`
+ * produces values derived from float multiplication on `ratio`, so exact equality cannot be
+ * assumed; 0.01 percentage points is well below any pane size the renderer can produce.
+ */
+const PANE_EDGE_EPSILON_PCT = 0.01;
 
 type WorkspaceApi = Window['api']['workspace'];
 type SplitDirection = Extract<PaneLayout, { type: 'split' }>['direction'];
+export type TabSelectionDirection = 'next' | 'previous';
+export type PaneFocusDirection = 'left' | 'right' | 'up' | 'down';
 
 interface CreateWorkspaceStoreOptions {
   createId?: () => string;
@@ -42,7 +51,34 @@ export interface WorkspaceStoreState {
   setActivePane: (paneId: string) => void;
   setPanePtyId: (paneId: string, ptyId: string | null) => void;
   splitPane: (paneId: string, direction: SplitDirection) => void;
+  /**
+   * Splits the active pane of the active workspace's active tab. No-op when there is no active
+   * workspace, tab, or pane. Used by the menu-driven shortcut dispatcher so the menu click handler
+   * does not need to resolve the active pane id itself.
+   */
+  splitActivePane: (direction: SplitDirection) => void;
+  /**
+   * Selects the next / previous tab on the active workspace, wrapping around at the ends. No-op
+   * when the workspace has zero or one tab. Used by the menu-driven shortcut dispatcher.
+   */
+  selectAdjacentTab: (direction: TabSelectionDirection) => void;
+  /**
+   * Moves focus to the pane geometrically adjacent to the active pane in the given direction.
+   *
+   * Selection algorithm: candidates are panes whose facing edge aligns with the active pane's edge
+   * in `direction` (within {@link PANE_EDGE_EPSILON_PCT}). Among those candidates, the one with
+   * the largest overlap on the perpendicular axis wins; ties are broken by smaller center
+   * distance. The active pane never wraps — if no candidate touches the edge (single pane or
+   * outermost pane in `direction`), this is a no-op.
+   */
+  focusAdjacentPane: (direction: PaneFocusDirection) => void;
   closePane: (paneId: string) => void;
+  /**
+   * Closes the active workspace's active tab. No-op when there is no active workspace, no active
+   * tab, or only one tab remains (mirrors {@link closeWorkspaceTab}). Used by the menu-driven
+   * shortcut dispatcher.
+   */
+  closeActiveTab: () => void;
   /**
    * Closes a pane in response to its PTY exiting. Behaves like {@link closePane} when the tab has
    * more than one pane. When the exiting pane is the last one in its tab, the tab is closed via
@@ -201,6 +237,94 @@ function updateSplitRatio(layout: PaneLayout, path: number[], ratio: number): Pa
       index === childIndex ? updateSplitRatio(child, remainingPath, ratio) : child,
     ) as [PaneLayout, PaneLayout],
   };
+}
+
+function rectsTouch(active: PaneRect, candidate: PaneRect, direction: PaneFocusDirection): boolean {
+  switch (direction) {
+    case 'left':
+      return (
+        Math.abs(candidate.leftPct + candidate.widthPct - active.leftPct) <= PANE_EDGE_EPSILON_PCT
+      );
+    case 'right':
+      return (
+        Math.abs(candidate.leftPct - (active.leftPct + active.widthPct)) <= PANE_EDGE_EPSILON_PCT
+      );
+    case 'up':
+      return (
+        Math.abs(candidate.topPct + candidate.heightPct - active.topPct) <= PANE_EDGE_EPSILON_PCT
+      );
+    case 'down':
+      return (
+        Math.abs(candidate.topPct - (active.topPct + active.heightPct)) <= PANE_EDGE_EPSILON_PCT
+      );
+  }
+}
+
+function perpendicularOverlap(
+  active: PaneRect,
+  candidate: PaneRect,
+  direction: PaneFocusDirection,
+): number {
+  if (direction === 'left' || direction === 'right') {
+    const top = Math.max(active.topPct, candidate.topPct);
+    const bottom = Math.min(
+      active.topPct + active.heightPct,
+      candidate.topPct + candidate.heightPct,
+    );
+    return bottom - top;
+  }
+  const left = Math.max(active.leftPct, candidate.leftPct);
+  const right = Math.min(active.leftPct + active.widthPct, candidate.leftPct + candidate.widthPct);
+  return right - left;
+}
+
+function centerDistance(a: PaneRect, b: PaneRect): number {
+  const ax = a.leftPct + a.widthPct / 2;
+  const ay = a.topPct + a.heightPct / 2;
+  const bx = b.leftPct + b.widthPct / 2;
+  const by = b.topPct + b.heightPct / 2;
+  return Math.hypot(ax - bx, ay - by);
+}
+
+/**
+ * Returns the pane id geometrically adjacent to `activePaneId` in `direction`, or `null` when no
+ * candidate touches the active pane's facing edge. See `focusAdjacentPane`'s JSDoc for the full
+ * selection rule.
+ */
+export function findAdjacentPaneId(
+  layout: PaneLayout,
+  activePaneId: string,
+  direction: PaneFocusDirection,
+): string | null {
+  const { panes } = flattenLayout(layout);
+  const activeRect = panes.find((rect) => rect.paneId === activePaneId);
+  if (!activeRect) {
+    return null;
+  }
+
+  let best: { paneId: string; overlap: number; distance: number } | null = null;
+  for (const candidate of panes) {
+    if (candidate.paneId === activePaneId) {
+      continue;
+    }
+    if (!rectsTouch(activeRect, candidate, direction)) {
+      continue;
+    }
+    const overlap = perpendicularOverlap(activeRect, candidate, direction);
+    if (overlap <= PANE_EDGE_EPSILON_PCT) {
+      continue;
+    }
+    const distance = centerDistance(activeRect, candidate);
+    if (
+      !best ||
+      overlap > best.overlap + PANE_EDGE_EPSILON_PCT ||
+      (Math.abs(overlap - best.overlap) <= PANE_EDGE_EPSILON_PCT && distance < best.distance)
+    ) {
+      best = { paneId: candidate.paneId, overlap, distance };
+    }
+  }
+
+  return best?.paneId ?? null;
 }
 
 function findActiveTabIndex(workspace: Workspace, tabId: string): number {
@@ -706,6 +830,62 @@ export function createWorkspaceStore(
             }),
           })),
         }));
+      },
+      splitActivePane: (direction: SplitDirection): void => {
+        const activePane = selectActivePane(get());
+        if (!activePane) {
+          return;
+        }
+
+        get().splitPane(activePane.id, direction);
+      },
+      selectAdjacentTab: (direction: TabSelectionDirection): void => {
+        const workspace = selectActiveWorkspace(get());
+        if (!workspace || workspace.tabs.length <= 1) {
+          return;
+        }
+
+        const activeTabId = workspace.activeTabId;
+        const currentIndex = activeTabId
+          ? workspace.tabs.findIndex((tab) => tab.id === activeTabId)
+          : -1;
+        // Fall back to the first tab when no tab is active so the user still gets a deterministic
+        // move on the first invocation. `tabs.length` is guaranteed > 1 here, so the modulo
+        // arithmetic below is safe.
+        const startIndex = currentIndex >= 0 ? currentIndex : 0;
+        const delta = direction === 'next' ? 1 : -1;
+        const length = workspace.tabs.length;
+        const nextIndex = (startIndex + delta + length) % length;
+        const targetTab = workspace.tabs[nextIndex];
+        if (!targetTab || targetTab.id === activeTabId) {
+          return;
+        }
+
+        get().selectWorkspaceTab(workspace.id, targetTab.id);
+      },
+      focusAdjacentPane: (direction: PaneFocusDirection): void => {
+        const state = get();
+        const workspace = selectActiveWorkspace(state);
+        const tab = selectActiveTab(state);
+        const activePane = selectActivePane(state);
+        if (!workspace || !tab || !activePane) {
+          return;
+        }
+
+        const targetPaneId = findAdjacentPaneId(tab.layout, activePane.id, direction);
+        if (!targetPaneId) {
+          return;
+        }
+
+        get().setActivePane(targetPaneId);
+      },
+      closeActiveTab: (): void => {
+        const workspace = selectActiveWorkspace(get());
+        if (!workspace || !workspace.activeTabId) {
+          return;
+        }
+
+        get().closeWorkspaceTab(workspace.id, workspace.activeTabId);
       },
       splitPane: (paneId: string, direction: SplitDirection): void => {
         const workspace = selectActiveWorkspace(get());

@@ -1,7 +1,9 @@
-import { app, type BrowserWindow } from 'electron';
+import { app, Menu, shell, type BrowserWindow, type MenuItemConstructorOptions } from 'electron';
 import { IPC } from '../../shared/ipc-channels';
 import type { AppSettings } from '../../shared/types';
 import { HotkeyManager } from '../hotkey/hotkey-manager';
+import { createMenuController, type MenuController } from '../menu/menu-controller';
+import { createShortcutDispatcher } from '../menu/dispatcher';
 import { PaneInfoTracker } from '../pane-info/pane-info-tracker';
 import { PtyManager } from '../pty/pty-manager';
 import { SettingsStore } from '../settings/settings-store';
@@ -25,6 +27,12 @@ interface RegisterIpcHandlersOptions {
    * `app.getPath('userData')`; tests inject a fake to avoid touching the real userData directory.
    */
   shellIntegrationInjector?: ShellIntegrationInjector;
+  /**
+   * Whether the application is running in development mode. Threaded through to the menu builder
+   * so the DevTools toggle only appears in dev. Defaults to `false` for test convenience; the
+   * production caller passes `is.dev` from `@electron-toolkit/utils`.
+   */
+  isDev?: boolean;
 }
 
 export interface RegisteredIpcHandlers {
@@ -130,6 +138,21 @@ export function registerIpcHandlers(options: RegisterIpcHandlersOptions): Regist
       }
     },
   });
+  const shortcutDispatchers = createShortcutDispatcher(options.getWindow);
+  const menuController: MenuController = createMenuController({
+    settingsStore,
+    dispatchers: shortcutDispatchers,
+    getWindow: options.getWindow,
+    openHelp: (): void => {
+      // Help menu currently points at the GitHub homepage; same URL the README and About dialog
+      // already advertise so users land somewhere recognisable.
+      void shell.openExternal('https://github.com/ytakahashi/evermore');
+    },
+    isDev: options.isDev ?? false,
+    setApplicationMenu: (template: MenuItemConstructorOptions[]): void => {
+      Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+    },
+  });
   const disposePtyHandlers = registerPtyHandlers({ getWindow: options.getWindow, ptyManager });
   const disposePaneInfoHandlers = registerPaneInfoHandlers({
     getWindow: options.getWindow,
@@ -166,6 +189,7 @@ export function registerIpcHandlers(options: RegisterIpcHandlersOptions): Regist
       disposeWindowHandlers();
       hotkeyManager.dispose();
       paneInfoTracker.dispose();
+      menuController.dispose();
     },
   };
 }

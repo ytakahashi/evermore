@@ -17,25 +17,14 @@ import { TopBar } from './TopBar';
  */
 export function AppShell(): React.JSX.Element {
   const activeView = useUiStore((state) => state.activeView);
-  const openSettings = useUiStore((state) => state.openSettings);
   const closeSettings = useUiStore((state) => state.closeSettings);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent): void => {
-      // Cmd+, is the macOS-standard shortcut for "open settings". We make it open-only (matching
-      // System Settings / Finder / Safari) so that pressing it while settings is already visible
-      // is a no-op rather than a toggle. Pressing it from any view brings settings up.
-      if (event.key === ',' && (event.metaKey || event.ctrlKey)) {
-        // The xterm input pipeline doesn't claim Cmd+, so suppressing default here only blocks
-        // browser shortcuts (which we don't have meaningful targets for in Electron).
-        event.preventDefault();
-        openSettings();
-        return;
-      }
-
-      // Esc closes the settings view. The same key needs to keep working inside the workspace
-      // pane (e.g. clearing fullscreen) — when settings is not the active view we let the event
-      // pass through unmodified.
+      // Esc closes the settings view. The application menu owns `Cmd+,` (Preferences…) via the
+      // shortcut dispatcher, so opening settings is not handled here. The same Esc key needs to
+      // keep working inside the workspace pane (e.g. clearing fullscreen) — when settings is not
+      // the active view we let the event pass through unmodified.
       if (event.key === 'Escape') {
         const currentActiveView = useUiStore.getState().activeView;
         if (currentActiveView === 'settings') {
@@ -49,7 +38,7 @@ export function AppShell(): React.JSX.Element {
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
     };
-  }, [openSettings, closeSettings]);
+  }, [closeSettings]);
 
   return (
     <div className="flex h-screen w-screen flex-col overflow-hidden bg-background font-sans text-foreground">
