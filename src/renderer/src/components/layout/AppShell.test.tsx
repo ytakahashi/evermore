@@ -40,32 +40,16 @@ describe('AppShell', () => {
     expect(screen.getByTestId('settings-pane')).toBeInTheDocument();
   });
 
-  it('opens the settings view when Cmd+, is pressed and is idempotent', () => {
+  it('does not handle Cmd+, in the renderer — that is owned by the application menu now', () => {
     // Given: the user is on the workspace view.
     render(<AppShell />);
 
-    // When: Cmd+, is pressed.
+    // When: Cmd+, is pressed in the renderer.
     fireEvent.keyDown(window, { key: ',', metaKey: true });
 
-    // Then: the active view flips to settings.
-    expect(useUiStore.getState().activeView).toBe('settings');
-
-    // When: Cmd+, is pressed again while already on settings.
-    fireEvent.keyDown(window, { key: ',', metaKey: true });
-
-    // Then: it remains a no-op (matches macOS System Settings behavior).
-    expect(useUiStore.getState().activeView).toBe('settings');
-  });
-
-  it('also accepts Ctrl+, on platforms where Cmd is not available', () => {
-    // Given: the user is on the workspace view.
-    render(<AppShell />);
-
-    // When: Ctrl+, is pressed (CommandOrControl).
-    fireEvent.keyDown(window, { key: ',', ctrlKey: true });
-
-    // Then: settings opens.
-    expect(useUiStore.getState().activeView).toBe('settings');
+    // Then: AppShell no longer toggles the view from a keydown handler; the macOS application
+    // menu dispatches `ui.openSettings` instead via `useShortcutBridge`.
+    expect(useUiStore.getState().activeView).toBe('workspace');
   });
 
   it('closes the settings view when Esc is pressed', () => {

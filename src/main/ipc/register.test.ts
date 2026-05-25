@@ -164,6 +164,14 @@ vi.mock('./handlers/workspace', () => ({
   registerWorkspaceHandlers: vi.fn(() => disposeMocks.workspaceHandlers),
 }));
 
+vi.mock('../menu/menu-controller', () => ({
+  createMenuController: vi.fn(() => ({ dispose: vi.fn() })),
+}));
+
+vi.mock('../menu/dispatcher', () => ({
+  createShortcutDispatcher: vi.fn(() => ({})),
+}));
+
 function createWindowMock(isDestroyed = false): {
   isDestroyed: () => boolean;
   webContents: { send: ReturnType<typeof vi.fn> };

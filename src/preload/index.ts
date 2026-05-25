@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import { IPC } from '../shared/ipc-channels';
+import type { KeyboardShortcutActionId } from '../shared/keyboard-shortcuts';
 import type {
   Workspace,
   AppSettings,
@@ -16,6 +17,7 @@ import type { Api, SettingsUpdate } from '../shared/api-types';
 const ptyDataSubscribers = new Set<(id: string, data: string) => void>();
 const ptyExitSubscribers = new Set<(id: string, code: number) => void>();
 const paneInfoChangedSubscribers = new Set<(info: PaneRuntimeInfo) => void>();
+const shortcutInvokeSubscribers = new Set<(actionId: KeyboardShortcutActionId) => void>();
 
 ipcRenderer.on(IPC.PTY_DATA, (_: unknown, payload: { id: string; data: string }) => {
   for (const cb of ptyDataSubscribers) {
@@ -34,6 +36,15 @@ ipcRenderer.on(IPC.PANE_INFO_CHANGED, (_: unknown, payload: PaneRuntimeInfo) => 
     cb(payload);
   }
 });
+
+ipcRenderer.on(
+  IPC.SHORTCUT_INVOKE,
+  (_: unknown, payload: { actionId: KeyboardShortcutActionId }) => {
+    for (const cb of shortcutInvokeSubscribers) {
+      cb(payload.actionId);
+    }
+  },
+);
 
 const api = {
   pty: {
@@ -130,6 +141,14 @@ const api = {
       ipcRenderer.on(IPC.WINDOW_FULLSCREEN_CHANGED, handler);
       return (): void => {
         ipcRenderer.removeListener(IPC.WINDOW_FULLSCREEN_CHANGED, handler);
+      };
+    },
+  },
+  shortcuts: {
+    onInvoke: (cb: (actionId: KeyboardShortcutActionId) => void): (() => void) => {
+      shortcutInvokeSubscribers.add(cb);
+      return (): void => {
+        shortcutInvokeSubscribers.delete(cb);
       };
     },
   },

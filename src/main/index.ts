@@ -91,6 +91,7 @@ app.whenReady().then(() => {
   ipcRuntime = registerIpcHandlers({
     getWindow: () => mainWindow,
     settingsStore,
+    isDev: is.dev,
   });
   quitConfirmationController = new QuitConfirmationController({
     cleanup: cleanupRuntime,

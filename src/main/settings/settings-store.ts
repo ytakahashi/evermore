@@ -2,6 +2,7 @@ import { homedir } from 'node:os';
 import path from 'node:path';
 import Store from 'electron-store';
 import type { SettingsUpdate } from '../../shared/api-types';
+import { isKeyboardShortcutActionId } from '../../shared/keyboard-shortcuts';
 import { cloneDefaultSettings, DEFAULT_APP_SETTINGS } from '../../shared/settings-defaults';
 import type { AppSettings, FontWeight } from '../../shared/types';
 import type { PersistedSettings, SettingsStorageAdapter, SettingsStoreOptions } from './types';
@@ -93,9 +94,10 @@ function pickKeybindings(value: unknown): Record<string, string> {
 
   const result: Record<string, string> = {};
   for (const [actionId, accelerator] of Object.entries(value)) {
-    // Empty string is a valid value: it means "the user explicitly unbound this action" so the
-    // default binding for that id should not apply. Non-string entries (e.g. numbers) are dropped.
-    if (typeof accelerator === 'string') {
+    // Unknown action ids (typos, removed actions) are dropped at the boundary so the resolved
+    // settings only carry the closed `KeyboardShortcutActionId` union. Empty string is preserved
+    // for known ids as the "explicitly unbound" signal so the default binding does not apply.
+    if (typeof accelerator === 'string' && isKeyboardShortcutActionId(actionId)) {
       result[actionId] = accelerator;
     }
   }

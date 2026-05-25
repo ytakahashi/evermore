@@ -299,9 +299,9 @@ describe('SettingsStore', () => {
     storage.payload = {
       shortcuts: {
         keybindings: {
-          'workspace.next': 'Cmd+Shift+]',
-          'workspace.prev': 42,
-          'pane.split': '',
+          'workspace.nextTab': 'Command+Shift+]',
+          'workspace.previousTab': 42,
+          'pane.splitVertical': '',
         },
       },
     };
@@ -309,10 +309,36 @@ describe('SettingsStore', () => {
     // When: the store reloads from disk.
     const next = store.reload();
 
-    // Then: non-strings are dropped; `""` survives as the "explicitly unbound" signal.
-    expect(next.shortcuts.keybindings).toEqual({
-      'workspace.next': 'Cmd+Shift+]',
-      'pane.split': '',
+    // Then: non-strings are dropped; the user override and the explicit unbind both survive on top
+    // of the default-merged map (default values remain for ids the user did not touch).
+    expect(next.shortcuts.keybindings['workspace.nextTab']).toBe('Command+Shift+]');
+    expect(next.shortcuts.keybindings['workspace.previousTab']).toBe(
+      DEFAULT_APP_SETTINGS.shortcuts.keybindings['workspace.previousTab'],
+    );
+    expect(next.shortcuts.keybindings['pane.splitVertical']).toBe('');
+  });
+
+  it('drops unknown action ids from the keybinding map on reload', () => {
+    // Given: a hand-edited settings.json with a typo or a removed action id.
+    storage.payload = {
+      shortcuts: {
+        keybindings: {
+          'workspace.nonexistent': 'Command+Shift+X',
+          'workspace.newTab': 'Command+Shift+T',
+        },
+      },
+    };
+
+    // When: the store reloads from disk.
+    const next = store.reload();
+
+    // Then: the unknown entry is removed entirely and never reaches the resolved settings.
+    expect(next.shortcuts.keybindings['workspace.newTab']).toBe('Command+Shift+T');
+    expect(next.shortcuts.keybindings).not.toHaveProperty('workspace.nonexistent');
+    // The canonicalized on-disk shape drops the unknown id as well.
+    const persisted = storage.payload as { shortcuts?: { keybindings?: Record<string, string> } };
+    expect(persisted.shortcuts?.keybindings).toEqual({
+      'workspace.newTab': 'Command+Shift+T',
     });
   });
 
@@ -383,49 +409,49 @@ describe('SettingsStore', () => {
   });
 
   it('persists only the user-set keybinding entries that differ from defaults', () => {
-    // Given: defaults are in storage (no keybindings by default).
+    // Given: defaults are in storage.
 
-    // When: the user sets a binding.
-    store.update({ shortcuts: { keybindings: { 'workspace.next': 'Cmd+Shift+]' } } });
+    // When: the user overrides one binding to a non-default accelerator.
+    store.update({ shortcuts: { keybindings: { 'workspace.newTab': 'Command+Shift+T' } } });
 
-    // Then: only the changed entry is persisted.
+    // Then: only the changed entry is persisted; every other default stays implicit.
     expect(storage.payload).toEqual({
-      shortcuts: { keybindings: { 'workspace.next': 'Cmd+Shift+]' } },
+      shortcuts: { keybindings: { 'workspace.newTab': 'Command+Shift+T' } },
     });
   });
 
-  it('drops a no-op unbind ("" against an undefined default) instead of persisting noise', () => {
-    // Given: defaults define no keybinding for this action.
+  it('drops an unknown-id "" entry instead of persisting noise', () => {
+    // Given: the user "unbinds" an action id that does not exist in the closed action id set.
 
-    // When: the user "unbinds" an action the default never bound.
-    store.update({ shortcuts: { keybindings: { 'workspace.next': '' } } });
+    // When: the update is applied.
+    store.update({ shortcuts: { keybindings: { 'workspace.nonexistent': '' } } });
 
-    // Then: the file stays empty — unbinding nothing is a no-op rather than a recorded change.
+    // Then: the unknown id is dropped at the boundary and the file stays empty.
     expect(storage.payload).toEqual({});
   });
 
-  it('canonicalizes a hand-edited no-op unbind to the empty file on reload', () => {
-    // Given: settings.json has been hand-edited with a meaningless unbind entry.
-    storage.payload = { shortcuts: { keybindings: { 'workspace.next': '' } } };
+  it('canonicalizes a hand-edited unknown-id entry to the empty file on reload', () => {
+    // Given: settings.json has been hand-edited with an entry for a non-existent action id.
+    storage.payload = { shortcuts: { keybindings: { 'workspace.nonexistent': '' } } };
 
     // When: the store reloads from disk.
     store.reload();
 
-    // Then: the unbind is treated as a no-op against the empty defaults and the file is cleaned.
+    // Then: the unknown id is dropped and the file is cleaned up.
     expect(storage.payload).toEqual({});
   });
 
-  it('accepts a hand-edited "" keybinding as an explicit unbind in the resolved settings', () => {
-    // Given: settings.json contains an explicit-unbind entry. With today's empty default map this
-    // is effectively a no-op; the test fixes the resolver's behavior for the future case where the
-    // default map gains entries (where `""` would suppress the default binding).
-    storage.payload = { shortcuts: { keybindings: { 'workspace.next': '' } } };
+  it('persists "" as an explicit unbind for an action id with a defined default', () => {
+    // Given: defaults bind `workspace.newTab` to a non-empty accelerator.
 
-    // When: the store reloads from disk.
-    const next = store.reload();
+    // When: the user explicitly unbinds it.
+    const next = store.update({ shortcuts: { keybindings: { 'workspace.newTab': '' } } });
 
-    // Then: the empty-string accelerator surfaces in the resolved in-memory settings.
-    expect(next.shortcuts.keybindings['workspace.next']).toBe('');
+    // Then: the empty-string accelerator surfaces in resolved settings and on disk as an override.
+    expect(next.shortcuts.keybindings['workspace.newTab']).toBe('');
+    expect(storage.payload).toEqual({
+      shortcuts: { keybindings: { 'workspace.newTab': '' } },
+    });
   });
 
   it('canonicalizes a fully-populated legacy file down to its sparse form on construction', () => {

@@ -1,3 +1,4 @@
+import { DEFAULT_KEYBINDINGS } from './keyboard-shortcuts';
 import type { AppSettings } from './types';
 
 /**
@@ -33,7 +34,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   },
   shortcuts: {
     activateAppHotkey: 'Command+Shift+,',
-    keybindings: {},
+    keybindings: { ...DEFAULT_KEYBINDINGS },
   },
   app: {
     quitConfirm: 'running-only',

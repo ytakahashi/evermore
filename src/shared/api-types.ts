@@ -1,3 +1,4 @@
+import type { KeyboardShortcutActionId } from './keyboard-shortcuts';
 import type {
   Workspace,
   AppSettings,
@@ -73,6 +74,14 @@ export interface Api {
   window: {
     isFullScreen: () => Promise<boolean>;
     onFullScreenChanged: (cb: (isFullScreen: boolean) => void) => () => void;
+  };
+  shortcuts: {
+    /**
+     * Subscribes to keyboard shortcut invocations dispatched from the main-process application
+     * menu. The renderer maps each `actionId` to a store action; the application menu owns the
+     * accelerator → action resolution so the renderer does not install its own keydown hook.
+     */
+    onInvoke: (cb: (actionId: KeyboardShortcutActionId) => void) => () => void;
   };
 }
 

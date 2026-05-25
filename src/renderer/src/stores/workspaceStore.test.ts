@@ -1635,4 +1635,297 @@ describe('workspaceStore', () => {
     expect(useStore.getState().workspaces[0]?.name).toBe('Project');
     expect(workspaceApi.update).not.toHaveBeenCalled();
   });
+
+  describe('shortcut-dispatched actions', () => {
+    it('selectAdjacentTab cycles forward and wraps at the end', async () => {
+      // Given: a workspace with three tabs and the first tab active.
+      const multiTabWorkspace: Workspace = {
+        ...workspace,
+        tabs: [
+          {
+            id: 'tab-a',
+            name: 'a',
+            layout: { type: 'leaf', paneId: 'pane-a' },
+            activePaneId: 'pane-a',
+          },
+          {
+            id: 'tab-b',
+            name: 'b',
+            layout: { type: 'leaf', paneId: 'pane-b' },
+            activePaneId: 'pane-b',
+          },
+          {
+            id: 'tab-c',
+            name: 'c',
+            layout: { type: 'leaf', paneId: 'pane-c' },
+            activePaneId: 'pane-c',
+          },
+        ],
+        panes: [
+          { id: 'pane-a', cwd: '/a' },
+          { id: 'pane-b', cwd: '/b' },
+          { id: 'pane-c', cwd: '/c' },
+        ],
+        activeTabId: 'tab-a',
+      };
+      workspaceApi.list = vi.fn(() =>
+        Promise.resolve({ workspaces: [multiTabWorkspace], activeWorkspaceId: 'workspace-1' }),
+      );
+      const useStore = createWorkspaceStore({ workspaceApi });
+      await useStore.getState().loadWorkspaces();
+
+      // When: the user invokes next-tab three times.
+      useStore.getState().selectAdjacentTab('next');
+      expect(selectActiveTab(useStore.getState())?.id).toBe('tab-b');
+      useStore.getState().selectAdjacentTab('next');
+      expect(selectActiveTab(useStore.getState())?.id).toBe('tab-c');
+      useStore.getState().selectAdjacentTab('next');
+
+      // Then: the third invocation wraps back to the first tab.
+      expect(selectActiveTab(useStore.getState())?.id).toBe('tab-a');
+    });
+
+    it('selectAdjacentTab cycles backward and wraps at the start', async () => {
+      // Given: a workspace with two tabs and the first tab active.
+      const twoTabWorkspace: Workspace = {
+        ...workspace,
+        tabs: [
+          {
+            id: 'tab-a',
+            name: 'a',
+            layout: { type: 'leaf', paneId: 'pane-a' },
+            activePaneId: 'pane-a',
+          },
+          {
+            id: 'tab-b',
+            name: 'b',
+            layout: { type: 'leaf', paneId: 'pane-b' },
+            activePaneId: 'pane-b',
+          },
+        ],
+        panes: [
+          { id: 'pane-a', cwd: '/a' },
+          { id: 'pane-b', cwd: '/b' },
+        ],
+        activeTabId: 'tab-a',
+      };
+      workspaceApi.list = vi.fn(() =>
+        Promise.resolve({ workspaces: [twoTabWorkspace], activeWorkspaceId: 'workspace-1' }),
+      );
+      const useStore = createWorkspaceStore({ workspaceApi });
+      await useStore.getState().loadWorkspaces();
+
+      // When: the user invokes previous-tab from the first tab.
+      useStore.getState().selectAdjacentTab('previous');
+
+      // Then: it wraps to the last tab.
+      expect(selectActiveTab(useStore.getState())?.id).toBe('tab-b');
+    });
+
+    it('selectAdjacentTab is a no-op when the workspace has only one tab', async () => {
+      // Given: the default single-tab workspace.
+      const useStore = createWorkspaceStore({ workspaceApi });
+      await useStore.getState().loadWorkspaces();
+
+      // When: shortcut-dispatched next-tab fires.
+      useStore.getState().selectAdjacentTab('next');
+
+      // Then: nothing changes.
+      expect(selectActiveTab(useStore.getState())?.id).toBe('workspace-1-tab-1');
+    });
+
+    it('splitActivePane resolves the active pane and delegates to splitPane', async () => {
+      // Given: a loaded workspace with a single pane.
+      const ids = ['pane-2'];
+      const useStore = createWorkspaceStore({
+        createId: () => ids.shift() ?? 'fallback-id',
+        workspaceApi,
+      });
+      await useStore.getState().loadWorkspaces();
+
+      // When: the menu-driven action splits the active pane.
+      useStore.getState().splitActivePane('vertical');
+
+      // Then: the active tab gains a split layout and the new pane is selected.
+      const updatedTab = selectActiveTab(useStore.getState());
+      expect(updatedTab?.activePaneId).toBe('pane-2');
+      expect(updatedTab?.layout).toEqual({
+        type: 'split',
+        direction: 'vertical',
+        ratio: 0.5,
+        children: [
+          { type: 'leaf', paneId: 'workspace-1-pane-1' },
+          { type: 'leaf', paneId: 'pane-2' },
+        ],
+      });
+    });
+
+    it('closeActiveTab is a no-op when only one tab remains', async () => {
+      // Given: the default single-tab workspace.
+      const useStore = createWorkspaceStore({ workspaceApi });
+      await useStore.getState().loadWorkspaces();
+      const beforeTabCount = selectActiveWorkspace(useStore.getState())?.tabs.length ?? 0;
+
+      // When: shortcut-dispatched close-tab fires.
+      useStore.getState().closeActiveTab();
+
+      // Then: the workspace keeps its tab.
+      expect(selectActiveWorkspace(useStore.getState())?.tabs.length).toBe(beforeTabCount);
+    });
+
+    it('closeActiveTab closes the active tab when more than one exists', async () => {
+      // Given: a two-tab workspace with the second tab active.
+      const twoTabWorkspace: Workspace = {
+        ...workspace,
+        tabs: [
+          {
+            id: 'tab-a',
+            name: 'a',
+            layout: { type: 'leaf', paneId: 'pane-a' },
+            activePaneId: 'pane-a',
+          },
+          {
+            id: 'tab-b',
+            name: 'b',
+            layout: { type: 'leaf', paneId: 'pane-b' },
+            activePaneId: 'pane-b',
+          },
+        ],
+        panes: [
+          { id: 'pane-a', cwd: '/a' },
+          { id: 'pane-b', cwd: '/b' },
+        ],
+        activeTabId: 'tab-b',
+      };
+      workspaceApi.list = vi.fn(() =>
+        Promise.resolve({ workspaces: [twoTabWorkspace], activeWorkspaceId: 'workspace-1' }),
+      );
+      const useStore = createWorkspaceStore({ workspaceApi });
+      await useStore.getState().loadWorkspaces();
+
+      // When: shortcut-dispatched close-tab fires.
+      useStore.getState().closeActiveTab();
+
+      // Then: only tab-a remains, and the active tab id falls back to it.
+      const updated = selectActiveWorkspace(useStore.getState());
+      expect(updated?.tabs.map((tab) => tab.id)).toEqual(['tab-a']);
+      expect(updated?.activeTabId).toBe('tab-a');
+    });
+
+    it('focusAdjacentPane moves to the directly adjacent pane after a vertical split', async () => {
+      // Given: a workspace whose active tab is vertically split into left (active) and right.
+      const ids = ['pane-2'];
+      const useStore = createWorkspaceStore({
+        createId: () => ids.shift() ?? 'fallback-id',
+        workspaceApi,
+      });
+      await useStore.getState().loadWorkspaces();
+      useStore.getState().splitPane('workspace-1-pane-1', 'vertical');
+      // splitPane sets the new pane (right side) active; move focus back to the left pane first.
+      useStore.getState().setActivePane('workspace-1-pane-1');
+
+      // When: shortcut-dispatched focus-right fires.
+      useStore.getState().focusAdjacentPane('right');
+
+      // Then: the right pane becomes active.
+      expect(selectActiveTab(useStore.getState())?.activePaneId).toBe('pane-2');
+
+      // When: shortcut-dispatched focus-left fires.
+      useStore.getState().focusAdjacentPane('left');
+
+      // Then: focus returns to the left pane.
+      expect(selectActiveTab(useStore.getState())?.activePaneId).toBe('workspace-1-pane-1');
+    });
+
+    it('focusAdjacentPane prefers the candidate with the largest perpendicular overlap', async () => {
+      // Given: a nested layout where the active (left) pane faces two right-side candidates of
+      // unequal vertical extent — the larger candidate must win.
+      //   layout: vertical split, left = active pane, right = horizontal split with two stacked panes
+      //   The selection rule should pick the top-right pane because the active pane spans the full
+      //   height; the largest overlap is with the top-right one when we artificially make it taller.
+      const nestedWorkspace: Workspace = {
+        ...workspace,
+        tabs: [
+          {
+            id: 'tab-1',
+            name: 'zsh',
+            layout: {
+              type: 'split',
+              direction: 'vertical',
+              ratio: 0.5,
+              children: [
+                { type: 'leaf', paneId: 'left' },
+                {
+                  type: 'split',
+                  direction: 'horizontal',
+                  // Top child occupies 80% of the right column — that's the larger overlap with
+                  // the full-height left pane.
+                  ratio: 0.8,
+                  children: [
+                    { type: 'leaf', paneId: 'right-top' },
+                    { type: 'leaf', paneId: 'right-bottom' },
+                  ],
+                },
+              ],
+            },
+            activePaneId: 'left',
+          },
+        ],
+        panes: [
+          { id: 'left', cwd: '/a' },
+          { id: 'right-top', cwd: '/b' },
+          { id: 'right-bottom', cwd: '/c' },
+        ],
+        activeTabId: 'tab-1',
+      };
+      workspaceApi.list = vi.fn(() =>
+        Promise.resolve({ workspaces: [nestedWorkspace], activeWorkspaceId: 'workspace-1' }),
+      );
+      const useStore = createWorkspaceStore({ workspaceApi });
+      await useStore.getState().loadWorkspaces();
+
+      // When: focus-right fires from the left pane.
+      useStore.getState().focusAdjacentPane('right');
+
+      // Then: right-top wins because its vertical overlap with the left pane is the largest.
+      expect(selectActiveTab(useStore.getState())?.activePaneId).toBe('right-top');
+    });
+
+    it('focusAdjacentPane is a no-op when no candidate touches the active edge', async () => {
+      // Given: a single-pane workspace (no neighbors at all).
+      const useStore = createWorkspaceStore({ workspaceApi });
+      await useStore.getState().loadWorkspaces();
+      const beforeActive = selectActivePane(useStore.getState())?.id;
+
+      // When: focus-down fires with no neighbor below.
+      useStore.getState().focusAdjacentPane('down');
+
+      // Then: the active pane is unchanged (no wrap).
+      expect(selectActivePane(useStore.getState())?.id).toBe(beforeActive);
+    });
+
+    it('focusAdjacentPane navigates vertically after a horizontal split', async () => {
+      // Given: the workspace has been split horizontally (top / bottom) with the top pane active.
+      const ids = ['pane-2'];
+      const useStore = createWorkspaceStore({
+        createId: () => ids.shift() ?? 'fallback-id',
+        workspaceApi,
+      });
+      await useStore.getState().loadWorkspaces();
+      useStore.getState().splitPane('workspace-1-pane-1', 'horizontal');
+      useStore.getState().setActivePane('workspace-1-pane-1');
+
+      // When: focus-down fires.
+      useStore.getState().focusAdjacentPane('down');
+
+      // Then: the bottom pane becomes active.
+      expect(selectActiveTab(useStore.getState())?.activePaneId).toBe('pane-2');
+
+      // When: focus-up fires.
+      useStore.getState().focusAdjacentPane('up');
+
+      // Then: focus returns to the top pane.
+      expect(selectActiveTab(useStore.getState())?.activePaneId).toBe('workspace-1-pane-1');
+    });
+  });
 });
