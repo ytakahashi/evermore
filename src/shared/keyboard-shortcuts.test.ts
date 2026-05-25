@@ -4,6 +4,8 @@ import {
   KEYBOARD_SHORTCUT_ACTION_IDS,
   KEYBOARD_SHORTCUT_ACTION_ID_SET,
   ACTION_LABELS,
+  ROLE_ACCELERATORS,
+  STANDARD_ROLE_ACCELERATOR_SET,
   getReservedAccelerators,
   isKeyboardShortcutActionId,
   type MenuTemplateNode,
@@ -25,6 +27,41 @@ describe('keyboard-shortcuts', () => {
     expect(isKeyboardShortcutActionId('workspace.unknown')).toBe(false);
     expect(isKeyboardShortcutActionId(42)).toBe(false);
     expect(isKeyboardShortcutActionId(undefined)).toBe(false);
+  });
+
+  describe('STANDARD_ROLE_ACCELERATOR_SET', () => {
+    it('exposes the canonical macOS role accelerators in renderer-canonical order', () => {
+      // Given: the user-facing accelerator picker emits strings ordered Command → Control →
+      // Option → Shift with `Option` (not `Alt`). The conflict-warning set must use the same form
+      // so exact-equality lookups succeed.
+
+      // When / Then: a sampling of common role bindings is present in the canonical form.
+      expect(STANDARD_ROLE_ACCELERATOR_SET.has('Command+C')).toBe(true);
+      expect(STANDARD_ROLE_ACCELERATOR_SET.has('Command+V')).toBe(true);
+      expect(STANDARD_ROLE_ACCELERATOR_SET.has('Command+Q')).toBe(true);
+      expect(STANDARD_ROLE_ACCELERATOR_SET.has('Command+Shift+Z')).toBe(true);
+      expect(STANDARD_ROLE_ACCELERATOR_SET.has('Command+Option+H')).toBe(true);
+      expect(STANDARD_ROLE_ACCELERATOR_SET.has('Command+Control+F')).toBe(true);
+      expect(STANDARD_ROLE_ACCELERATOR_SET.has('Command+Option+I')).toBe(true);
+    });
+
+    it('does not leak the non-canonical aliases Electron also accepts', () => {
+      // Given: Electron treats `Shift+Command+Z` and `Alt` as equivalents at runtime, but exact
+      // string equality with the picker output requires the canonical form to win in the set.
+
+      // Then: the non-canonical aliases are absent so a user-entered canonical value can never
+      // miss a match.
+      expect(STANDARD_ROLE_ACCELERATOR_SET.has('Shift+Command+Z')).toBe(false);
+      expect(STANDARD_ROLE_ACCELERATOR_SET.has('Command+Alt+H')).toBe(false);
+      expect(STANDARD_ROLE_ACCELERATOR_SET.has('Alt+Command+I')).toBe(false);
+    });
+
+    it('covers every entry declared in ROLE_ACCELERATORS', () => {
+      // Given / When / Then: the frozen set is derived from the table, so every value must round-trip.
+      for (const accelerator of Object.values(ROLE_ACCELERATORS)) {
+        expect(STANDARD_ROLE_ACCELERATOR_SET.has(accelerator)).toBe(true);
+      }
+    });
   });
 
   describe('getReservedAccelerators', () => {

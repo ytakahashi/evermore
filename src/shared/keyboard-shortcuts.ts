@@ -117,3 +117,42 @@ export function getReservedAccelerators(template: readonly MenuTemplateNode[]): 
   visit(template);
   return result;
 }
+
+/**
+ * macOS-standard accelerators for the Electron menu roles Evermore exposes in its application
+ * menu. Written in the renderer's canonical modifier order
+ * (`Command` → `Control` → `Option` → `Shift`) and using `Option` instead of `Alt`, matching what
+ * the Settings UI's accelerator picker produces. Electron's Accelerator parser treats different
+ * orderings and `Alt`/`Option` as equivalent, so the runtime binding is unchanged; aligning the
+ * string lets exact-equality conflict checks succeed against user-entered values.
+ *
+ * Lives in `shared/` so the main process menu builder and the renderer Settings UI consume the
+ * same table — drifting them by hand was how earlier revisions missed `Cmd+C` / `Cmd+V` conflict
+ * warnings.
+ *
+ * `toggleDevTools` is intentionally listed even though the menu builder only includes the item in
+ * development builds: warning the user that `Command+Option+I` is reserved is harmless in
+ * production and avoids threading `isDev` into the renderer just for one binding.
+ */
+export const ROLE_ACCELERATORS = {
+  undo: 'Command+Z',
+  redo: 'Command+Shift+Z',
+  cut: 'Command+X',
+  copy: 'Command+C',
+  paste: 'Command+V',
+  selectAll: 'Command+A',
+  quit: 'Command+Q',
+  hide: 'Command+H',
+  hideOthers: 'Command+Option+H',
+  minimize: 'Command+M',
+  togglefullscreen: 'Command+Control+F',
+  toggleDevTools: 'Command+Option+I',
+} as const;
+
+/**
+ * Frozen set of every accelerator in {@link ROLE_ACCELERATORS}. Used by Settings UI to warn when
+ * a user-supplied keybinding collides with a standard macOS role binding.
+ */
+export const STANDARD_ROLE_ACCELERATOR_SET: ReadonlySet<string> = new Set(
+  Object.values(ROLE_ACCELERATORS),
+);
