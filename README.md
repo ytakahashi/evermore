@@ -9,21 +9,18 @@ connections.
 
 ### Core Features
 
-Even without any shell configuration, Evermore provides a highly informative workspace:
+Evermore provides a highly informative workspace by default:
 
 - **Persistent Workspace Layouts**: The sidebar workspace, tab structure, and split-pane terminal
   layouts are persisted across sessions.
 - **Pane Status Indicators**: Sidebar lists reflect whether a terminal pane is currently `running`
   or `idle`, using system-level process monitoring.
 - **Active Process & Command Labels**: Sidebar pane items display the name of the active foreground
-  program (e.g., `node`, `ssh`) or the last command line inferred from keystrokes.
+  program (e.g., `node`, `ssh`) or the cwd when `idle`.
 - **AI Agent Awareness**: Detects AI agent CLIs and replaces the generic terminal icon with an agent
   icon.
-- **SSH Config & Tunnel Management**:
-  - Displays host shortcuts discovered from `~/.ssh/config`.
-  - Shows resolved connection details (via `ssh -G`) and opens a terminal with one click.
-  - Starts and stops SSH tunnels (LocalForward / RemoteForward / DynamicForward) with real-time
-    port-forwarding state.
+- **SSH Config & Tunnel Management**: Discovers host shortcuts from `~/.ssh/config` for one-click
+  terminal connections, and manages SSH port-forwarding tunnels with real-time status.
 
 ### Shell-Integrated Features (Zsh)
 
@@ -44,12 +41,12 @@ With AI agent hooks configured, the sidebar reflects per-pane agent status in re
 
 ## Recommended Setup
 
-- **Zsh Auto-Injection**: Enabled by default. You can toggle this behavior under **Settings >
+- **Zsh Auto-Injection (zsh)**: Enabled by default. You can toggle this behavior under **Settings >
   Advanced features**.
-- **SSH Config (Tunnel Reliability)**: Open **Settings > Recommended setup** to view and copy
-  recommended SSH options (such as keep-alives) that keep background port-forwarding tunnels
+- **SSH Config**: Open **Settings > Recommended setup** to view and copy recommended SSH tunnel
+  reliability configuration (such as keep-alives) that keep background port-forwarding tunnels
   reliable.
-- **Manual Shell Setup (Fallback)**: Copy the manual shell integration snippet from **Settings >
+- **Manual Shell Setup (Fallback)**: Copy the Shell integration (zsh) snippet from **Settings >
   Recommended setup** if you run custom shells or subshells, or prefer to configure shell
   integration manually.
 - **AI Agent Hooks**: Open **Settings > AI Integration** to copy the Evermore agent status helper
