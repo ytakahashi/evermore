@@ -249,10 +249,7 @@ export function ShortcutsSection(): React.JSX.Element {
 
       <div className="grid gap-3 border-b border-border-subtle py-4 sm:grid-cols-[1fr_auto]">
         <div>
-          <div className="flex items-center gap-2">
-            <h3 className="text-sm font-medium">Activate Evermore</h3>
-            <span className="rounded bg-raised px-1.5 py-0.5 text-xs text-muted">Live</span>
-          </div>
+          <h3 className="text-sm font-medium">Activate Evermore</h3>
           <p className="mt-1 max-w-2xl text-xs leading-5 text-muted">
             Focuses the Evermore window from anywhere on the system. Click the field and press a
             shortcut. Backspace disables it.
@@ -269,10 +266,7 @@ export function ShortcutsSection(): React.JSX.Element {
       </div>
 
       <section className="py-4">
-        <div className="mb-3 flex items-center gap-2">
-          <h3 className="text-sm font-medium">Keybindings</h3>
-          <span className="rounded bg-raised px-1.5 py-0.5 text-xs text-muted">Live</span>
-        </div>
+        <h3 className="mb-3 text-sm font-medium">Keybindings</h3>
         <p className="mb-3 max-w-2xl text-xs leading-5 text-muted">
           Click a field and press a shortcut to rebind the action. Backspace restores the default.
           Conflicts with another action, a macOS menu role, or the global hotkey are highlighted but

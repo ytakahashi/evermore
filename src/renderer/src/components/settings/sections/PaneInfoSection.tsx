@@ -21,10 +21,7 @@ export function PaneInfoSection(): React.JSX.Element {
 
       <div className="grid gap-3 border-b border-border-subtle py-4 sm:grid-cols-[1fr_10rem]">
         <div>
-          <div className="flex items-center gap-2">
-            <h3 className="text-sm font-medium">Process poll interval</h3>
-            <span className="rounded bg-raised px-1.5 py-0.5 text-xs text-muted">Live</span>
-          </div>
+          <h3 className="text-sm font-medium">Process poll interval</h3>
           <p className="mt-1 max-w-2xl text-xs leading-5 text-muted">
             Lower values refresh running-command and activity status sooner, but each poll spawns a
             ps subprocess in the main process. With many panes open, very low values can increase

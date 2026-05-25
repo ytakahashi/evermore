@@ -19,12 +19,9 @@ function SettingRow({
   return (
     <div className="grid gap-3 border-b border-border-subtle py-4 sm:grid-cols-[1fr_auto]">
       <div className="min-w-0">
-        <div className="flex items-center gap-2">
-          <label className="text-sm font-medium" htmlFor={labelFor}>
-            {label}
-          </label>
-          <span className="rounded bg-raised px-1.5 py-0.5 text-xs text-muted">Live</span>
-        </div>
+        <label className="text-sm font-medium" htmlFor={labelFor}>
+          {label}
+        </label>
         <p className="mt-1 max-w-2xl text-xs leading-5 text-muted">{description}</p>
       </div>
       <div className="flex items-center justify-start sm:justify-end">{children}</div>
