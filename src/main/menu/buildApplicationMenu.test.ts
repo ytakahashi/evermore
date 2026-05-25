@@ -187,18 +187,21 @@ describe('buildApplicationMenu', () => {
 
     // And: the standard macOS role accelerators must surface too — these are the conflict source
     // the Settings UI warns against (e.g. trying to rebind an Evermore action to Cmd+C).
+    // Strings use the renderer's canonical modifier order (`Command` → `Control` → `Option` →
+    // `Shift`) so exact-equality conflict checks line up with what the Settings UI's accelerator
+    // picker produces.
     const standardRoleAccelerators = [
       'Command+Z',
-      'Shift+Command+Z',
+      'Command+Shift+Z',
       'Command+X',
       'Command+C',
       'Command+V',
       'Command+A',
       'Command+Q',
       'Command+H',
-      'Command+Alt+H',
+      'Command+Option+H',
       'Command+M',
-      'Control+Command+F',
+      'Command+Control+F',
     ];
     for (const accelerator of standardRoleAccelerators) {
       expect(reserved.has(accelerator)).toBe(true);
@@ -211,12 +214,12 @@ describe('buildApplicationMenu', () => {
     const prod = buildApplicationMenu(defaultOptions({ isDev: false }));
 
     // When / Then: the DevTools accelerator only appears when the menu item is rendered.
-    expect(getReservedAccelerators(dev as readonly MenuTemplateNode[]).has('Alt+Command+I')).toBe(
-      true,
-    );
-    expect(getReservedAccelerators(prod as readonly MenuTemplateNode[]).has('Alt+Command+I')).toBe(
-      false,
-    );
+    expect(
+      getReservedAccelerators(dev as readonly MenuTemplateNode[]).has('Command+Option+I'),
+    ).toBe(true);
+    expect(
+      getReservedAccelerators(prod as readonly MenuTemplateNode[]).has('Command+Option+I'),
+    ).toBe(false);
   });
 
   it('renders a Help menu with a Learn More item that forwards to the injected callback', () => {

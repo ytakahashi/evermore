@@ -37,23 +37,29 @@ export interface BuildApplicationMenuOptions {
  * conflict sources in the Settings UI. The OS still resolves the role's behavior; the explicit
  * accelerator just makes the binding observable in the template.
  *
+ * Strings are written in the renderer's canonical modifier order
+ * (`Command` → `Control` → `Option` → `Shift`) and use `Option` instead of `Alt`, matching what
+ * the Settings UI's accelerator picker produces. Electron's Accelerator parser treats the
+ * orderings and modifier aliases as equivalent, so the runtime binding is unchanged; aligning the
+ * string lets exact-equality conflict checks succeed against user-entered values.
+ *
  * Keep this table aligned with the role items used below — every role item that owns a keyboard
  * accelerator on macOS must appear here, otherwise downstream conflict detection in the Settings
  * UI cannot warn against rebinding an Evermore action onto a standard role accelerator.
  */
 const ROLE_ACCELERATORS = {
   undo: 'Command+Z',
-  redo: 'Shift+Command+Z',
+  redo: 'Command+Shift+Z',
   cut: 'Command+X',
   copy: 'Command+C',
   paste: 'Command+V',
   selectAll: 'Command+A',
   quit: 'Command+Q',
   hide: 'Command+H',
-  hideOthers: 'Command+Alt+H',
+  hideOthers: 'Command+Option+H',
   minimize: 'Command+M',
-  togglefullscreen: 'Control+Command+F',
-  toggleDevTools: 'Alt+Command+I',
+  togglefullscreen: 'Command+Control+F',
+  toggleDevTools: 'Command+Option+I',
 } as const satisfies Partial<Record<NonNullable<MenuItemConstructorOptions['role']>, string>>;
 
 /**
