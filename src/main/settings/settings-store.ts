@@ -5,6 +5,8 @@ import type { SettingsUpdate } from '../../shared/api-types';
 import { isKeyboardShortcutActionId } from '../../shared/keyboard-shortcuts';
 import { cloneDefaultSettings, DEFAULT_APP_SETTINGS } from '../../shared/settings-defaults';
 import type { AppSettings, FontWeight } from '../../shared/types';
+import { createLogger, type Logger } from '../logging/logger';
+import { NoopTransport } from '../logging/transports/noop';
 import type { PersistedSettings, SettingsStorageAdapter, SettingsStoreOptions } from './types';
 
 /**
@@ -367,13 +369,21 @@ function applySettingsPatch(current: AppSettings, patch: SettingsUpdate): AppSet
  * on every IPC call. Writes go through `update()` / `reset()`, which both persist and broadcast to
  * subscribers (e.g. main-side reactors that need to push values into runtime services).
  */
+function createSilentLogger(): Logger {
+  // Default for tests and callers that have not wired a real logger yet. Errors are still useful
+  // to surface, but a silent default avoids forcing every test to spy on console.
+  return createLogger({ level: 'error', transport: new NoopTransport() });
+}
+
 export class SettingsStore {
   private readonly storage: SettingsStorageAdapter;
+  private readonly logger: Logger;
   private settings: AppSettings;
   private readonly subscribers = new Set<(settings: AppSettings) => void>();
 
   public constructor(options: SettingsStoreOptions = {}) {
     this.storage = options.storage ?? new ElectronSettingsStorageAdapter();
+    this.logger = options.logger ?? createSilentLogger();
     this.settings = readCurrentSettings(this.storage.getSettings());
     // Persist the normalized diff so a hand-edited settings.json with typoed or default-valued keys
     // gets canonicalized to its sparse form on first launch. Legacy shape migrations are
@@ -444,8 +454,8 @@ export class SettingsStore {
       // here keeps a misbehaving reactor from blocking other subscribers.
       try {
         listener(this.settings);
-      } catch (error) {
-        console.error('SettingsStore subscriber threw', error);
+      } catch (error: unknown) {
+        this.logger.error('SettingsStore subscriber threw', error);
       }
     }
   }

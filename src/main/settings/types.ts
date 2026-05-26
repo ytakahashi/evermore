@@ -1,4 +1,5 @@
 import type { AppSettings } from '../../shared/types';
+import type { Logger } from '../logging/logger';
 
 /**
  * Sparse on-disk representation of {@link AppSettings}.
@@ -27,4 +28,10 @@ export interface SettingsStorageAdapter {
 
 export interface SettingsStoreOptions {
   storage?: SettingsStorageAdapter;
+  /**
+   * Logger used for internal diagnostics such as failures in subscriber callbacks. Optional so
+   * tests can omit it and get a silent default; production wiring injects a scoped logger from
+   * the composition root.
+   */
+  logger?: Logger;
 }
