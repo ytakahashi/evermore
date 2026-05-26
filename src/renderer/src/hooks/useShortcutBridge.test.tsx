@@ -1,6 +1,7 @@
 import { render } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { KeyboardShortcutActionId } from '../../../shared/keyboard-shortcuts';
+import type { Workspace } from '../../../shared/types';
 import { useUiStore } from '../stores/uiStore';
 import { useWorkspaceStore } from '../stores/workspaceStore';
 import { useShortcutBridge } from './useShortcutBridge';
@@ -115,6 +116,59 @@ describe('useShortcutBridge', () => {
 
     // Then: the Settings view comes up.
     expect(useUiStore.getState().activeView).toBe('settings');
+  });
+
+  it('toggles pane fullscreen for the active pane and clears it on a second invocation', () => {
+    // Given: an active workspace with two panes, pane-2 currently active in the tab.
+    const workspace: Workspace = {
+      id: 'workspace-1',
+      name: 'Default',
+      rootPath: '/tmp',
+      tabs: [
+        {
+          id: 'tab-1',
+          name: 'zsh',
+          layout: { type: 'leaf', paneId: 'pane-2' },
+          activePaneId: 'pane-2',
+        },
+      ],
+      panes: [
+        { id: 'pane-1', cwd: '/tmp' },
+        { id: 'pane-2', cwd: '/tmp' },
+      ],
+      activeTabId: 'tab-1',
+      createdAt: 1,
+      updatedAt: 1,
+    };
+    useWorkspaceStore.setState({
+      workspaces: [workspace],
+      activeWorkspaceId: workspace.id,
+    });
+    render(<TestBridge />);
+
+    // When: the toggle fires while no pane is fullscreen.
+    emit('pane.toggleFullscreen');
+
+    // Then: the active pane enters fullscreen.
+    expect(useUiStore.getState().fullscreenPaneId).toBe('pane-2');
+
+    // When: the toggle fires again while a pane is fullscreen.
+    emit('pane.toggleFullscreen');
+
+    // Then: fullscreen is cleared so the chord is a true toggle.
+    expect(useUiStore.getState().fullscreenPaneId).toBeNull();
+  });
+
+  it('skips pane.toggleFullscreen while the Settings view is active', () => {
+    // Given: the Settings view is active and no pane is in fullscreen.
+    useUiStore.setState({ activeView: 'settings', fullscreenPaneId: null });
+    render(<TestBridge />);
+
+    // When: the toggle fires from the menu.
+    emit('pane.toggleFullscreen');
+
+    // Then: nothing changes because the workspace is not visible.
+    expect(useUiStore.getState().fullscreenPaneId).toBeNull();
   });
 
   it('unsubscribes from window.api.shortcuts.onInvoke on unmount', () => {

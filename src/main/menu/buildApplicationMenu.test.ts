@@ -113,6 +113,23 @@ describe('buildApplicationMenu', () => {
     expect(calls).toEqual(['workspace.newTab']);
   });
 
+  it('renders Toggle Pane Full Screen and a Window-labeled togglefullscreen role item', () => {
+    // Given: the production template with default keybindings.
+    const template = buildApplicationMenu(defaultOptions());
+
+    // Then: the pane-level toggle exposes its accelerator.
+    const paneToggle = findItemByLabel(template, 'Toggle Pane Full Screen');
+    expect(paneToggle?.accelerator).toBe(DEFAULT_KEYBINDINGS['pane.toggleFullscreen']);
+
+    // And: the window-level toggle keeps the `togglefullscreen` role with an explicit "Window"
+    // label so users can distinguish it from the pane-level entry. macOS additionally injects its
+    // own native fullscreen item; that duplication is accepted as the tradeoff for an unambiguous
+    // label on the role-bound entry.
+    const windowToggle = findItemByLabel(template, 'Toggle Window Full Screen');
+    expect(windowToggle?.role).toBe('togglefullscreen');
+    expect(windowToggle?.accelerator).toBe('Command+Control+F');
+  });
+
   it('omits the DevTools entry in production builds', () => {
     // Given: a production-mode template.
     const template = buildApplicationMenu(defaultOptions({ isDev: false }));

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Workspace } from '../../../../shared/types';
 import { useUiStore } from '../../stores/uiStore';
@@ -74,26 +74,6 @@ describe('MainTerminalArea', () => {
   afterEach(() => {
     useWorkspaceStore.setState(initialWorkspaceStoreState, true);
     useUiStore.setState(initialUiStoreState, true);
-  });
-
-  it('clears fullscreen with Cmd+Escape while preserving plain Escape', async () => {
-    // Given: a pane is fullscreen in the active tab.
-    useUiStore.getState().setFullscreenPaneId('pane-1');
-    render(<MainTerminalArea />);
-
-    // When: plain Escape is pressed.
-    fireEvent.keyDown(window, { key: 'Escape', metaKey: false });
-
-    // Then: fullscreen stays active because plain Escape belongs to terminal apps.
-    expect(useUiStore.getState().fullscreenPaneId).toBe('pane-1');
-
-    // When: Cmd+Escape is pressed.
-    fireEvent.keyDown(window, { key: 'Escape', metaKey: true });
-
-    // Then: fullscreen is cleared.
-    await waitFor(() => {
-      expect(useUiStore.getState().fullscreenPaneId).toBeNull();
-    });
   });
 
   it('clears fullscreen when the active tab changes', async () => {

@@ -126,9 +126,19 @@ export function buildApplicationMenu(
     actionItem('pane.focusUp', options),
     actionItem('pane.focusDown', options),
     { type: 'separator' },
+    actionItem('pane.toggleFullscreen', options),
+    { type: 'separator' },
     actionItem('ui.toggleSidebar', options),
     { type: 'separator' },
-    { role: 'togglefullscreen', accelerator: ROLE_ACCELERATORS.togglefullscreen },
+    // Override the localized "Enter/Exit Full Screen" label so the window-level toggle is
+    // unambiguously labeled relative to `pane.toggleFullscreen` above. macOS still injects its
+    // own native "Full Screen" item alongside this one, but the explicit "Window" label keeps the
+    // pair readable. Overriding `label` freezes the toggle text — accepted tradeoff for clarity.
+    {
+      role: 'togglefullscreen',
+      label: 'Toggle Window Full Screen',
+      accelerator: ROLE_ACCELERATORS.togglefullscreen,
+    },
   ];
   if (options.isDev) {
     viewSubmenu.push(

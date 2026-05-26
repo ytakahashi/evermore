@@ -75,28 +75,6 @@ export function MainTerminalArea(): React.JSX.Element {
     }
   }, [activePaneIds, clearFullscreen, fullscreenPaneId]);
 
-  useEffect(() => {
-    if (!fullscreenPaneId) {
-      return;
-    }
-
-    const handleKeyDown = (event: KeyboardEvent): void => {
-      if (event.key !== 'Escape' || !event.metaKey) {
-        return;
-      }
-
-      // `useTerminal` swallows this same chord inside xterm so fullscreen can close without also
-      // sending ESC to the PTY, which would affect terminal apps such as vim.
-      event.preventDefault();
-      clearFullscreen();
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-    return () => {
-      window.removeEventListener('keydown', handleKeyDown);
-    };
-  }, [clearFullscreen, fullscreenPaneId]);
-
   let content: React.JSX.Element;
   if (isLoading && workspaces.length === 0) {
     content = <div className="p-4 text-sm text-muted">Loading workspace...</div>;

@@ -486,7 +486,7 @@ describe('PaneLayout', () => {
     expect(
       screen.queryByRole('separator', { name: 'Resize vertical split' }),
     ).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Exit fullscreen (⌘Esc)' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Exit fullscreen (⌘⇧F)' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Split pane vertically' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Close pane' })).not.toBeInTheDocument();
   });
@@ -513,9 +513,7 @@ describe('PaneLayout', () => {
 
     // Then: fullscreen is not applied to this tab.
     expect(screen.getByRole('separator', { name: 'Resize vertical split' })).toBeInTheDocument();
-    expect(
-      screen.queryByRole('button', { name: 'Exit fullscreen (⌘Esc)' }),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Exit fullscreen (⌘⇧F)' })).not.toBeInTheDocument();
     expect(screen.getAllByRole('button', { name: 'Maximize pane' })).toHaveLength(2);
   });
 
