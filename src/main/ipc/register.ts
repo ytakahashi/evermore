@@ -4,6 +4,8 @@ import type { AppSettings } from '../../shared/types';
 import { HotkeyManager } from '../hotkey/hotkey-manager';
 import { createMenuController, type MenuController } from '../menu/menu-controller';
 import { createShortcutDispatcher } from '../menu/dispatcher';
+import { AiAgentNotifier } from '../notifications/ai-agent-notifier';
+import { NotificationService } from '../notifications/notification-service';
 import { PaneInfoTracker } from '../pane-info/pane-info-tracker';
 import { PtyManager } from '../pty/pty-manager';
 import { SettingsStore } from '../settings/settings-store';
@@ -62,6 +64,12 @@ export function registerIpcHandlers(options: RegisterIpcHandlersOptions): Regist
       userDataDir: app.getPath('userData'),
       initialAutoInject: settingsStore.get().shellIntegration.autoInject,
     });
+  const hotkeyManager = new HotkeyManager({ getWindow: options.getWindow });
+  const notificationService = new NotificationService({ getWindow: options.getWindow });
+  const aiAgentNotifier = new AiAgentNotifier({
+    service: notificationService,
+    getSettings: () => settingsStore.get(),
+  });
   const paneInfoTracker = new PaneInfoTracker({
     pollIntervalMs: settingsStore.get().paneInfo.pollIntervalMs,
     callbacks: {
@@ -70,10 +78,13 @@ export function registerIpcHandlers(options: RegisterIpcHandlersOptions): Regist
         if (window && !window.isDestroyed()) {
           window.webContents.send(IPC.PANE_INFO_CHANGED, info);
         }
+        // Fan the same observation out to the AI awaiting-input notifier so it can raise a macOS
+        // notification on pane attention transitions. Order matters only for tests: the renderer
+        // event is dispatched first to keep its perceived latency unchanged.
+        aiAgentNotifier.observe(info);
       },
     },
   });
-  const hotkeyManager = new HotkeyManager({ getWindow: options.getWindow });
   const applyRuntimeSettings = (settings: AppSettings): AppSettings => {
     paneInfoTracker.setPollIntervalMs(settings.paneInfo.pollIntervalMs);
     shellIntegrationInjector.setAutoInject(settings.shellIntegration.autoInject);
@@ -108,6 +119,8 @@ export function registerIpcHandlers(options: RegisterIpcHandlersOptions): Regist
       },
       onDispose: ({ id }) => {
         paneInfoTracker.unregister(id);
+        // Drop notifier state too so a reused ptyId starts from a clean snapshot.
+        aiAgentNotifier.unregister(id);
       },
       onSignal: ({ id, signal }) => {
         paneInfoTracker.applySignal(id, signal);
@@ -190,6 +203,7 @@ export function registerIpcHandlers(options: RegisterIpcHandlersOptions): Regist
       hotkeyManager.dispose();
       paneInfoTracker.dispose();
       menuController.dispose();
+      notificationService.dispose();
     },
   };
 }

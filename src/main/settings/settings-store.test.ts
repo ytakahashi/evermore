@@ -476,4 +476,49 @@ describe('SettingsStore', () => {
     // Then: the section is populated with defaults so downstream consumers can read it.
     expect(next.shellIntegration).toEqual(DEFAULT_APP_SETTINGS.shellIntegration);
   });
+
+  it('defaults notifications.aiAgentAwaitingInputEnabled to false when storage is empty', () => {
+    // Given: a freshly created store on top of an empty payload.
+
+    // When: the renderer reads settings.
+    const result = store.get();
+
+    // Then: AI awaiting-input notifications are opt-in.
+    expect(result.notifications.aiAgentAwaitingInputEnabled).toBe(false);
+  });
+
+  it('persists an explicit notifications.aiAgentAwaitingInputEnabled=true update', () => {
+    // Given: defaults are in storage.
+
+    // When: the user enables AI awaiting-input notifications.
+    const next = store.update({ notifications: { aiAgentAwaitingInputEnabled: true } });
+
+    // Then: only the diff lands on disk and other sections stay implicit.
+    expect(next.notifications.aiAgentAwaitingInputEnabled).toBe(true);
+    expect(storage.payload).toEqual({ notifications: { aiAgentAwaitingInputEnabled: true } });
+  });
+
+  it('normalizes a non-boolean notifications.aiAgentAwaitingInputEnabled to the default', () => {
+    // Given: a hand-edited settings.json with a non-boolean value.
+    storage.payload = { notifications: { aiAgentAwaitingInputEnabled: 'yes' } };
+
+    // When: the store reloads from disk.
+    const next = store.reload();
+
+    // Then: the canonical default is restored.
+    expect(next.notifications.aiAgentAwaitingInputEnabled).toBe(
+      DEFAULT_APP_SETTINGS.notifications.aiAgentAwaitingInputEnabled,
+    );
+  });
+
+  it('fills in a missing notifications section with defaults when read from storage', () => {
+    // Given: a legacy settings.json predating the notifications section.
+    storage.payload = { terminal: { cursorStyle: 'block' } };
+
+    // When: the store reloads from disk.
+    const next = store.reload();
+
+    // Then: the section is populated with defaults so downstream consumers can read it.
+    expect(next.notifications).toEqual(DEFAULT_APP_SETTINGS.notifications);
+  });
 });
