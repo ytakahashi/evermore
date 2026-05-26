@@ -27,6 +27,12 @@ export interface TerminalSignalParserOptions {
    * Receives a typed signal whenever a known OSC sequence is observed.
    */
   emit: (signal: PaneRuntimeSignal) => void;
+  /**
+   * Invoked when an OSC 777 Evermore agent-event payload is dropped, with a short reason string
+   * (`'oversized payload'`, `'malformed JSON'`, etc.). The parser is intentionally logger-agnostic
+   * — callers translate this into a `logger.debug` call, suppress it, or rate-limit it as needed.
+   */
+  onDropAgentEvent?: (reason: string) => void;
 }
 
 /**
@@ -38,6 +44,7 @@ export interface TerminalSignalParserOptions {
 export class TerminalSignalParser {
   private readonly maxOscPayloadCodeUnits: number;
   private readonly emit: (signal: PaneRuntimeSignal) => void;
+  private readonly onDropAgentEvent: ((reason: string) => void) | undefined;
   private state: ParserState = 'normal';
   private payload = '';
 
@@ -45,6 +52,7 @@ export class TerminalSignalParser {
     this.maxOscPayloadCodeUnits =
       options.maxOscPayloadCodeUnits ?? DEFAULT_MAX_OSC_PAYLOAD_CODE_UNITS;
     this.emit = options.emit;
+    this.onDropAgentEvent = options.onDropAgentEvent;
   }
 
   /**
@@ -145,7 +153,9 @@ export class TerminalSignalParser {
   }
 
   private dispatchPayload(payload: string): void {
-    const signal = parseOscPayload(payload);
+    const signal = parseOscPayload(payload, (reason) => {
+      this.safeDropAgentEvent(reason);
+    });
     if (signal) {
       this.safeEmit(signal);
     }
@@ -158,9 +168,20 @@ export class TerminalSignalParser {
       // Signal observation must never block raw PTY data forwarding.
     }
   }
+
+  private safeDropAgentEvent(reason: string): void {
+    try {
+      this.onDropAgentEvent?.(reason);
+    } catch (_error: unknown) {
+      // Drop-observer failures must never block raw PTY data forwarding, mirroring safeEmit.
+    }
+  }
 }
 
-function parseOscPayload(payload: string): PaneRuntimeSignal | null {
+function parseOscPayload(
+  payload: string,
+  onDropAgentEvent: ((reason: string) => void) | undefined,
+): PaneRuntimeSignal | null {
   if (payload.startsWith('7;')) {
     const cwd = parseOsc7Cwd(payload.slice(2));
     return cwd ? { type: 'cwd', cwd, source: 'osc7' } : null;
@@ -177,17 +198,24 @@ function parseOscPayload(payload: string): PaneRuntimeSignal | null {
   }
 
   if (payload.startsWith('777;evermore;')) {
-    const event = parseEvermoreAgentEvent(payload.slice('777;evermore;'.length));
+    const event = parseEvermoreAgentEvent(payload.slice('777;evermore;'.length), onDropAgentEvent);
     return event ? { type: 'agent-event', source: 'evermore-osc777', event } : null;
   }
 
   return null;
 }
 
-function parseEvermoreAgentEvent(payload: string): EvermoreAgentEvent | null {
-  if (getUtf8ByteLength(payload) > OSC_777_PAYLOAD_MAX_BYTES) {
-    debugDropEvermoreAgentEvent('oversized payload');
+function parseEvermoreAgentEvent(
+  payload: string,
+  onDropAgentEvent: ((reason: string) => void) | undefined,
+): EvermoreAgentEvent | null {
+  const drop = (reason: string): null => {
+    onDropAgentEvent?.(reason);
     return null;
+  };
+
+  if (getUtf8ByteLength(payload) > OSC_777_PAYLOAD_MAX_BYTES) {
+    return drop('oversized payload');
   }
 
   let parsed: unknown;
@@ -196,35 +224,29 @@ function parseEvermoreAgentEvent(payload: string): EvermoreAgentEvent | null {
   } catch (_error: unknown) {
     // Ignore JSON parse errors for malformed agent event payloads
     // and drop them without disrupting the PTY flow.
-    debugDropEvermoreAgentEvent('malformed JSON');
-    return null;
+    return drop('malformed JSON');
   }
 
   if (!isRecord(parsed)) {
-    debugDropEvermoreAgentEvent('payload is not an object');
-    return null;
+    return drop('payload is not an object');
   }
 
   if (parsed['v'] !== 1) {
-    debugDropEvermoreAgentEvent('unsupported version');
-    return null;
+    return drop('unsupported version');
   }
 
   if (parsed['type'] !== 'agent-status') {
-    debugDropEvermoreAgentEvent('unsupported event type');
-    return null;
+    return drop('unsupported event type');
   }
 
   const agent = normalizeAgentKind(parsed['agent']);
   if (!agent) {
-    debugDropEvermoreAgentEvent('missing agent');
-    return null;
+    return drop('missing agent');
   }
 
   const status = parsed['status'];
   if (status !== 'running' && status !== 'awaiting-input' && status !== 'complete') {
-    debugDropEvermoreAgentEvent('unsupported status');
-    return null;
+    return drop('unsupported status');
   }
 
   return {
@@ -266,10 +288,6 @@ const UTF8_ENCODER = new TextEncoder();
 
 function getUtf8ByteLength(value: string): number {
   return UTF8_ENCODER.encode(value).byteLength;
-}
-
-function debugDropEvermoreAgentEvent(reason: string): void {
-  console.debug(`[Evermore] Ignored OSC 777 agent event: ${reason}`);
 }
 
 function parseLifecycleSignal(payload: string): PaneRuntimeSignal | null {

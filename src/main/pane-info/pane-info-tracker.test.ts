@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PaneRuntimeInfo } from '../../shared/types';
+import { createLogger, type LogRecord, type LogTransport } from '../logging/logger';
 import { PaneInfoTracker } from './pane-info-tracker';
 import type { PaneInfoChangedEvent, ProcessTableRow } from './types';
 
@@ -56,6 +57,41 @@ describe('PaneInfoTracker', () => {
 
   afterEach(() => {
     vi.useRealTimers();
+  });
+
+  it('routes inspector failures to the injected logger', async () => {
+    // Given: an inspector that always rejects and a recording logger.
+    const records: LogRecord[] = [];
+    const transport: LogTransport = {
+      write(record) {
+        records.push(record);
+      },
+    };
+    const logger = createLogger({ level: 'debug', transport });
+    const failure = new Error('ps failed');
+    const failingTracker = new PaneInfoTracker({
+      callbacks: { onChanged },
+      inspector: {
+        listProcesses: vi.fn(() => Promise.reject(failure)),
+      },
+      now: () => now,
+      pollIntervalMs: 0,
+      logger,
+    });
+
+    // When: a pane is registered, which kicks off a poll that will fail.
+    failingTracker.register('pty-1', 123, '/tmp');
+    await Promise.resolve();
+    await Promise.resolve();
+
+    // Then: the warning is emitted via the injected logger with the original error as meta.
+    expect(records).toEqual([
+      expect.objectContaining({
+        level: 'warn',
+        message: 'Failed to inspect pane processes',
+        meta: failure,
+      }),
+    ]);
   });
 
   it('registers panes with an initial idle snapshot', () => {

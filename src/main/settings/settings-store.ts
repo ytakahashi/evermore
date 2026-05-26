@@ -5,8 +5,7 @@ import type { SettingsUpdate } from '../../shared/api-types';
 import { isKeyboardShortcutActionId } from '../../shared/keyboard-shortcuts';
 import { cloneDefaultSettings, DEFAULT_APP_SETTINGS } from '../../shared/settings-defaults';
 import type { AppSettings, FontWeight } from '../../shared/types';
-import { createLogger, type Logger } from '../logging/logger';
-import { NoopTransport } from '../logging/transports/noop';
+import { createSilentLogger, type Logger } from '../logging/logger';
 import type { PersistedSettings, SettingsStorageAdapter, SettingsStoreOptions } from './types';
 
 /**
@@ -369,12 +368,6 @@ function applySettingsPatch(current: AppSettings, patch: SettingsUpdate): AppSet
  * on every IPC call. Writes go through `update()` / `reset()`, which both persist and broadcast to
  * subscribers (e.g. main-side reactors that need to push values into runtime services).
  */
-function createSilentLogger(): Logger {
-  // Default for tests and callers that have not wired a real logger yet. Errors are still useful
-  // to surface, but a silent default avoids forcing every test to spy on console.
-  return createLogger({ level: 'error', transport: new NoopTransport() });
-}
-
 export class SettingsStore {
   private readonly storage: SettingsStorageAdapter;
   private readonly logger: Logger;

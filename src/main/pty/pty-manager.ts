@@ -3,6 +3,7 @@ import { existsSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import * as nodePty from 'node-pty';
 import type { IDisposable, IPty } from 'node-pty';
+import { createSilentLogger, type Logger } from '../logging/logger';
 import type { ShellIntegrationInjector } from '../shell-integration/injector';
 import { buildPtyProcessEnv } from './pty-env';
 import { TerminalSignalParser } from './terminal-signal-parser';
@@ -27,12 +28,14 @@ export class PtyManager {
   private readonly spawn: PtySpawn;
   private readonly getHomeDirectory: () => string;
   private readonly shellIntegrationInjector: ShellIntegrationInjector | undefined;
+  private readonly logger: Logger;
 
   public constructor(options: PtyManagerOptions) {
     this.callbacks = options.callbacks;
     this.spawn = options.spawn ?? nodePty.spawn;
     this.getHomeDirectory = options.getHomeDirectory ?? homedir;
     this.shellIntegrationInjector = options.shellIntegrationInjector;
+    this.logger = options.logger ?? createSilentLogger();
   }
 
   /**
@@ -85,6 +88,9 @@ export class PtyManager {
     const parser = new TerminalSignalParser({
       emit: (signal) => {
         this.callbacks.onSignal?.({ id, signal });
+      },
+      onDropAgentEvent: (reason) => {
+        this.logger.debug('osc-777 dropped', { reason });
       },
     });
 

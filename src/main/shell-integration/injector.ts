@@ -1,6 +1,7 @@
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { EVERMORE_ZSH_SHELL_INTEGRATION_SNIPPET } from '../../shared/shell-integration/zsh-snippet';
+import { createSilentLogger, type Logger } from '../logging/logger';
 import { buildZlogin, buildZprofile, buildZshenv, buildZshrc } from './forwarding-scripts';
 
 /**
@@ -22,6 +23,11 @@ export interface ShellIntegrationInjectorOptions {
   snippet?: string;
   /** Filesystem adapter (DI). Production uses real `node:fs`. */
   fs?: ShellIntegrationInjectorFs;
+  /**
+   * Logger for materialize failures. Optional so tests can omit it and inherit a silent default;
+   * production wiring injects a scoped logger from the composition root.
+   */
+  logger?: Logger;
 }
 
 const ENV_KEY_ZDOTDIR = 'ZDOTDIR' as const;
@@ -50,6 +56,7 @@ export class ShellIntegrationInjector {
   private readonly directory: string;
   private readonly snippet: string;
   private readonly fs: ShellIntegrationInjectorFs;
+  private readonly logger: Logger;
   private autoInject: boolean;
   private materializeOk = false;
 
@@ -61,6 +68,7 @@ export class ShellIntegrationInjector {
       writeFileSync,
       readFileSync,
     };
+    this.logger = options.logger ?? createSilentLogger();
     this.autoInject = options.initialAutoInject;
     if (this.autoInject) {
       this.materialize();
@@ -141,7 +149,7 @@ export class ShellIntegrationInjector {
       // unusual state, leave `materializeOk = false` so `envExtrasForShell` returns undefined and
       // PTY spawn continues without auto-injection.
       this.materializeOk = false;
-      console.error('ShellIntegrationInjector.materialize failed', error);
+      this.logger.error('ShellIntegrationInjector.materialize failed', error);
     }
   }
 

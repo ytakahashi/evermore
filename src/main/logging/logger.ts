@@ -111,6 +111,21 @@ export function createLogger(options: CreateLoggerOptions): Logger {
 }
 
 /**
+ * Returns a logger that swallows every record. Suitable as a constructor default for managers
+ * that take an optional logger so tests do not need to wire one and unwired call sites do not
+ * leak diagnostics through `console`.
+ */
+export function createSilentLogger(): Logger {
+  return createLogger({ level: 'error', transport: silentTransport });
+}
+
+const silentTransport: LogTransport = {
+  write(): void {
+    // Intentional no-op.
+  },
+};
+
+/**
  * Resolves the effective log level from an environment variable string and the dev/prod flag.
  *
  * `LOG_LEVEL` overrides when it is one of the four valid values. Missing or invalid input falls

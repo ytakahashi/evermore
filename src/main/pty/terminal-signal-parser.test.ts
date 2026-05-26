@@ -293,6 +293,55 @@ describe('TerminalSignalParser', () => {
     expect(signals).toEqual([]);
   });
 
+  it('reports a reason via onDropAgentEvent for every OSC 777 drop case', () => {
+    // Given: a parser whose code-unit guard is wide enough to let the OSC 777 byte guard fire,
+    // configured with an onDropAgentEvent observer.
+    const reasons: string[] = [];
+    const parser = new TerminalSignalParser({
+      maxOscPayloadCodeUnits: 65_536,
+      emit: () => {},
+      onDropAgentEvent: (reason) => {
+        reasons.push(reason);
+      },
+    });
+    const oversizedPayload = JSON.stringify({
+      v: 1,
+      type: 'agent-status',
+      agent: 'claude',
+      status: 'running',
+      message: 'x'.repeat(8200),
+    });
+    const cases: Array<[string, string]> = [
+      [`\x1b]777;evermore;${oversizedPayload}\x07`, 'oversized payload'],
+      ['\x1b]777;evermore;{not-json\x07', 'malformed JSON'],
+      ['\x1b]777;evermore;[1,2,3]\x07', 'payload is not an object'],
+      [
+        `\x1b]777;evermore;${JSON.stringify({ v: 2, type: 'agent-status', agent: 'claude', status: 'running' })}\x07`,
+        'unsupported version',
+      ],
+      [
+        `\x1b]777;evermore;${JSON.stringify({ v: 1, type: 'notify', agent: 'claude', status: 'running' })}\x07`,
+        'unsupported event type',
+      ],
+      [
+        `\x1b]777;evermore;${JSON.stringify({ v: 1, type: 'agent-status', agent: '   ', status: 'running' })}\x07`,
+        'missing agent',
+      ],
+      [
+        `\x1b]777;evermore;${JSON.stringify({ v: 1, type: 'agent-status', agent: 'claude', status: 'thinking' })}\x07`,
+        'unsupported status',
+      ],
+    ];
+
+    // When: each invalid payload is streamed through the parser.
+    for (const [chunk] of cases) {
+      parser.applyChunk(chunk);
+    }
+
+    // Then: every drop reason is reported in order via the observer callback.
+    expect(reasons).toEqual(cases.map(([, reason]) => reason));
+  });
+
   it('discards oversized OSC payloads until their terminator and resumes afterward', () => {
     // Given: an oversized OSC payload that contains a nested OSC-looking sequence before BEL.
     const data = [`\x1b]633;E;${'a'.repeat(20)}\x1b]133;A\x07`, '\x1b]133;C\x07'];
@@ -344,6 +393,22 @@ describe('TerminalSignalParser', () => {
 
     // Then: the stale partial payload is gone and subsequent complete OSC still works.
     expect(signals).toEqual([{ type: 'shell-prompt-end', source: 'osc133' }]);
+  });
+
+  it('does not throw when the onDropAgentEvent callback throws', () => {
+    // Given: a parser whose drop observer throws on every invocation.
+    const parser = new TerminalSignalParser({
+      emit: () => {},
+      onDropAgentEvent: () => {
+        throw new Error('drop observer failed');
+      },
+    });
+
+    // When / Then: malformed OSC 777 input must not propagate out of applyChunk, otherwise raw
+    // PTY data forwarding would stall whenever a bad payload arrives.
+    expect(() => {
+      parser.applyChunk('\x1b]777;evermore;not-json\x07');
+    }).not.toThrow();
   });
 
   it('does not throw when the signal callback throws', () => {
