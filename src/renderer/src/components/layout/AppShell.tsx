@@ -22,9 +22,9 @@ export function AppShell(): React.JSX.Element {
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent): void => {
       // Esc closes the settings view. The application menu owns `Cmd+,` (Preferences…) via the
-      // shortcut dispatcher, so opening settings is not handled here. The same Esc key needs to
-      // keep working inside the workspace pane (e.g. clearing fullscreen) — when settings is not
-      // the active view we let the event pass through unmodified.
+      // shortcut dispatcher, so opening settings is not handled here. Outside the settings view
+      // Esc must reach the terminal (vim, less, etc.), so we only swallow it while settings is
+      // the active view.
       if (event.key === 'Escape') {
         const currentActiveView = useUiStore.getState().activeView;
         if (currentActiveView === 'settings') {

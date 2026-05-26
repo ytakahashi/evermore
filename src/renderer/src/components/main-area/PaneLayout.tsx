@@ -6,6 +6,7 @@ import {
   type PaneRect,
   type SplitRect,
 } from '../../../../shared/pane-layout';
+import { DEFAULT_KEYBINDINGS } from '../../../../shared/keyboard-shortcuts';
 import type { Pane, PaneLayout as PaneLayoutModel, Tab } from '../../../../shared/types';
 import { DEFAULT_APP_SETTINGS } from '../../../../shared/settings-defaults';
 import { usePaneInfoStore } from '../../stores/paneInfoStore';
@@ -28,6 +29,36 @@ const FULLSCREEN_PANE_RECT: PaneRect = {
   widthPct: 100,
   heightPct: 100,
 };
+
+// Map Electron accelerator tokens to macOS keyboard symbols used in tooltip / aria-label hints.
+// macOS-only project, so only the modifier names emitted by `keyboard-shortcuts.ts` are listed.
+const ACCELERATOR_SYMBOLS: Record<string, string> = {
+  Command: '⌘',
+  Control: '⌃',
+  Option: '⌥',
+  Shift: '⇧',
+  Return: '↩',
+  Enter: '↩',
+  Escape: 'Esc',
+  Tab: '⇥',
+  Backspace: '⌫',
+  Delete: '⌦',
+  Left: '←',
+  Right: '→',
+  Up: '↑',
+  Down: '↓',
+  Space: '␣',
+};
+
+function formatAcceleratorSymbols(accelerator: string): string {
+  if (accelerator.length === 0) {
+    return '';
+  }
+  return accelerator
+    .split('+')
+    .map((part) => ACCELERATOR_SYMBOLS[part] ?? part)
+    .join('');
+}
 
 /**
  * Renders a tab's pane layout as flat siblings under a single absolute container.
@@ -124,6 +155,15 @@ function PaneCell({
     (state) =>
       state.settings?.terminal.closePaneOnExit ?? DEFAULT_APP_SETTINGS.terminal.closePaneOnExit,
   );
+  const toggleFullscreenAccelerator = useSettingsStore(
+    (state) =>
+      state.settings?.shortcuts.keybindings['pane.toggleFullscreen'] ??
+      DEFAULT_KEYBINDINGS['pane.toggleFullscreen'],
+  );
+  const toggleFullscreenHint = formatAcceleratorSymbols(toggleFullscreenAccelerator);
+  const exitFullscreenLabel = toggleFullscreenHint
+    ? `Exit fullscreen (${toggleFullscreenHint})`
+    : 'Exit fullscreen';
 
   const isActive = isActiveTab && tab.activePaneId === pane.id;
   const canClosePane = countPaneLeaves(tab.layout) > 1;
@@ -171,9 +211,9 @@ function PaneCell({
       />
       <div className="absolute right-2 top-2 z-20 flex items-center gap-1 rounded bg-panel/90 p-1 opacity-0 shadow-sm transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
         <button
-          aria-label={isFullscreen ? 'Exit fullscreen (⌘Esc)' : 'Maximize pane'}
+          aria-label={isFullscreen ? exitFullscreenLabel : 'Maximize pane'}
           className="flex size-6 items-center justify-center rounded text-subtle hover:bg-raised hover:text-foreground"
-          title={isFullscreen ? 'Exit fullscreen (⌘Esc)' : 'Maximize pane'}
+          title={isFullscreen ? exitFullscreenLabel : 'Maximize pane'}
           type="button"
           onClick={(event) => {
             event.stopPropagation();

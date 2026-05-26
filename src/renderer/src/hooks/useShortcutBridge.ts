@@ -1,7 +1,7 @@
 import { useEffect } from 'react';
 import type { KeyboardShortcutActionId } from '../../../shared/keyboard-shortcuts';
 import { useUiStore } from '../stores/uiStore';
-import { useWorkspaceStore } from '../stores/workspaceStore';
+import { selectActivePane, useWorkspaceStore } from '../stores/workspaceStore';
 
 /**
  * Subscribes to shortcut invocations dispatched from the main-process application menu and
@@ -17,6 +17,8 @@ import { useWorkspaceStore } from '../stores/workspaceStore';
  *    `Cmd+T` does not silently create tabs the user cannot see.
  *  - `pane.split*` and `pane.focus*` are no-ops while a pane is in fullscreen so the layout cannot
  *    mutate underneath the focused pane.
+ *  - `pane.toggleFullscreen` runs in either fullscreen state (that is the toggle), but is still
+ *    gated to the workspace view so it does not silently affect a hidden tab.
  *  - `ui.toggleSidebar` and `ui.openSettings` are always allowed — they only affect chrome.
  */
 export function useShortcutBridge(): void {
@@ -75,6 +77,17 @@ function handleShortcut(actionId: KeyboardShortcutActionId): void {
       if (!isWorkspaceView || isFullscreen) return;
       workspace.focusAdjacentPane('down');
       return;
+    case 'pane.toggleFullscreen': {
+      if (!isWorkspaceView) return;
+      if (isFullscreen) {
+        uiState.clearFullscreen();
+        return;
+      }
+      const activePane = selectActivePane(workspace);
+      if (!activePane) return;
+      uiState.setFullscreenPaneId(activePane.id);
+      return;
+    }
     case 'ui.toggleSidebar':
       uiState.toggleSidebar();
       return;
