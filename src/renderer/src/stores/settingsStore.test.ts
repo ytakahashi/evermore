@@ -28,6 +28,9 @@ function makeSettingsApi(initial: AppSettings = structuredClone(DEFAULT_APP_SETT
         shellIntegration: patch.shellIntegration
           ? { ...state.current.shellIntegration, ...patch.shellIntegration }
           : state.current.shellIntegration,
+        notifications: patch.notifications
+          ? { ...state.current.notifications, ...patch.notifications }
+          : state.current.notifications,
       };
       return Promise.resolve(structuredClone(state.current));
     }),
@@ -93,6 +96,7 @@ describe('createSettingsStore', () => {
       shortcuts: undefined,
       app: undefined,
       shellIntegration: undefined,
+      notifications: undefined,
     });
   });
 

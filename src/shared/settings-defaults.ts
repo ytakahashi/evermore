@@ -42,6 +42,9 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   shellIntegration: {
     autoInject: true,
   },
+  notifications: {
+    aiAgentAwaitingInputEnabled: false,
+  },
 };
 
 /**
@@ -58,5 +61,6 @@ export function cloneDefaultSettings(): AppSettings {
     },
     app: { ...DEFAULT_APP_SETTINGS.app },
     shellIntegration: { ...DEFAULT_APP_SETTINGS.shellIntegration },
+    notifications: { ...DEFAULT_APP_SETTINGS.notifications },
   };
 }

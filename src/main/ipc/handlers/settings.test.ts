@@ -93,6 +93,24 @@ describe('registerSettingsHandlers', () => {
     expect(settingsStore.get().shellIntegration.autoInject).toBe(false);
   });
 
+  it('persists a notifications.aiAgentAwaitingInputEnabled update across the IPC boundary', async () => {
+    // Given: handlers are registered with defaults (AI awaiting-input notifications default off).
+    registerSettingsHandlers({ settingsStore });
+    expect(settingsStore.get().notifications.aiAgentAwaitingInputEnabled).toBe(false);
+
+    // When: the renderer invokes settings:update to enable AI awaiting-input notifications.
+    const result = (await findHandler(IPC.SETTINGS_UPDATE)?.(
+      {},
+      { settings: { notifications: { aiAgentAwaitingInputEnabled: true } } },
+    )) as AppSettings;
+
+    // Then: the returned value and the underlying store both reflect the enabled state. This
+    // catches the regression where the IPC payload whitelist drops the notifications section,
+    // which made the Settings checkbox flip back to unchecked immediately after the user toggled it.
+    expect(result.notifications.aiAgentAwaitingInputEnabled).toBe(true);
+    expect(settingsStore.get().notifications.aiAgentAwaitingInputEnabled).toBe(true);
+  });
+
   it('returns runtime-reconciled settings after update', async () => {
     // Given: runtime settings application falls back to a different hotkey value.
     const applyRuntimeSettings = vi.fn((_settings: AppSettings) => {

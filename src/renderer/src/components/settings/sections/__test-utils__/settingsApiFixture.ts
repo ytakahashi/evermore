@@ -44,6 +44,9 @@ function defaultMerge(current: AppSettings, patch: SettingsUpdate): AppSettings 
     shellIntegration: patch.shellIntegration
       ? { ...current.shellIntegration, ...patch.shellIntegration }
       : current.shellIntegration,
+    notifications: patch.notifications
+      ? { ...current.notifications, ...patch.notifications }
+      : current.notifications,
   };
 }
 

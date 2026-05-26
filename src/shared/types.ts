@@ -220,4 +220,15 @@ export interface AppSettings {
      */
     autoInject: boolean;
   };
+  notifications: {
+    /**
+     * When true, Evermore raises a macOS notification each time a tracked AI agent transitions
+     * into `attention.kind === 'awaiting-input'`. Default false.
+     *
+     * Requires the agent's hook to be configured and the agent to expose an awaiting-input signal
+     * (see Settings > AI Integration). Enabling this without configured hooks results in no
+     * notifications.
+     */
+    aiAgentAwaitingInputEnabled: boolean;
+  };
 }

@@ -151,6 +151,7 @@ function readCurrentSettings(raw: unknown): AppSettings {
   const shortcutsRaw = isPlainObject(raw.shortcuts) ? raw.shortcuts : {};
   const appRaw = isPlainObject(raw.app) ? raw.app : {};
   const shellIntegrationRaw = isPlainObject(raw.shellIntegration) ? raw.shellIntegration : {};
+  const notificationsRaw = isPlainObject(raw.notifications) ? raw.notifications : {};
 
   const terminal: AppSettings['terminal'] = {
     cursorStyle: pickCursorStyle(terminalRaw.cursorStyle, defaults.terminal.cursorStyle),
@@ -197,6 +198,12 @@ function readCurrentSettings(raw: unknown): AppSettings {
     },
     shellIntegration: {
       autoInject: pickBoolean(shellIntegrationRaw.autoInject, defaults.shellIntegration.autoInject),
+    },
+    notifications: {
+      aiAgentAwaitingInputEnabled: pickBoolean(
+        notificationsRaw.aiAgentAwaitingInputEnabled,
+        defaults.notifications.aiAgentAwaitingInputEnabled,
+      ),
     },
   };
 }
@@ -304,6 +311,11 @@ function diffAgainstDefaults(settings: AppSettings): PersistedSettings {
     result.shellIntegration = shellIntegration;
   }
 
+  const notifications = diffPrimitives(settings.notifications, defaults.notifications);
+  if (Object.keys(notifications).length > 0) {
+    result.notifications = notifications;
+  }
+
   return result;
 }
 
@@ -339,6 +351,12 @@ function applySettingsPatch(current: AppSettings, patch: SettingsUpdate): AppSet
           patch.shellIntegration as Record<string, unknown>,
         ) as AppSettings['shellIntegration'])
       : current.shellIntegration,
+    notifications: patch.notifications
+      ? (mergeSection(
+          current.notifications as Record<string, unknown>,
+          patch.notifications as Record<string, unknown>,
+        ) as AppSettings['notifications'])
+      : current.notifications,
   };
 }
 

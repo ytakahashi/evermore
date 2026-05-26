@@ -35,6 +35,7 @@ function readSettingsUpdate(payload: unknown): SettingsUpdate {
     shortcuts: readSectionUpdate<AppSettings['shortcuts']>(settings.shortcuts),
     app: readSectionUpdate<AppSettings['app']>(settings.app),
     shellIntegration: readSectionUpdate<AppSettings['shellIntegration']>(settings.shellIntegration),
+    notifications: readSectionUpdate<AppSettings['notifications']>(settings.notifications),
   };
 }
 

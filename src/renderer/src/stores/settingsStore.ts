@@ -61,6 +61,9 @@ function mergePatchIntoSettings(current: AppSettings, patch: SettingsUpdate): Ap
     shellIntegration: patch.shellIntegration
       ? { ...current.shellIntegration, ...patch.shellIntegration }
       : current.shellIntegration,
+    notifications: patch.notifications
+      ? { ...current.notifications, ...patch.notifications }
+      : current.notifications,
   };
 }
 
@@ -153,6 +156,9 @@ export function createSettingsStore(
           shellIntegration: patch.shellIntegration
             ? { ...pendingPatch.shellIntegration, ...patch.shellIntegration }
             : pendingPatch.shellIntegration,
+          notifications: patch.notifications
+            ? { ...pendingPatch.notifications, ...patch.notifications }
+            : pendingPatch.notifications,
         };
 
         const flushPromise = new Promise<AppSettings | null>((resolve) => {
