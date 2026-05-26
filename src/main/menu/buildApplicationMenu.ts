@@ -5,6 +5,7 @@ import type { BrowserWindow, MenuItemConstructorOptions } from 'electron';
 import {
   ACTION_LABELS,
   DEFAULT_KEYBINDINGS,
+  ROLE_ACCELERATORS,
   type KeyboardShortcutActionId,
 } from '../../shared/keyboard-shortcuts';
 
@@ -30,37 +31,6 @@ export interface BuildApplicationMenuOptions {
   /** Adds the DevTools toggle entry under View when true. */
   isDev: boolean;
 }
-
-/**
- * macOS-standard accelerators for Electron menu roles, declared explicitly on each role item so
- * `getReservedAccelerators` (which only walks the `accelerator` field) can surface them as
- * conflict sources in the Settings UI. The OS still resolves the role's behavior; the explicit
- * accelerator just makes the binding observable in the template.
- *
- * Strings are written in the renderer's canonical modifier order
- * (`Command` → `Control` → `Option` → `Shift`) and use `Option` instead of `Alt`, matching what
- * the Settings UI's accelerator picker produces. Electron's Accelerator parser treats the
- * orderings and modifier aliases as equivalent, so the runtime binding is unchanged; aligning the
- * string lets exact-equality conflict checks succeed against user-entered values.
- *
- * Keep this table aligned with the role items used below — every role item that owns a keyboard
- * accelerator on macOS must appear here, otherwise downstream conflict detection in the Settings
- * UI cannot warn against rebinding an Evermore action onto a standard role accelerator.
- */
-const ROLE_ACCELERATORS = {
-  undo: 'Command+Z',
-  redo: 'Command+Shift+Z',
-  cut: 'Command+X',
-  copy: 'Command+C',
-  paste: 'Command+V',
-  selectAll: 'Command+A',
-  quit: 'Command+Q',
-  hide: 'Command+H',
-  hideOthers: 'Command+Option+H',
-  minimize: 'Command+M',
-  togglefullscreen: 'Command+Control+F',
-  toggleDevTools: 'Command+Option+I',
-} as const satisfies Partial<Record<NonNullable<MenuItemConstructorOptions['role']>, string>>;
 
 /**
  * Resolves the accelerator for an Evermore action. Returns `undefined` for explicit unbinds (`""`)

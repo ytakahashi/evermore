@@ -40,10 +40,7 @@ export function ApplicationSection(): React.JSX.Element {
       </header>
 
       <fieldset className="border-b border-border-subtle py-4">
-        <div className="flex items-center gap-2">
-          <legend className="text-sm font-medium">Quit confirmation</legend>
-          <span className="rounded bg-raised px-1.5 py-0.5 text-xs text-muted">Live</span>
-        </div>
+        <legend className="text-sm font-medium">Quit confirmation</legend>
         <div className="mt-3 flex flex-col gap-2">
           {QUIT_CONFIRM_OPTIONS.map((option) => (
             <label
