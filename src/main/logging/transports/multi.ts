@@ -11,7 +11,9 @@ export class MultiTransport implements LogTransport {
   private readonly transports: readonly LogTransport[];
 
   public constructor(transports: readonly LogTransport[]) {
-    this.transports = transports;
+    // Snapshot the input so later mutations by the caller cannot alter this instance's fan-out.
+    // The `readonly` parameter type is a compile-time contract only.
+    this.transports = [...transports];
   }
 
   public write(record: LogRecord): void {

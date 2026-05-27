@@ -110,6 +110,12 @@ export function createLogger(options: CreateLoggerOptions): Logger {
   return logger;
 }
 
+const silentTransport: LogTransport = {
+  write(): void {
+    // Intentional no-op.
+  },
+};
+
 /**
  * Returns a logger that swallows every record. Suitable as a constructor default for managers
  * that take an optional logger so tests do not need to wire one and unwired call sites do not
@@ -118,12 +124,6 @@ export function createLogger(options: CreateLoggerOptions): Logger {
 export function createSilentLogger(): Logger {
   return createLogger({ level: 'error', transport: silentTransport });
 }
-
-const silentTransport: LogTransport = {
-  write(): void {
-    // Intentional no-op.
-  },
-};
 
 /**
  * Resolves the effective log level from an environment variable string and the dev/prod flag.
