@@ -2,6 +2,7 @@ import { app, Menu, shell, type BrowserWindow, type MenuItemConstructorOptions }
 import { IPC } from '../../shared/ipc-channels';
 import type { AppSettings } from '../../shared/types';
 import { HotkeyManager } from '../hotkey/hotkey-manager';
+import { createSilentLogger, type Logger } from '../logging/logger';
 import { createMenuController, type MenuController } from '../menu/menu-controller';
 import { createShortcutDispatcher } from '../menu/dispatcher';
 import { AiAgentNotifier } from '../notifications/ai-agent-notifier';
@@ -35,6 +36,11 @@ interface RegisterIpcHandlersOptions {
    * production caller passes `is.dev` from `@electron-toolkit/utils`.
    */
   isDev?: boolean;
+  /**
+   * Root logger from the composition root. Optional so tests can omit it; production passes the
+   * root logger and per-feature managers receive scoped children created here.
+   */
+  logger?: Logger;
 }
 
 export interface RegisteredIpcHandlers {
@@ -55,6 +61,7 @@ function isWindowAvailable(window: BrowserWindow | null): window is BrowserWindo
  * long-lived main-process services, such as PTYs, continue to be owned outside any one window.
  */
 export function registerIpcHandlers(options: RegisterIpcHandlersOptions): RegisteredIpcHandlers {
+  const logger = options.logger ?? createSilentLogger();
   const settingsStore = options.settingsStore ?? new SettingsStore();
   const sshConfigManager = new SshConfigManager();
   const sshHostResolver = new SshHostResolver();
@@ -63,15 +70,20 @@ export function registerIpcHandlers(options: RegisterIpcHandlersOptions): Regist
     new ShellIntegrationInjector({
       userDataDir: app.getPath('userData'),
       initialAutoInject: settingsStore.get().shellIntegration.autoInject,
+      logger: logger.child('shell-integration'),
     });
   const hotkeyManager = new HotkeyManager({ getWindow: options.getWindow });
-  const notificationService = new NotificationService({ getWindow: options.getWindow });
+  const notificationService = new NotificationService({
+    getWindow: options.getWindow,
+    logger: logger.child('notifications'),
+  });
   const aiAgentNotifier = new AiAgentNotifier({
     service: notificationService,
     getSettings: () => settingsStore.get(),
   });
   const paneInfoTracker = new PaneInfoTracker({
     pollIntervalMs: settingsStore.get().paneInfo.pollIntervalMs,
+    logger: logger.child('pane-info'),
     callbacks: {
       onChanged: ({ info }) => {
         const window = options.getWindow();
@@ -97,6 +109,7 @@ export function registerIpcHandlers(options: RegisterIpcHandlersOptions): Regist
   };
   const ptyManager = new PtyManager({
     shellIntegrationInjector,
+    logger: logger.child('pty'),
     callbacks: {
       onData: (event) => {
         const window = options.getWindow();
@@ -178,6 +191,7 @@ export function registerIpcHandlers(options: RegisterIpcHandlersOptions): Regist
   const disposeTunnelHandlers = registerTunnelHandlers({
     sshConfigManager,
     tunnelManager,
+    logger: logger.child('tunnels'),
   });
   const disposeWindowHandlers = registerWindowHandlers({
     getWindow: options.getWindow,
