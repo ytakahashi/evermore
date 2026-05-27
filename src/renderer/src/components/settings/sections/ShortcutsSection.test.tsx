@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   ACTION_LABELS,
   DEFAULT_KEYBINDINGS,
+  formatAcceleratorForDisplay,
   KEYBOARD_SHORTCUT_ACTION_IDS,
 } from '../../../../../shared/keyboard-shortcuts';
 import { DEFAULT_APP_SETTINGS } from '../../../../../shared/settings-defaults';
@@ -81,14 +82,37 @@ describe('ShortcutsSection', () => {
     render(<ShortcutsSection />);
 
     // Then: every action id surfaces with the ACTION_LABELS title, the action id subtitle, and
-    // the default accelerator value in its picker.
+    // the default accelerator value in its picker rendered as macOS keycap symbols.
     for (const actionId of KEYBOARD_SHORTCUT_ACTION_IDS) {
       const label = ACTION_LABELS[actionId];
       expect(screen.getByText(label)).toBeInTheDocument();
       expect(screen.getByText(actionId)).toBeInTheDocument();
-      const picker = screen.getByLabelText(`${label} keybinding`) as HTMLInputElement;
-      expect(picker.value).toBe(DEFAULT_KEYBINDINGS[actionId]);
+      const picker = screen.getByLabelText(`${label} keybinding`);
+      expect(picker.textContent).toBe(formatAcceleratorForDisplay(DEFAULT_KEYBINDINGS[actionId]));
     }
+  });
+
+  it('associates the activate hotkey and keybinding pickers with their instructional copy via aria-describedby', () => {
+    // Given: defaults render both the hotkey picker and the per-action keybinding rows.
+    fixture = createSettingsApiFixture();
+    render(<ShortcutsSection />);
+
+    // Then: the hotkey picker points at the "click and press a shortcut" instructions so screen
+    // readers announce the key-capture affordance instead of treating this as a normal textbox.
+    const hotkeyPicker = screen.getByLabelText('Activate Evermore hotkey');
+    const hotkeyDescribedBy = hotkeyPicker.getAttribute('aria-describedby');
+    expect(hotkeyDescribedBy).not.toBeNull();
+    const hotkeyDescription = document.getElementById(hotkeyDescribedBy as string);
+    expect(hotkeyDescription?.textContent).toMatch(/click the field and press a shortcut/i);
+
+    // And: each keybinding row references the shared keybinding instructions paragraph.
+    const newTabPicker = screen.getByLabelText('New Tab keybinding');
+    const newTabDescribedBy = newTabPicker.getAttribute('aria-describedby');
+    expect(newTabDescribedBy).not.toBeNull();
+    const firstId = (newTabDescribedBy as string).split(' ')[0] as string;
+    expect(document.getElementById(firstId)?.textContent).toMatch(
+      /press a shortcut to rebind the action/i,
+    );
   });
 
   it('persists a rebound accelerator via updateSettings', async () => {
@@ -161,8 +185,8 @@ describe('ShortcutsSection', () => {
     render(<ShortcutsSection />);
 
     // Then: the picker shows the (disabled) sentinel and is marked aria-disabled.
-    const picker = screen.getByLabelText('New Tab keybinding') as HTMLInputElement;
-    expect(picker.value).toBe('(disabled)');
+    const picker = screen.getByLabelText('New Tab keybinding');
+    expect(picker.textContent).toBe('(disabled)');
     expect(picker.getAttribute('aria-disabled')).toBe('true');
 
     // When: a normal accelerator keystroke is sent — it must be ignored.

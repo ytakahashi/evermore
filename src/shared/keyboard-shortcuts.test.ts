@@ -6,6 +6,7 @@ import {
   ACTION_LABELS,
   ROLE_ACCELERATORS,
   STANDARD_ROLE_ACCELERATOR_SET,
+  formatAcceleratorForDisplay,
   getReservedAccelerators,
   isKeyboardShortcutActionId,
   type MenuTemplateNode,
@@ -61,6 +62,56 @@ describe('keyboard-shortcuts', () => {
       for (const accelerator of Object.values(ROLE_ACCELERATORS)) {
         expect(STANDARD_ROLE_ACCELERATOR_SET.has(accelerator)).toBe(true);
       }
+    });
+  });
+
+  describe('formatAcceleratorForDisplay', () => {
+    const cmd = String.fromCodePoint(0x2318);
+    const opt = String.fromCodePoint(0x2325);
+    const shift = String.fromCodePoint(0x21e7);
+    const ctrl = String.fromCodePoint(0x2303);
+    const left = String.fromCodePoint(0x2190);
+    const right = String.fromCodePoint(0x2192);
+    const up = String.fromCodePoint(0x2191);
+    const down = String.fromCodePoint(0x2193);
+    const enter = String.fromCodePoint(0x21b5);
+    const escape = String.fromCodePoint(0x238b);
+    const forwardDelete = String.fromCodePoint(0x2326);
+    const tab = String.fromCodePoint(0x21e5);
+
+    it('maps modifiers and named keys to macOS keycap symbols separated by spaces', () => {
+      expect(formatAcceleratorForDisplay('Command+T')).toBe(`${cmd} T`);
+      expect(formatAcceleratorForDisplay('Command+Shift+D')).toBe(`${shift} ${cmd} D`);
+      expect(formatAcceleratorForDisplay('Command+Option+Left')).toBe(`${opt} ${cmd} ${left}`);
+      expect(formatAcceleratorForDisplay('Command+Option+Right')).toBe(`${opt} ${cmd} ${right}`);
+      expect(formatAcceleratorForDisplay('Command+Option+Up')).toBe(`${opt} ${cmd} ${up}`);
+      expect(formatAcceleratorForDisplay('Command+Option+Down')).toBe(`${opt} ${cmd} ${down}`);
+    });
+
+    it('reorders modifiers to Control → Option → Shift → Command regardless of stored order', () => {
+      // Given: stored accelerators are emitted Command-first by the picker, but the macOS HIG
+      // display order puts Command last.
+      expect(formatAcceleratorForDisplay('Command+Control+Option+Shift+K')).toBe(
+        `${ctrl} ${opt} ${shift} ${cmd} K`,
+      );
+    });
+
+    it('renders named non-modifier keys as their symbols', () => {
+      expect(formatAcceleratorForDisplay('Command+Enter')).toBe(`${cmd} ${enter}`);
+      expect(formatAcceleratorForDisplay('Command+Escape')).toBe(`${cmd} ${escape}`);
+      expect(formatAcceleratorForDisplay('Command+Delete')).toBe(`${cmd} ${forwardDelete}`);
+      expect(formatAcceleratorForDisplay('Command+Tab')).toBe(`${cmd} ${tab}`);
+    });
+
+    it('passes punctuation and word keys through unchanged', () => {
+      expect(formatAcceleratorForDisplay('Command+,')).toBe(`${cmd} ,`);
+      expect(formatAcceleratorForDisplay('Command+[')).toBe(`${cmd} [`);
+      expect(formatAcceleratorForDisplay('Command+]')).toBe(`${cmd} ]`);
+      expect(formatAcceleratorForDisplay('Command+Space')).toBe(`${cmd} Space`);
+    });
+
+    it('returns an empty string for an empty input', () => {
+      expect(formatAcceleratorForDisplay('')).toBe('');
     });
   });
 

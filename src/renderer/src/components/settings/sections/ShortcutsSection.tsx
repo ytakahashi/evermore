@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import {
   ACTION_LABELS,
   DEFAULT_KEYBINDINGS,
+  formatAcceleratorForDisplay,
   KEYBOARD_SHORTCUT_ACTION_IDS,
   STANDARD_ROLE_ACCELERATOR_SET,
   type KeyboardShortcutActionId,
@@ -11,6 +12,12 @@ import { useSettingsStore } from '../../../stores/settingsStore';
 
 interface AcceleratorPickerProps {
   ariaLabel: string;
+  /**
+   * Space-separated id list passed through to `aria-describedby`. Used to attach the surrounding
+   * "click a field and press a shortcut" instructions (and the inline hotkey error, when present)
+   * so a screen-reader user understands this is a key-capture field rather than a normal textbox.
+   */
+  ariaDescribedBy?: string;
   onChange: (accelerator: string | null) => void;
   value: string | null;
   /**
@@ -24,10 +31,13 @@ interface AcceleratorPickerProps {
 }
 
 function formatAccelerator(value: string | null): string {
-  return value ?? 'Disabled';
+  if (value === null) {
+    return 'Disabled';
+  }
+  return formatAcceleratorForDisplay(value);
 }
 
-function keyToAcceleratorPart(event: React.KeyboardEvent<HTMLInputElement>): string | null {
+function keyToAcceleratorPart(event: React.KeyboardEvent<HTMLElement>): string | null {
   if (event.key === ',' || event.code === 'Comma') {
     return ',';
   }
@@ -52,9 +62,7 @@ function keyToAcceleratorPart(event: React.KeyboardEvent<HTMLInputElement>): str
   return namedKeys[event.key] ?? null;
 }
 
-function eventToAccelerator(
-  event: React.KeyboardEvent<HTMLInputElement>,
-): string | null | undefined {
+function eventToAccelerator(event: React.KeyboardEvent<HTMLElement>): string | null | undefined {
   if (event.key === 'Backspace') {
     return null;
   }
@@ -87,6 +95,7 @@ function eventToAccelerator(
 
 function AcceleratorPicker({
   ariaLabel,
+  ariaDescribedBy,
   onChange,
   value,
   disabled,
@@ -94,11 +103,13 @@ function AcceleratorPicker({
 }: AcceleratorPickerProps): React.JSX.Element {
   const displayValue = disabled ? (placeholder ?? '(disabled)') : formatAccelerator(value);
   return (
-    <input
+    <div
       aria-label={ariaLabel}
+      aria-describedby={ariaDescribedBy}
       aria-disabled={disabled || undefined}
+      aria-readonly="true"
       className={
-        'w-64 rounded border border-border bg-background px-2 py-1 font-mono text-sm' +
+        'flex h-7 w-64 items-center rounded border border-border bg-background px-2 text-sm tabular-nums focus:border-brand focus:outline-none' +
         (disabled ? ' text-muted opacity-70' : '')
       }
       onKeyDown={(event) => {
@@ -119,10 +130,11 @@ function AcceleratorPicker({
         event.preventDefault();
         onChange(accelerator);
       }}
-      readOnly
-      type="text"
-      value={displayValue}
-    />
+      role="textbox"
+      tabIndex={0}
+    >
+      {displayValue}
+    </div>
   );
 }
 
@@ -250,15 +262,27 @@ export function ShortcutsSection(): React.JSX.Element {
       <div className="grid gap-3 border-b border-border-subtle py-4 sm:grid-cols-[1fr_auto]">
         <div>
           <h3 className="text-sm font-medium">Activate Evermore</h3>
-          <p className="mt-1 max-w-2xl text-xs leading-5 text-muted">
+          <p
+            className="mt-1 max-w-2xl text-xs leading-5 text-muted"
+            id="shortcuts-hotkey-description"
+          >
             Focuses the Evermore window from anywhere on the system. Click the field and press a
             shortcut. Backspace disables it.
           </p>
-          {hotkeyError ? <p className="mt-2 text-xs leading-5 text-danger">{hotkeyError}</p> : null}
+          {hotkeyError ? (
+            <p className="mt-2 text-xs leading-5 text-danger" id="shortcuts-hotkey-error">
+              {hotkeyError}
+            </p>
+          ) : null}
         </div>
         <div className="flex items-center sm:justify-end">
           <AcceleratorPicker
             ariaLabel="Activate Evermore hotkey"
+            ariaDescribedBy={
+              hotkeyError
+                ? 'shortcuts-hotkey-description shortcuts-hotkey-error'
+                : 'shortcuts-hotkey-description'
+            }
             onChange={updateHotkey}
             value={settings.shortcuts.activateAppHotkey}
           />
@@ -267,7 +291,10 @@ export function ShortcutsSection(): React.JSX.Element {
 
       <section className="py-4">
         <h3 className="mb-3 text-sm font-medium">Keybindings</h3>
-        <p className="mb-3 max-w-2xl text-xs leading-5 text-muted">
+        <p
+          className="mb-3 max-w-2xl text-xs leading-5 text-muted"
+          id="shortcuts-keybindings-description"
+        >
           Click a field and press a shortcut to rebind the action. Backspace restores the default.
           Conflicts with another action, a macOS menu role, or the global hotkey are highlighted but
           not blocked — the actual winner is decided by the application menu and OS at runtime.
@@ -278,6 +305,10 @@ export function ShortcutsSection(): React.JSX.Element {
             const isExplicitlyUnbound = current === '';
             const value = isExplicitlyUnbound ? null : (current ?? DEFAULT_KEYBINDINGS[actionId]);
             const conflict = conflicts.get(actionId);
+            const conflictDescriptionId = conflict ? `shortcuts-conflict-${actionId}` : undefined;
+            const describedBy = ['shortcuts-keybindings-description', conflictDescriptionId]
+              .filter((id): id is string => typeof id === 'string')
+              .join(' ');
             return (
               <div
                 className="grid items-start gap-2 rounded border border-border px-3 py-2 sm:grid-cols-[1fr_auto]"
@@ -287,13 +318,18 @@ export function ShortcutsSection(): React.JSX.Element {
                   <span className="text-sm font-medium">{ACTION_LABELS[actionId]}</span>
                   <span className="font-mono text-xs text-muted">{actionId}</span>
                   {conflict ? (
-                    <p className="mt-1 text-xs leading-5 text-warning" role="alert">
+                    <p
+                      className="mt-1 text-xs leading-5 text-warning"
+                      id={conflictDescriptionId}
+                      role="alert"
+                    >
                       {formatConflictMessage(conflict)}
                     </p>
                   ) : null}
                 </div>
                 <AcceleratorPicker
                   ariaLabel={`${ACTION_LABELS[actionId]} keybinding`}
+                  ariaDescribedBy={describedBy}
                   disabled={isExplicitlyUnbound}
                   onChange={(nextAccelerator) => {
                     updateKeybinding(actionId, nextAccelerator);

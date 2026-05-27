@@ -160,3 +160,88 @@ export const ROLE_ACCELERATORS = {
 export const STANDARD_ROLE_ACCELERATOR_SET: ReadonlySet<string> = new Set(
   Object.values(ROLE_ACCELERATORS),
 );
+
+/**
+ * macOS keycap symbols for the modifiers used in stored Electron accelerator strings. The display
+ * layer renders these instead of the raw `Command`/`Option`/`Shift`/`Control` tokens so the
+ * Settings UI matches the symbols printed on Apple keyboards and used by the macOS menu bar.
+ */
+const MODIFIER_SYMBOLS: Readonly<Record<string, string>> = {
+  Control: '⌃',
+  Option: '⌥',
+  Shift: '⇧',
+  Command: '⌘',
+};
+
+/**
+ * Display order for stacked modifiers, matching Apple's Human Interface Guidelines
+ * (Control → Option → Shift → Command). The order in stored accelerator strings is Command-first
+ * (see {@link eventToAccelerator} in the renderer); the display layer re-sorts on render so the
+ * persisted string stays unchanged.
+ */
+const MODIFIER_DISPLAY_ORDER: readonly string[] = ['Control', 'Option', 'Shift', 'Command'];
+
+/**
+ * Symbols for named non-modifier keys. Single-character tokens (letters, digits, punctuation such
+ * as `,` / `[`) pass through unchanged. `Space` stays as the word "Space" — the open-box glyph
+ * (`␣`) is visually too close to underscore at small sizes to be readable here.
+ */
+const NAMED_KEY_SYMBOLS: Readonly<Record<string, string>> = {
+  Left: '←',
+  Right: '→',
+  Up: '↑',
+  Down: '↓',
+  Enter: '↵',
+  Tab: '⇥',
+  Escape: '⎋',
+  // Electron's `Delete` token is the Forward Delete key (fn+delete on Apple keyboards). Plain
+  // Backspace is intercepted by the picker as "clear this binding" and never reaches an accelerator
+  // string, so the `⌫` glyph printed on the main delete key would misrepresent what was bound.
+  // Use `⌦` (U+2326) — the Forward Delete symbol — to match what the user actually pressed.
+  Delete: '⌦',
+};
+
+/**
+ * Formats a stored Electron accelerator string (e.g. `"Command+Option+Left"`) into a macOS-style
+ * keycap display string (e.g. `"⌥ ⌘ ←"`). Tokens are separated by a single space so each glyph
+ * stays visually distinct without per-key borders.
+ *
+ * The function only rewrites the visual form — the persisted accelerator format is unchanged, so
+ * Electron's menu builder and conflict detection keep using the canonical token strings.
+ */
+export function formatAcceleratorForDisplay(accelerator: string): string {
+  if (accelerator.length === 0) {
+    return '';
+  }
+
+  // Split on `+` but only when it acts as a separator. A trailing `+` token (e.g. `"Shift++"` for
+  // the `+` key on a non-US layout) would otherwise produce an empty segment; preserve it as the
+  // literal `+` key by detecting the trailing-empty case.
+  const rawParts = accelerator.split('+');
+  const parts =
+    rawParts.length >= 2 && rawParts[rawParts.length - 1] === ''
+      ? [...rawParts.slice(0, -2), '+']
+      : rawParts;
+
+  const presentModifiers = new Set<string>();
+  let keyPart: string | null = null;
+  for (const part of parts) {
+    if (part in MODIFIER_SYMBOLS) {
+      presentModifiers.add(part);
+    } else {
+      keyPart = part;
+    }
+  }
+
+  const tokens: string[] = [];
+  for (const modifier of MODIFIER_DISPLAY_ORDER) {
+    if (presentModifiers.has(modifier)) {
+      tokens.push(MODIFIER_SYMBOLS[modifier] as string);
+    }
+  }
+  if (keyPart !== null && keyPart.length > 0) {
+    tokens.push(NAMED_KEY_SYMBOLS[keyPart] ?? keyPart);
+  }
+
+  return tokens.join(' ');
+}
