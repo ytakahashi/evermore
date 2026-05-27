@@ -10,6 +10,7 @@ import type {
   PaneProcessActivity,
   PaneRuntimeInfo,
 } from '../../shared/types';
+import { createSilentLogger, type Logger } from '../logging/logger';
 import { detectAgentFromCommand } from './agent-detection';
 import { classifyForegroundSession } from './foreground-session';
 import { isIntegrationStale } from './integration-staleness';
@@ -26,6 +27,11 @@ interface PaneInfoTrackerOptions {
   inspector?: Pick<ProcessInspector, 'listProcesses'>;
   now?: () => number;
   pollIntervalMs?: number;
+  /**
+   * Logger for diagnostic observations such as process-inspection failures. Optional so tests
+   * can omit it and inherit a silent default.
+   */
+  logger?: Logger;
 }
 
 /**
@@ -35,6 +41,7 @@ export class PaneInfoTracker {
   private readonly callbacks: PaneInfoTrackerCallbacks;
   private readonly inspector: Pick<ProcessInspector, 'listProcesses'>;
   private readonly now: () => number;
+  private readonly logger: Logger;
   private pollIntervalMs: number;
   private readonly processes = new Map<string, RegisteredPaneProcess>();
   private readonly runtimeInfo = new Map<string, PaneRuntimeInfo>();
@@ -46,6 +53,7 @@ export class PaneInfoTracker {
     this.inspector = options.inspector ?? new ProcessInspector();
     this.now = options.now ?? Date.now;
     this.pollIntervalMs = options.pollIntervalMs ?? DEFAULT_PS_POLL_INTERVAL_MS;
+    this.logger = options.logger ?? createSilentLogger();
   }
 
   /**
@@ -270,11 +278,7 @@ export class PaneInfoTracker {
     try {
       this.updateFromRows(await this.inspector.listProcesses());
     } catch (error: unknown) {
-      if (error instanceof Error) {
-        console.warn(`[Evermore] Failed to inspect pane processes: ${error.message}`);
-      } else {
-        console.warn('[Evermore] Failed to inspect pane processes.');
-      }
+      this.logger.warn('Failed to inspect pane processes', error);
     } finally {
       this.isPolling = false;
     }

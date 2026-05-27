@@ -1,5 +1,6 @@
 import type * as nodePty from 'node-pty';
 import type { PaneRuntimeSignal } from '../../shared/pane-runtime-signal';
+import type { Logger } from '../logging/logger';
 import type { ShellIntegrationInjector } from '../shell-integration/injector';
 
 export interface PtyCreateOptions {
@@ -70,4 +71,9 @@ export interface PtyManagerOptions {
    * Absent in tests that do not exercise auto-injection.
    */
   shellIntegrationInjector?: ShellIntegrationInjector;
+  /**
+   * Logger for parser-driven debug observations (e.g. OSC 777 payload drops). Optional so tests
+   * can omit it and inherit a silent default; production wiring injects a scoped logger.
+   */
+  logger?: Logger;
 }

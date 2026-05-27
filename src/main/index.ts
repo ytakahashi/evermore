@@ -6,6 +6,8 @@ import icon from '../../resources/icon.png?asset';
 import { IPC } from '../shared/ipc-channels';
 import { DEFAULT_APP_SETTINGS } from '../shared/settings-defaults';
 import { registerIpcHandlers, type RegisteredIpcHandlers } from './ipc/register';
+import { createLogger, resolveLogLevel, type Logger, type LogTransport } from './logging/logger';
+import { ConsoleTransport } from './logging/transports/console';
 import { QuitConfirmationController } from './quit-confirmation';
 import { SettingsStore } from './settings/settings-store';
 import { attachWindowShortcuts } from './window-shortcuts';
@@ -16,11 +18,18 @@ let mainWindow: BrowserWindow | null = null;
 let ipcRuntime: RegisteredIpcHandlers | null = null;
 let settingsStore: SettingsStore | null = null;
 let quitConfirmationController: QuitConfirmationController | null = null;
+let rootLogTransport: LogTransport | null = null;
 
 function cleanupRuntime(): void {
+  // Order matters: dispose managers and IPC handlers first so any final log writes during their
+  // dispose() chain still reach the transport. Only after the runtime is gone do we tear the
+  // transport down. Phase 1 ConsoleTransport has no resources to release; the contract is
+  // established here so a Phase 2 file transport can plug in without changing call sites.
   ipcRuntime?.dispose();
   ipcRuntime = null;
   settingsStore = null;
+  rootLogTransport?.dispose?.();
+  rootLogTransport = null;
 }
 
 function createWindow(): void {
@@ -87,11 +96,25 @@ app.whenReady().then(() => {
     attachWindowShortcuts(window);
   });
 
-  settingsStore = new SettingsStore();
+  const consoleTransport = new ConsoleTransport();
+  rootLogTransport = consoleTransport;
+  // LOG_LEVEL is forwarded from the launching shell, so it is only available when the process
+  // inherits the shell environment: `pnpm dev` (the dev path), running the packaged binary
+  // directly (`/Applications/Evermore.app/Contents/MacOS/Evermore`), or pre-registering with
+  // `launchctl setenv LOG_LEVEL …`. Finder clicks and `open -a Evermore` go through launchd and
+  // do not inherit shell env, so the fallback in `resolveLogLevel` (debug in dev, info in prod)
+  // applies there.
+  const rootLogger: Logger = createLogger({
+    level: resolveLogLevel(process.env['LOG_LEVEL'], is.dev),
+    transport: consoleTransport,
+    scope: 'evermore',
+  });
+  settingsStore = new SettingsStore({ logger: rootLogger.child('settings') });
   ipcRuntime = registerIpcHandlers({
     getWindow: () => mainWindow,
     settingsStore,
     isDev: is.dev,
+    logger: rootLogger,
   });
   quitConfirmationController = new QuitConfirmationController({
     cleanup: cleanupRuntime,

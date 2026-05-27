@@ -1,4 +1,5 @@
 import type { BrowserWindow, NotificationConstructorOptions } from 'electron';
+import type { Logger } from '../logging/logger';
 
 /**
  * Subset of the Electron `Notification` surface that {@link NotificationService} consumes.
@@ -37,4 +38,9 @@ export interface NotificationServiceOptions {
    * shown within the gap are suppressed. Defaults to 10_000ms (10s).
    */
   cooldownMs?: number;
+  /**
+   * Logger for diagnostic observations (e.g. unsupported-host skip, close-on-dispose failures).
+   * Optional so tests can omit it and inherit a silent default.
+   */
+  logger?: Logger;
 }

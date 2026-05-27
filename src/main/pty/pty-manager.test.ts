@@ -1,5 +1,6 @@
 import type { IPty, IPtyForkOptions, IDisposable } from 'node-pty';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { createLogger, type LogRecord, type LogTransport } from '../logging/logger';
 import type { ShellIntegrationInjector } from '../shell-integration/injector';
 import { PtyManager } from './pty-manager';
 import { TerminalSignalParser } from './terminal-signal-parser';
@@ -285,6 +286,38 @@ describe('PtyManager', () => {
     });
     expect(onData).toHaveBeenCalledWith({ id, data });
     expect(onSignal.mock.invocationCallOrder[0]).toBeLessThan(onData.mock.invocationCallOrder[0]);
+  });
+
+  it('translates OSC 777 parser drops into a logger.debug observation', () => {
+    // Given: a manager with a recording logger and a live PTY.
+    const records: LogRecord[] = [];
+    const transport: LogTransport = {
+      write(record) {
+        records.push(record);
+      },
+    };
+    const logger = createLogger({ level: 'debug', transport });
+    const localPty = createFakePty();
+    const localSpawn = vi.fn<PtySpawn>().mockReturnValue(localPty);
+    const managerWithLogger = new PtyManager({
+      callbacks: { onData, onExit, onCreate, onDispose, onSignal },
+      spawn: localSpawn,
+      getHomeDirectory: () => '/Users/tester',
+      logger,
+    });
+    managerWithLogger.create({ cwd: '/Users/tester' });
+
+    // When: a malformed Evermore OSC 777 payload arrives from the PTY.
+    localPty.emitData('\x1b]777;evermore;not-json\x07');
+
+    // Then: the parser's drop reason is recorded as a debug entry on the injected logger.
+    expect(records).toEqual([
+      expect.objectContaining({
+        level: 'debug',
+        message: 'osc-777 dropped',
+        meta: { reason: 'malformed JSON' },
+      }),
+    ]);
   });
 
   it('keeps forwarding raw PTY data when terminal signal observation throws', () => {

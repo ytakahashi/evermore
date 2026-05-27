@@ -1,6 +1,7 @@
 import { ipcMain } from 'electron';
 import { IPC } from '../../../shared/ipc-channels';
 import type { SSHHost, Tunnel } from '../../../shared/types';
+import { createSilentLogger, type Logger } from '../../logging/logger';
 import type { SshConfigManager } from '../../ssh-config/manager';
 import type { TunnelManager } from '../../tunnels/tunnel-manager';
 
@@ -13,6 +14,11 @@ type TunnelRuntimeManager = Pick<
 interface RegisterTunnelHandlersOptions {
   sshConfigManager: TunnelSshConfigManager;
   tunnelManager: TunnelRuntimeManager;
+  /**
+   * Logger for diagnostics such as the "still running but no longer configured" warning. Optional
+   * so tests can omit it and inherit a silent default.
+   */
+  logger?: Logger;
 }
 
 function toTunnel(host: SSHHost, tunnelManager: TunnelRuntimeManager): Tunnel {
@@ -30,35 +36,33 @@ function toTunnel(host: SSHHost, tunnelManager: TunnelRuntimeManager): Tunnel {
   };
 }
 
-function warnAboutUnconfiguredActiveTunnels(
-  hosts: SSHHost[],
-  tunnelManager: TunnelRuntimeManager,
-): void {
-  const configuredTunnelAliases = new Set(
-    hosts.filter((host) => host.hasForwarding).map((host) => host.alias),
-  );
-
-  for (const runtimeEntry of tunnelManager.list()) {
-    if (
-      !configuredTunnelAliases.has(runtimeEntry.alias) &&
-      (runtimeEntry.state.status === 'starting' || runtimeEntry.state.status === 'running')
-    ) {
-      console.warn(
-        `[Evermore] SSH tunnel "${runtimeEntry.alias}" is ${runtimeEntry.state.status} but is no longer configured in ~/.ssh/config. Leaving the process running until it is stopped or the app quits.`,
-      );
-    }
-  }
-}
-
 /**
  * Bridges renderer tunnel requests to the main-process tunnel runtime manager.
  */
 export function registerTunnelHandlers(options: RegisterTunnelHandlersOptions): () => void {
   const { tunnelManager } = options;
+  const logger = options.logger ?? createSilentLogger();
+
+  const warnAboutUnconfiguredActiveTunnels = (hosts: SSHHost[]): void => {
+    const configuredTunnelAliases = new Set(
+      hosts.filter((host) => host.hasForwarding).map((host) => host.alias),
+    );
+
+    for (const runtimeEntry of tunnelManager.list()) {
+      if (
+        !configuredTunnelAliases.has(runtimeEntry.alias) &&
+        (runtimeEntry.state.status === 'starting' || runtimeEntry.state.status === 'running')
+      ) {
+        logger.warn(
+          `SSH tunnel "${runtimeEntry.alias}" is ${runtimeEntry.state.status} but is no longer configured in ~/.ssh/config. Leaving the process running until it is stopped or the app quits.`,
+        );
+      }
+    }
+  };
 
   ipcMain.handle(IPC.TUNNEL_LIST, () => {
     const hosts = options.sshConfigManager.list();
-    warnAboutUnconfiguredActiveTunnels(hosts, tunnelManager);
+    warnAboutUnconfiguredActiveTunnels(hosts);
 
     return hosts.filter((host) => host.hasForwarding).map((host) => toTunnel(host, tunnelManager));
   });

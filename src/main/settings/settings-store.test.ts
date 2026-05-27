@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { DEFAULT_APP_SETTINGS } from '../../shared/settings-defaults';
 import type { AppSettings } from '../../shared/types';
+import { createLogger, type LogRecord, type LogTransport } from '../logging/logger';
 import { SettingsStore } from './settings-store';
 import type { PersistedSettings, SettingsStorageAdapter } from './types';
 
@@ -136,21 +137,53 @@ describe('SettingsStore', () => {
   });
 
   it('isolates one subscriber error so other subscribers still run', () => {
-    // Given: two subscribers, the first of which throws.
-    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    // Given: a store with a recording logger and two subscribers, the first of which throws.
+    const records: LogRecord[] = [];
+    const recordingTransport: LogTransport = {
+      write(record) {
+        records.push(record);
+      },
+    };
+    const logger = createLogger({ level: 'debug', transport: recordingTransport });
+    const failingStorage = new MemorySettingsStorageAdapter();
+    const failingStore = new SettingsStore({ storage: failingStorage, logger });
+    const thrown = new Error('boom');
     const failing = vi.fn(() => {
-      throw new Error('boom');
+      throw thrown;
     });
     const ok = vi.fn();
-    store.subscribe(failing);
-    store.subscribe(ok);
+    failingStore.subscribe(failing);
+    failingStore.subscribe(ok);
 
     // When: an update fires both subscribers.
-    store.update({ terminal: { copyOnSelect: false } });
+    failingStore.update({ terminal: { copyOnSelect: false } });
 
-    // Then: the failure is logged but the second subscriber still receives the update.
+    // Then: the failure is routed to the injected logger but the second subscriber still runs.
     expect(failing).toHaveBeenCalledOnce();
     expect(ok).toHaveBeenCalledOnce();
+    expect(records).toEqual([
+      expect.objectContaining({
+        level: 'error',
+        message: 'SettingsStore subscriber threw',
+        meta: thrown,
+      }),
+    ]);
+  });
+
+  it('does not touch console when no logger is injected and a subscriber throws', () => {
+    // Given: a store with no logger override and a console.error spy in place.
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const defaultStorage = new MemorySettingsStorageAdapter();
+    const defaultStore = new SettingsStore({ storage: defaultStorage });
+    defaultStore.subscribe(() => {
+      throw new Error('boom');
+    });
+
+    // When: an update triggers the failing subscriber.
+    defaultStore.update({ terminal: { copyOnSelect: false } });
+
+    // Then: the silent default logger swallows the diagnostic — console stays quiet.
+    expect(errorSpy).not.toHaveBeenCalled();
     errorSpy.mockRestore();
   });
 

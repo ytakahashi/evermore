@@ -1,8 +1,22 @@
 import type { BrowserWindow, NotificationConstructorOptions } from 'electron';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { NotificationPayload } from '../../shared/notifications';
+import { createLogger, type LogRecord, type LogTransport } from '../logging/logger';
 import { NotificationService } from './notification-service';
 import type { NotificationLike } from './types';
+
+function createRecordingLogger(): {
+  logger: ReturnType<typeof createLogger>;
+  records: LogRecord[];
+} {
+  const records: LogRecord[] = [];
+  const transport: LogTransport = {
+    write(record) {
+      records.push(record);
+    },
+  };
+  return { logger: createLogger({ level: 'debug', transport }), records };
+}
 
 type FakeNotificationEvent = 'click' | 'close' | 'failed';
 
@@ -82,6 +96,7 @@ function setupService(
     isSupported?: () => boolean;
     cooldownMs?: number;
     window?: FakeWindow | null;
+    logger?: ReturnType<typeof createLogger>;
   } = {},
 ): ServiceHarness {
   const nowValues = options.nowValues ?? [0];
@@ -104,6 +119,7 @@ function setupService(
     },
     now,
     cooldownMs: options.cooldownMs,
+    ...(options.logger ? { logger: options.logger } : {}),
   });
   return { service, created, window };
 }
@@ -135,17 +151,23 @@ describe('NotificationService', () => {
   });
 
   it('returns "unsupported" without creating a notification when isSupported is false', () => {
-    // Given: a host that reports notifications as unavailable.
-    const debugSpy = vi.spyOn(console, 'debug').mockImplementation(() => {});
-    const { service, created } = setupService({ isSupported: () => false });
+    // Given: a host that reports notifications as unavailable and a recording logger.
+    const { logger, records } = createRecordingLogger();
+    const { service, created } = setupService({ isSupported: () => false, logger });
 
     // When: a payload is shown.
     const result = service.show(payload());
 
-    // Then: nothing is constructed and the unsupported sentinel is returned.
+    // Then: nothing is constructed, the unsupported sentinel is returned, and the diagnostic is
+    // routed through the injected logger rather than console.
     expect(result).toBe('unsupported');
     expect(created).toHaveLength(0);
-    expect(debugSpy).toHaveBeenCalledOnce();
+    expect(records).toEqual([
+      expect.objectContaining({
+        level: 'debug',
+        message: 'Notifications are not supported on this host; skipping show().',
+      }),
+    ]);
   });
 
   it('suppresses a second show of the same id within the cooldown window', () => {

@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { EVERMORE_ZSH_SHELL_INTEGRATION_SNIPPET } from '../../shared/shell-integration/zsh-snippet';
+import { createLogger, type LogRecord, type LogTransport } from '../logging/logger';
 import { buildZlogin, buildZprofile, buildZshenv, buildZshrc } from './forwarding-scripts';
 import {
   ShellIntegrationInjector,
@@ -160,8 +161,14 @@ describe('ShellIntegrationInjector', () => {
     });
 
     it('falls back silently when filesystem writes throw', () => {
-      // Given: a failing fs adapter so materialize fails on construction.
-      const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+      // Given: a failing fs adapter and a recording logger.
+      const records: LogRecord[] = [];
+      const transport: LogTransport = {
+        write(record) {
+          records.push(record);
+        },
+      };
+      const logger = createLogger({ level: 'debug', transport });
       const failingFs: ShellIntegrationInjectorFs = {
         mkdirSync: () => {
           throw new Error('EACCES');
@@ -179,12 +186,18 @@ describe('ShellIntegrationInjector', () => {
         userDataDir: '/nonexistent',
         initialAutoInject: true,
         fs: failingFs,
+        logger,
       });
 
       // Then: env extras are undefined so PTY spawn falls back gracefully, and the failure is
-      // logged for debugging without surfacing to the renderer.
+      // routed through the injected logger rather than console.
       expect(injector.envExtrasForShell('/bin/zsh', {})).toBeUndefined();
-      expect(consoleError).toHaveBeenCalled();
+      expect(records).toEqual([
+        expect.objectContaining({
+          level: 'error',
+          message: 'ShellIntegrationInjector.materialize failed',
+        }),
+      ]);
     });
   });
 

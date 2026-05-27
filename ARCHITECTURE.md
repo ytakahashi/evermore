@@ -170,6 +170,12 @@ handler that bridges it to the renderer.
 - **`SshHostResolver` is constructed once in `register.ts` and DI'd into the SSH handler.** A second
   instance would defeat the in-memory cache and force redundant `ssh -G` subprocess spawns on every
   renderer call.
+- **Per-feature managers and handlers accept an optional `logger: Logger` constructor option.** The
+  composition root in `src/main/index.ts` builds a `ConsoleTransport`-backed root logger and threads
+  scoped children (`logger.child('pty')`, `logger.child('notifications')`, etc.) through
+  `registerIpcHandlers`. Tests omit the option and inherit a silent no-op logger via
+  `createSilentLogger()`, so they do not need to spy on `console`. The effective level resolves from
+  `LOG_LEVEL`, falling back to `debug` in dev and `info` in prod.
 
 ### Allowed dependencies
 

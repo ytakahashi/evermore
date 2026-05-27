@@ -1,5 +1,6 @@
 import { Notification, type NotificationConstructorOptions } from 'electron';
 import type { NotificationPayload, NotificationShowResult } from '../../shared/notifications';
+import { createSilentLogger, type Logger } from '../logging/logger';
 import type { NotificationLike, NotificationServiceOptions } from './types';
 
 const DEFAULT_COOLDOWN_MS = 10_000;
@@ -20,6 +21,7 @@ export class NotificationService {
   ) => NotificationLike;
   private readonly now: () => number;
   private readonly cooldownMs: number;
+  private readonly logger: Logger;
 
   private readonly lastShownAt = new Map<string, number>();
   private readonly activeNotifications = new Set<NotificationLike>();
@@ -33,6 +35,7 @@ export class NotificationService {
         new Notification(notificationOptions) as unknown as NotificationLike);
     this.now = options.now ?? Date.now;
     this.cooldownMs = options.cooldownMs ?? DEFAULT_COOLDOWN_MS;
+    this.logger = options.logger ?? createSilentLogger();
   }
 
   /**
@@ -47,7 +50,7 @@ export class NotificationService {
       // Notifications can be unavailable in dev mode (e.g. unsigned dev shells without a stable
       // bundle id) and on hosts that disable user notifications. Logging keeps the failure
       // discoverable without escalating to a runtime error.
-      console.debug('[Evermore] Notifications are not supported on this host; skipping show().');
+      this.logger.debug('Notifications are not supported on this host; skipping show().');
       return 'unsupported';
     }
 
@@ -94,11 +97,7 @@ export class NotificationService {
       } catch (error: unknown) {
         // Closing a notification that has already been dismissed by the system can throw on some
         // platforms; swallow so dispose() stays best-effort during app shutdown.
-        if (error instanceof Error) {
-          console.debug(
-            `[Evermore] Failed to close active notification during dispose: ${error.message}`,
-          );
-        }
+        this.logger.debug('Failed to close active notification during dispose', error);
       }
     }
     this.activeNotifications.clear();
