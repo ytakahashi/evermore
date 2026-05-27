@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { IPC } from '../../../shared/ipc-channels';
 import type { SSHHost } from '../../../shared/types';
+import { createLogger, type LogRecord, type LogTransport } from '../../logging/logger';
 import type { TunnelRuntimeState } from '../../tunnels/types';
 import { registerTunnelHandlers } from './tunnel';
 
@@ -195,8 +196,15 @@ describe('registerTunnelHandlers', () => {
   });
 
   it('warns when an active runtime tunnel is no longer configured', () => {
-    // Given: runtime state still has an active tunnel that config no longer contains.
-    const consoleWarn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    // Given: runtime state still has an active tunnel that config no longer contains, and a
+    // recording logger captures warn records.
+    const records: LogRecord[] = [];
+    const transport: LogTransport = {
+      write(record) {
+        records.push(record);
+      },
+    };
+    const logger = createLogger({ level: 'debug', transport });
     const sshConfigManager = {
       list: vi.fn(() => [
         {
@@ -225,14 +233,15 @@ describe('registerTunnelHandlers', () => {
     registerTunnelHandlers({
       sshConfigManager,
       tunnelManager,
+      logger,
     });
     getHandler(IPC.TUNNEL_LIST)?.({});
 
-    // Then: only the active unconfigured runtime tunnel is reported for developer visibility.
-    expect(consoleWarn).toHaveBeenCalledOnce();
-    expect(consoleWarn).toHaveBeenCalledWith(
+    // Then: only the active unconfigured runtime tunnel is reported through the injected logger.
+    const warnRecords = records.filter((record) => record.level === 'warn');
+    expect(warnRecords).toHaveLength(1);
+    expect(warnRecords[0]?.message).toEqual(
       expect.stringContaining('SSH tunnel "removed" is running'),
     );
-    consoleWarn.mockRestore();
   });
 });
