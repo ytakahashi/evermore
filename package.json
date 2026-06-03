@@ -58,6 +58,8 @@
     "build:mac": "electron-vite build && electron-builder --mac",
     "build:mac:dev": "electron-vite build && electron-builder --mac --dir -c electron-builder.dev.yml",
     "build:unpack": "pnpm run build && electron-builder --dir",
+    "notarize:dmg": "xcrun notarytool submit dist/Evermore-$npm_package_version.dmg --key $APPLE_API_KEY --key-id $APPLE_API_KEY_ID --issuer $APPLE_API_ISSUER --wait && xcrun stapler staple dist/Evermore-$npm_package_version.dmg",
+    "release:mac": "pnpm run build:mac && pnpm run notarize:dmg",
     "dev": "electron-vite dev",
     "format": "prettier --check .",
     "format:fix": "prettier --write .",

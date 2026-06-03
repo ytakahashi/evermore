@@ -11,13 +11,21 @@ files:
   - '!{.eslintcache,eslint.config.mjs,.prettierignore,.prettierrc.yaml,dev-app-update.yml,CHANGELOG.md,README.md}'
   - '!{.env,.env.*,.npmrc,pnpm-lock.yaml}'
   - '!{tsconfig.json,tsconfig.node.json,tsconfig.web.json}'
+  - '!**/*.{md,markdown,map,ts,tsx}'
+  - '!**/{test,tests,__tests__,example,examples,docs,doc}/**'
+  - '!**/.github/**'
+  - '!**/{.eslintrc*,.prettierrc*,.editorconfig,.gitattributes,.npmignore,.travis.yml}'
 asarUnpack:
   - resources/**
   - '**/node_modules/node-pty/**'
 mac:
   icon: resources/icon.png
+  hardenedRuntime: true
+  gatekeeperAssess: false
+  entitlements: build/entitlements.mac.plist
   entitlementsInherit: build/entitlements.mac.plist
-  notarize: false
+  notarize: true
 dmg:
   artifactName: ${name}-${version}.${ext}
+  sign: true
 npmRebuild: false
