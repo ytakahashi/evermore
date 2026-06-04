@@ -1734,6 +1734,131 @@ describe('workspaceStore', () => {
       expect(selectActiveTab(useStore.getState())?.id).toBe('workspace-1-tab-1');
     });
 
+    it('selectAdjacentTabGlobal crosses into the next workspace when at the end of the current one', async () => {
+      // Given: two single-tab workspaces with the first workspace active.
+      const workspaceA = createWorkspace('workspace-1', '/a');
+      const workspaceB = createWorkspace('workspace-2', '/b');
+      workspaceApi.list = vi.fn(() =>
+        Promise.resolve({
+          workspaces: [workspaceA, workspaceB],
+          activeWorkspaceId: 'workspace-1',
+        }),
+      );
+      const useStore = createWorkspaceStore({ workspaceApi });
+      await useStore.getState().loadWorkspaces();
+
+      // When: the user invokes global next-tab from the only tab of the first workspace.
+      useStore.getState().selectAdjacentTabGlobal('next');
+
+      // Then: the active workspace switches and lands on the next workspace's first tab.
+      expect(useStore.getState().activeWorkspaceId).toBe('workspace-2');
+      expect(selectActiveTab(useStore.getState())?.id).toBe('workspace-2-tab-1');
+    });
+
+    it('selectAdjacentTabGlobal wraps from the last workspace back to the first', async () => {
+      // Given: two single-tab workspaces with the second workspace active.
+      const workspaceA = createWorkspace('workspace-1', '/a');
+      const workspaceB = createWorkspace('workspace-2', '/b');
+      workspaceApi.list = vi.fn(() =>
+        Promise.resolve({
+          workspaces: [workspaceA, workspaceB],
+          activeWorkspaceId: 'workspace-2',
+        }),
+      );
+      const useStore = createWorkspaceStore({ workspaceApi });
+      await useStore.getState().loadWorkspaces();
+
+      // When: the user invokes global next-tab from the last tab of the last workspace.
+      useStore.getState().selectAdjacentTabGlobal('next');
+
+      // Then: it wraps to the first workspace's first tab.
+      expect(useStore.getState().activeWorkspaceId).toBe('workspace-1');
+      expect(selectActiveTab(useStore.getState())?.id).toBe('workspace-1-tab-1');
+    });
+
+    it('selectAdjacentTabGlobal previous wraps from the first workspace to the last', async () => {
+      // Given: two single-tab workspaces with the first workspace active.
+      const workspaceA = createWorkspace('workspace-1', '/a');
+      const workspaceB = createWorkspace('workspace-2', '/b');
+      workspaceApi.list = vi.fn(() =>
+        Promise.resolve({
+          workspaces: [workspaceA, workspaceB],
+          activeWorkspaceId: 'workspace-1',
+        }),
+      );
+      const useStore = createWorkspaceStore({ workspaceApi });
+      await useStore.getState().loadWorkspaces();
+
+      // When: the user invokes global previous-tab from the first tab of the first workspace.
+      useStore.getState().selectAdjacentTabGlobal('previous');
+
+      // Then: it wraps backward to the last tab of the last workspace.
+      expect(useStore.getState().activeWorkspaceId).toBe('workspace-2');
+      expect(selectActiveTab(useStore.getState())?.id).toBe('workspace-2-tab-1');
+    });
+
+    it('selectAdjacentTabGlobal moves between tabs of the same workspace before crossing', async () => {
+      // Given: a workspace with two tabs followed by a second single-tab workspace.
+      const workspaceA: Workspace = {
+        ...createWorkspace('workspace-1', '/a'),
+        tabs: [
+          {
+            id: 'tab-a1',
+            name: 'a1',
+            layout: { type: 'leaf', paneId: 'pane-a1' },
+            activePaneId: 'pane-a1',
+          },
+          {
+            id: 'tab-a2',
+            name: 'a2',
+            layout: { type: 'leaf', paneId: 'pane-a2' },
+            activePaneId: 'pane-a2',
+          },
+        ],
+        panes: [
+          { id: 'pane-a1', cwd: '/a' },
+          { id: 'pane-a2', cwd: '/a' },
+        ],
+        activeTabId: 'tab-a1',
+      };
+      const workspaceB = createWorkspace('workspace-2', '/b');
+      workspaceApi.list = vi.fn(() =>
+        Promise.resolve({
+          workspaces: [workspaceA, workspaceB],
+          activeWorkspaceId: 'workspace-1',
+        }),
+      );
+      const useStore = createWorkspaceStore({ workspaceApi });
+      await useStore.getState().loadWorkspaces();
+
+      // When: global next-tab fires twice.
+      useStore.getState().selectAdjacentTabGlobal('next');
+
+      // Then: the first invocation moves within workspace A.
+      expect(useStore.getState().activeWorkspaceId).toBe('workspace-1');
+      expect(selectActiveTab(useStore.getState())?.id).toBe('tab-a2');
+
+      // When: the user invokes global next-tab again.
+      useStore.getState().selectAdjacentTabGlobal('next');
+
+      // Then: it crosses into workspace B.
+      expect(useStore.getState().activeWorkspaceId).toBe('workspace-2');
+      expect(selectActiveTab(useStore.getState())?.id).toBe('workspace-2-tab-1');
+    });
+
+    it('selectAdjacentTabGlobal is a no-op when only one tab exists across all workspaces', async () => {
+      // Given: the default single-workspace single-tab fixture.
+      const useStore = createWorkspaceStore({ workspaceApi });
+      await useStore.getState().loadWorkspaces();
+
+      // When: shortcut-dispatched global next-tab fires.
+      useStore.getState().selectAdjacentTabGlobal('next');
+
+      // Then: nothing changes.
+      expect(useStore.getState().activeWorkspaceId).toBe('workspace-1');
+      expect(selectActiveTab(useStore.getState())?.id).toBe('workspace-1-tab-1');
+    });
+
     it('splitActivePane resolves the active pane and delegates to splitPane', async () => {
       // Given: a loaded workspace with a single pane.
       const ids = ['pane-2'];

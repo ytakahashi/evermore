@@ -13,6 +13,8 @@ export type KeyboardShortcutActionId =
   | 'workspace.closeTab'
   | 'workspace.nextTab'
   | 'workspace.previousTab'
+  | 'workspace.nextTabGlobal'
+  | 'workspace.previousTabGlobal'
   | 'pane.splitVertical'
   | 'pane.splitHorizontal'
   | 'pane.focusLeft'
@@ -28,6 +30,8 @@ export const KEYBOARD_SHORTCUT_ACTION_IDS: readonly KeyboardShortcutActionId[] =
   'workspace.closeTab',
   'workspace.nextTab',
   'workspace.previousTab',
+  'workspace.nextTabGlobal',
+  'workspace.previousTabGlobal',
   'pane.splitVertical',
   'pane.splitHorizontal',
   'pane.focusLeft',
@@ -59,6 +63,8 @@ export const DEFAULT_KEYBINDINGS: Record<KeyboardShortcutActionId, string> = {
   'workspace.closeTab': 'Command+W',
   'workspace.nextTab': 'Command+]',
   'workspace.previousTab': 'Command+[',
+  'workspace.nextTabGlobal': 'Command+Shift+]',
+  'workspace.previousTabGlobal': 'Command+Shift+[',
   'pane.splitVertical': 'Command+D',
   'pane.splitHorizontal': 'Command+Shift+D',
   'pane.focusLeft': 'Command+Option+Left',
@@ -75,6 +81,8 @@ export const ACTION_LABELS: Record<KeyboardShortcutActionId, string> = {
   'workspace.closeTab': 'Close Tab',
   'workspace.nextTab': 'Next Tab',
   'workspace.previousTab': 'Previous Tab',
+  'workspace.nextTabGlobal': 'Next Tab (All Workspaces)',
+  'workspace.previousTabGlobal': 'Previous Tab (All Workspaces)',
   'pane.splitVertical': 'Split Vertically',
   'pane.splitHorizontal': 'Split Horizontally',
   'pane.focusLeft': 'Focus Left Pane',

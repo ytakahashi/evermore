@@ -53,6 +53,14 @@ function handleShortcut(actionId: KeyboardShortcutActionId): void {
       if (!isWorkspaceView) return;
       workspace.selectAdjacentTab('previous');
       return;
+    case 'workspace.nextTabGlobal':
+      if (!isWorkspaceView) return;
+      workspace.selectAdjacentTabGlobal('next');
+      return;
+    case 'workspace.previousTabGlobal':
+      if (!isWorkspaceView) return;
+      workspace.selectAdjacentTabGlobal('previous');
+      return;
     case 'pane.splitVertical':
       if (!isWorkspaceView || isFullscreen) return;
       workspace.splitActivePane('vertical');
