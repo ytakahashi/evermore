@@ -5,7 +5,17 @@ import { useConnectionsStore } from '../../stores/connectionsStore';
 import { useTunnelsStore } from '../../stores/tunnelsStore';
 import { TunnelsSection } from './TunnelsSection';
 
-const tipText = 'Tip: Set ExitOnForwardFailure yes in ~/.ssh/config for faster error detection.';
+const tooltipText =
+  'Refer to "SSH tunnel reliability" under "Settings > Recommended setup" for faster error detection.';
+
+function expectTunnelTooltip(): void {
+  const trigger = screen.getByLabelText('Tunnel setup hint');
+  const tooltip = screen.getByRole('tooltip');
+
+  expect(tooltip).toHaveTextContent(tooltipText);
+  expect(trigger).toHaveAttribute('aria-describedby', tooltip.id);
+  expect(trigger).toHaveAccessibleDescription(tooltipText);
+}
 
 const stoppedTunnel: Tunnel = {
   alias: 'db-tunnel',
@@ -108,7 +118,7 @@ describe('TunnelsSection', () => {
     expect(screen.getByLabelText('Error')).toBeInTheDocument();
     expect(screen.getAllByRole('button', { name: /Start/ })).toHaveLength(2);
     expect(screen.getAllByRole('button', { name: /Stop/ })).toHaveLength(2);
-    expect(screen.getByText(tipText)).toBeInTheDocument();
+    expectTunnelTooltip();
   });
 
   it('starts and stops tunnels from row actions', () => {
@@ -192,7 +202,7 @@ describe('TunnelsSection', () => {
     expect(clearTunnelDiagnostics).toHaveBeenCalledWith('api-tunnel');
   });
 
-  it('renders loading, empty, and error states with the tunnel tip', () => {
+  it('renders loading, empty, and error states with the tunnel tooltip', () => {
     // Given: tunnel loading is in progress.
     useTunnelsStore.setState({ isLoading: true });
 
@@ -201,7 +211,7 @@ describe('TunnelsSection', () => {
 
     // Then: loading and tip text are shown.
     expect(screen.getByText('Loading tunnels...')).toBeInTheDocument();
-    expect(screen.getByText(tipText)).toBeInTheDocument();
+    expectTunnelTooltip();
 
     // Given: loading completed with no tunnel-eligible hosts.
     useTunnelsStore.setState({ isLoading: false, tunnels: [] });
@@ -209,7 +219,7 @@ describe('TunnelsSection', () => {
 
     // Then: empty state keeps the tip visible.
     expect(screen.getByText('No tunnels configured in ~/.ssh/config')).toBeInTheDocument();
-    expect(screen.getByText(tipText)).toBeInTheDocument();
+    expectTunnelTooltip();
 
     // Given: tunnel loading failed.
     useTunnelsStore.setState({ error: 'cannot list tunnels' });
@@ -218,7 +228,7 @@ describe('TunnelsSection', () => {
     // Then: the error and retry control are shown with the tip.
     expect(screen.getByText('cannot list tunnels')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument();
-    expect(screen.getByText(tipText)).toBeInTheDocument();
+    expectTunnelTooltip();
   });
 
   it('reloads SSH hosts before loading tunnels', async () => {
