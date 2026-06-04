@@ -1,4 +1,11 @@
-import { ChevronDown, ChevronRight, Play, RefreshCw, Square } from 'lucide-react';
+import {
+  ChevronDown,
+  ChevronRight,
+  CircleQuestionMark,
+  Play,
+  RefreshCw,
+  Square,
+} from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import type { ForwardEntry, Tunnel, TunnelStatus } from '../../../../shared/types';
 import { useReloadConnections } from '../../hooks/useReloadConnections';
@@ -6,7 +13,7 @@ import { useTunnelsStore } from '../../stores/tunnelsStore';
 
 const ACTION_DISABLE_MS = 500;
 const LOG_PREVIEW_LINES = 8;
-const TUNNEL_TIP = 'Tip: Set ExitOnForwardFailure yes in ~/.ssh/config for faster error detection.';
+const TUNNEL_TOOLTIP_ID = 'tunnels-section-setup-tooltip';
 
 function formatBindEndpoint(forward: ForwardEntry): string {
   if (forward.type === 'dynamic') {
@@ -286,20 +293,38 @@ export function TunnelsSection(): React.JSX.Element {
     <section>
       <div className="mb-1 flex items-center justify-between px-2 text-[10px] font-bold uppercase tracking-wider text-subtle">
         <span>Tunnels</span>
-        <button
-          aria-label="Reload tunnels"
-          className="flex size-4 items-center justify-center rounded hover:bg-raised hover:text-foreground disabled:cursor-default disabled:opacity-40"
-          disabled={isReloading}
-          title="Reload tunnels"
-          type="button"
-          onClick={() => {
-            void handleReload();
-          }}
-        >
-          <RefreshCw size={12} />
-        </button>
+        <div className="flex items-center gap-1.5">
+          <span
+            aria-describedby={TUNNEL_TOOLTIP_ID}
+            aria-label="Tunnel setup hint"
+            role="img"
+            tabIndex={0}
+            className="group relative flex size-4 items-center justify-center rounded text-subtle hover:bg-raised hover:text-foreground focus-visible:bg-raised focus-visible:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-border"
+          >
+            <CircleQuestionMark aria-hidden="true" className="size-3 cursor-help" />
+            <span
+              id={TUNNEL_TOOLTIP_ID}
+              role="tooltip"
+              className="pointer-events-none invisible absolute bottom-full right-0 z-50 mb-1.5 w-48 rounded border border-border bg-raised p-2 text-[11px] font-normal normal-case leading-normal text-foreground opacity-0 shadow-lg transition-all duration-150 group-hover:visible group-hover:opacity-100 group-focus-visible:visible group-focus-visible:opacity-100"
+            >
+              Refer to &quot;SSH tunnel reliability&quot; under &quot;Settings &gt; Recommended
+              setup&quot; for faster error detection.
+            </span>
+          </span>
+          <button
+            aria-label="Reload tunnels"
+            className="flex size-4 items-center justify-center rounded hover:bg-raised hover:text-foreground disabled:cursor-default disabled:opacity-40"
+            disabled={isReloading}
+            title="Reload tunnels"
+            type="button"
+            onClick={() => {
+              void handleReload();
+            }}
+          >
+            <RefreshCw size={12} />
+          </button>
+        </div>
       </div>
-      <div className="px-2 py-1 text-xs text-subtle">{TUNNEL_TIP}</div>
       {content}
     </section>
   );
