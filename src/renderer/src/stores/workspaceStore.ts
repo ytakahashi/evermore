@@ -63,6 +63,14 @@ export interface WorkspaceStoreState {
    */
   selectAdjacentTab: (direction: TabSelectionDirection) => void;
   /**
+   * Selects the next / previous tab across all workspaces, treating every workspace's tabs as a
+   * single ordered list. Stepping off the end of one workspace lands on the first tab of the next
+   * workspace (wrapping around at the boundaries). Workspaces with zero tabs are skipped. No-op
+   * when the total tab count across workspaces is at most one. Used by the menu-driven shortcut
+   * dispatcher.
+   */
+  selectAdjacentTabGlobal: (direction: TabSelectionDirection) => void;
+  /**
    * Moves focus to the pane geometrically adjacent to the active pane in the given direction.
    *
    * Selection algorithm: candidates are panes whose facing edge aligns with the active pane's edge
@@ -862,6 +870,49 @@ export function createWorkspaceStore(
         }
 
         get().selectWorkspaceTab(workspace.id, targetTab.id);
+      },
+      selectAdjacentTabGlobal: (direction: TabSelectionDirection): void => {
+        const state = get();
+        // Flatten every workspace's tabs into a single ordered list so workspace boundaries do not
+        // interrupt next/previous navigation. Workspaces with zero tabs are skipped here so the
+        // modulo arithmetic below never lands on an empty workspace.
+        const entries: { workspaceId: string; tabId: string }[] = [];
+        for (const workspace of state.workspaces) {
+          for (const tab of workspace.tabs) {
+            entries.push({ workspaceId: workspace.id, tabId: tab.id });
+          }
+        }
+        if (entries.length <= 1) {
+          return;
+        }
+
+        const activeWorkspace = selectActiveWorkspace(state);
+        const activeTab = selectActiveTab(state);
+        const currentIndex =
+          activeWorkspace && activeTab
+            ? entries.findIndex(
+                (entry) => entry.workspaceId === activeWorkspace.id && entry.tabId === activeTab.id,
+              )
+            : -1;
+        // Fall back to the first entry when nothing is active so the first invocation still moves
+        // deterministically. `entries.length` is guaranteed > 1, so the modulo math is safe.
+        const startIndex = currentIndex >= 0 ? currentIndex : 0;
+        const delta = direction === 'next' ? 1 : -1;
+        const length = entries.length;
+        const nextIndex = (startIndex + delta + length) % length;
+        const target = entries[nextIndex];
+        if (!target) {
+          return;
+        }
+        if (
+          currentIndex >= 0 &&
+          target.workspaceId === entries[currentIndex]?.workspaceId &&
+          target.tabId === entries[currentIndex]?.tabId
+        ) {
+          return;
+        }
+
+        get().selectWorkspaceTab(target.workspaceId, target.tabId);
       },
       focusAdjacentPane: (direction: PaneFocusDirection): void => {
         const state = get();

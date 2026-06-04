@@ -101,6 +101,8 @@ export function buildApplicationMenu(
       { type: 'separator' },
       actionItem('workspace.nextTab', options),
       actionItem('workspace.previousTab', options),
+      actionItem('workspace.nextTabGlobal', options),
+      actionItem('workspace.previousTabGlobal', options),
     ],
   };
 
