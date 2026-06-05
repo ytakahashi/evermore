@@ -1,4 +1,4 @@
-import { app, dialog, shell, BrowserWindow, type MessageBoxOptions } from 'electron';
+import { app, dialog, BrowserWindow, type MessageBoxOptions } from 'electron';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { electronApp, is } from '@electron-toolkit/utils';
@@ -10,6 +10,7 @@ import { createLogger, resolveLogLevel, type Logger, type LogTransport } from '.
 import { ConsoleTransport } from './logging/transports/console';
 import { QuitConfirmationController } from './quit-confirmation';
 import { SettingsStore } from './settings/settings-store';
+import { attachWebContentsNavigationGuard, openSafeExternalUrl } from './web-contents-security';
 import { attachWindowShortcuts } from './window-shortcuts';
 
 const _filename = fileURLToPath(import.meta.url);
@@ -68,9 +69,10 @@ function createWindow(): void {
   });
 
   window.webContents.setWindowOpenHandler((details) => {
-    shell.openExternal(details.url);
+    openSafeExternalUrl(details.url);
     return { action: 'deny' };
   });
+  attachWebContentsNavigationGuard(window.webContents);
 
   // HMR for renderer base on electron-vite cli.
   // Load the remote URL for development or the local html file for production.
