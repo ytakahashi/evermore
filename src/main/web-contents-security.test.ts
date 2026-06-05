@@ -70,7 +70,9 @@ describe('attachWebContentsNavigationGuard', () => {
 
   type NavigateListener = (event: { preventDefault: () => void }, url: string) => void;
 
-  function captureListener(): { invoke: NavigateListener } {
+  function captureListener(options?: { allowedInternalOrigins?: string[] }): {
+    invoke: NavigateListener;
+  } {
     let listener: NavigateListener | null = null;
     const fakeWebContents = {
       on: vi.fn((channel: string, handler: NavigateListener) => {
@@ -80,7 +82,7 @@ describe('attachWebContentsNavigationGuard', () => {
       }),
     } as unknown as WebContents;
 
-    attachWebContentsNavigationGuard(fakeWebContents);
+    attachWebContentsNavigationGuard(fakeWebContents, options);
 
     return {
       invoke: (event, url) => {
@@ -103,6 +105,21 @@ describe('attachWebContentsNavigationGuard', () => {
     // Then: navigation is cancelled and the URL is opened in the system browser.
     expect(preventDefault).toHaveBeenCalledTimes(1);
     expect(shellMock.openExternal).toHaveBeenCalledWith('https://example.com/');
+  });
+
+  it('allows navigation inside an explicitly trusted app origin', () => {
+    // Given: a guard configured for the Vite dev server origin.
+    const harness = captureListener({
+      allowedInternalOrigins: ['http://localhost:5173/index.html'],
+    });
+    const preventDefault = vi.fn();
+
+    // When: the app loads or refreshes inside the same dev server origin.
+    harness.invoke({ preventDefault }, 'http://localhost:5173/settings');
+
+    // Then: the in-window navigation is allowed and nothing is opened externally.
+    expect(preventDefault).not.toHaveBeenCalled();
+    expect(shellMock.openExternal).not.toHaveBeenCalled();
   });
 
   it('cancels navigation without opening anything for hostile schemes', () => {

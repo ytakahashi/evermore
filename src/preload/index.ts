@@ -154,13 +154,4 @@ const api = {
   },
 } satisfies Api;
 
-if (process.contextIsolated) {
-  try {
-    contextBridge.exposeInMainWorld('api', api);
-  } catch (error) {
-    console.error(error);
-  }
-} else {
-  // @ts-expect-error window.api is declared in index.d.ts (web tsconfig only)
-  window.api = api;
-}
+contextBridge.exposeInMainWorld('api', api);
