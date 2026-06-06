@@ -1,28 +1,39 @@
 import { app, session, shell, type WebContents } from 'electron';
 
+const CLIPBOARD_WRITE_PERMISSION = 'clipboard-sanitized-write';
+
+function isAllowedRendererPermission(
+  webContents: WebContents | null,
+  permission: string,
+  getTrustedWebContents: () => WebContents | null,
+): boolean {
+  return (
+    permission === CLIPBOARD_WRITE_PERMISSION &&
+    webContents !== null &&
+    webContents === getTrustedWebContents()
+  );
+}
+
 /**
  * Registers global security handlers on the Electron application, such as denying permission
- * requests and preventing webview attachments.
+ * requests outside the trusted renderer's clipboard writes and preventing webview attachments.
  *
  * This should be called after Electron has finished initialization (i.e. in app.whenReady).
  */
-export function registerSecurityHandlers(): void {
-  // Deny all permission requests on the default session. This covers async prompts triggered by
-  // APIs like getUserMedia or Notification.requestPermission.
+export function registerSecurityHandlers(getTrustedWebContents: () => WebContents | null): void {
+  // Clipboard writes power copy-on-select and settings copy buttons. Allow them only from the
+  // current app renderer; deny every other permission and WebContents on the shared session.
   session.defaultSession.setPermissionRequestHandler(
-    (
-      _webContents: WebContents,
-      _permission: string,
-      callback: (allowed: boolean) => void,
-    ): void => {
-      callback(false);
+    (webContents: WebContents, permission: string, callback: (allowed: boolean) => void): void => {
+      callback(isAllowedRendererPermission(webContents, permission, getTrustedWebContents));
     },
   );
 
-  // Deny synchronous permission lookups (navigator.permissions.query, Notification.permission)
-  // for the same scope. Without this, the request handler above can be bypassed for APIs that
-  // only consult the check path.
-  session.defaultSession.setPermissionCheckHandler((): boolean => false);
+  // Most web APIs perform a permission check before requesting it, so enforce the same boundary on
+  // both paths.
+  session.defaultSession.setPermissionCheckHandler((webContents, permission): boolean =>
+    isAllowedRendererPermission(webContents, permission, getTrustedWebContents),
+  );
 
   // Prevent <webview> tag attachments across all web contents
   app.on('web-contents-created', (_event: unknown, webContents: WebContents): void => {

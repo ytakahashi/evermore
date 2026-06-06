@@ -157,6 +157,9 @@ describe('registerSecurityHandlers', () => {
   type WebviewAttachListener = (event: { preventDefault: () => void }) => void;
   type WebContentsCreatedListener = (event: unknown, webContents: WebContents) => void;
   type WebContentsOn = (channel: 'will-attach-webview', handler: WebviewAttachListener) => void;
+  const trustedWebContents = {} as WebContents;
+  const untrustedWebContents = {} as WebContents;
+  const getTrustedWebContents = (): WebContents => trustedWebContents;
 
   beforeEach(() => {
     sessionMock.defaultSession.setPermissionRequestHandler.mockClear();
@@ -164,44 +167,101 @@ describe('registerSecurityHandlers', () => {
     appMock.on.mockClear();
   });
 
-  it('sets the permission request handler to deny all permissions', () => {
-    // Given: nothing.
+  it('allows clipboard write permission requests only from the trusted renderer', () => {
+    // Given: callbacks for permission requests from trusted and untrusted WebContents.
+    const trustedCallback = vi.fn();
+    const otherPermissionCallback = vi.fn();
+    const untrustedCallback = vi.fn();
 
     // When: handlers are registered.
-    registerSecurityHandlers();
+    registerSecurityHandlers(getTrustedWebContents);
 
     // Then: the default session registers a permission handler.
     expect(sessionMock.defaultSession.setPermissionRequestHandler).toHaveBeenCalledTimes(1);
 
-    // And: when the handler is invoked, it calls the callback with false (denied).
+    // And: only the trusted renderer's clipboard write request is allowed.
     const handler = sessionMock.defaultSession.setPermissionRequestHandler.mock.calls[0]?.[0];
     expect(handler).toBeDefined();
 
-    const callback = vi.fn();
-    handler({} as WebContents, 'geolocation', callback);
-    expect(callback).toHaveBeenCalledWith(false);
+    handler(trustedWebContents, 'clipboard-sanitized-write', trustedCallback);
+    handler(trustedWebContents, 'geolocation', otherPermissionCallback);
+    handler(untrustedWebContents, 'clipboard-sanitized-write', untrustedCallback);
+
+    expect(trustedCallback).toHaveBeenCalledWith(true);
+    expect(otherPermissionCallback).toHaveBeenCalledWith(false);
+    expect(untrustedCallback).toHaveBeenCalledWith(false);
   });
 
-  it('sets the permission check handler to deny synchronous permission lookups', () => {
+  it('allows clipboard write permission checks only from the trusted renderer', () => {
     // Given: nothing.
 
     // When: handlers are registered.
-    registerSecurityHandlers();
+    registerSecurityHandlers(getTrustedWebContents);
 
-    // Then: the default session registers a check handler that returns false.
+    // Then: the default session registers a check handler with the same narrow allowlist.
     expect(sessionMock.defaultSession.setPermissionCheckHandler).toHaveBeenCalledTimes(1);
     const handler = sessionMock.defaultSession.setPermissionCheckHandler.mock.calls[0]?.[0];
     expect(handler).toBeDefined();
-    expect(handler(null, 'geolocation', 'https://example.com', { embeddingOrigin: '' })).toBe(
+    expect(
+      handler(trustedWebContents, 'clipboard-sanitized-write', 'file://', {
+        embeddingOrigin: '',
+      }),
+    ).toBe(true);
+    expect(handler(trustedWebContents, 'geolocation', 'file://', { embeddingOrigin: '' })).toBe(
       false,
     );
+    expect(
+      handler(untrustedWebContents, 'clipboard-sanitized-write', 'file://', {
+        embeddingOrigin: '',
+      }),
+    ).toBe(false);
+    expect(handler(null, 'clipboard-sanitized-write', 'file://', { embeddingOrigin: '' })).toBe(
+      false,
+    );
+  });
+
+  it('uses the latest trusted renderer when the app window is recreated', () => {
+    // Given: a trusted WebContents resolver whose value can change.
+    let currentTrustedWebContents: WebContents | null = trustedWebContents;
+    registerSecurityHandlers(() => currentTrustedWebContents);
+    const handler = sessionMock.defaultSession.setPermissionCheckHandler.mock.calls[0]?.[0];
+    expect(handler).toBeDefined();
+
+    // When: the old app window closes and a new one becomes trusted.
+    currentTrustedWebContents = untrustedWebContents;
+
+    // Then: permission follows the current app window rather than the old WebContents.
+    expect(
+      handler(trustedWebContents, 'clipboard-sanitized-write', 'file://', {
+        embeddingOrigin: '',
+      }),
+    ).toBe(false);
+    expect(
+      handler(untrustedWebContents, 'clipboard-sanitized-write', 'file://', {
+        embeddingOrigin: '',
+      }),
+    ).toBe(true);
+  });
+
+  it('denies clipboard write permission while no app renderer exists', () => {
+    // Given: the app currently has no main window.
+    registerSecurityHandlers(() => null);
+    const handler = sessionMock.defaultSession.setPermissionCheckHandler.mock.calls[0]?.[0];
+    expect(handler).toBeDefined();
+
+    // When / Then: clipboard writes from any remaining WebContents are denied.
+    expect(
+      handler(trustedWebContents, 'clipboard-sanitized-write', 'file://', {
+        embeddingOrigin: '',
+      }),
+    ).toBe(false);
   });
 
   it('registers a web-contents-created listener that prevents webview attachment', () => {
     // Given: nothing.
 
     // When: handlers are registered.
-    registerSecurityHandlers();
+    registerSecurityHandlers(getTrustedWebContents);
 
     // Then: app registers a listener for web-contents-created.
     expect(appMock.on).toHaveBeenCalledWith('web-contents-created', expect.any(Function));
