@@ -89,7 +89,7 @@ app.whenReady().then(() => {
   // Set app user model id for windows
   electronApp.setAppUserModelId('net.ytakahashi.evermore');
 
-  registerSecurityHandlers();
+  registerSecurityHandlers(() => mainWindow?.webContents ?? null);
 
   // Suppress only Cmd-modified renderer shortcuts (reload / zoom / production DevTools) so that
   // Ctrl-modified key combinations such as Ctrl+R reach xterm for shell reverse-i-search. The
