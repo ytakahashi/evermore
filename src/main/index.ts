@@ -1,4 +1,4 @@
-import { app, dialog, shell, BrowserWindow, type MessageBoxOptions } from 'electron';
+import { app, dialog, BrowserWindow, type MessageBoxOptions } from 'electron';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { electronApp, is } from '@electron-toolkit/utils';
@@ -10,6 +10,12 @@ import { createLogger, resolveLogLevel, type Logger, type LogTransport } from '.
 import { ConsoleTransport } from './logging/transports/console';
 import { QuitConfirmationController } from './quit-confirmation';
 import { SettingsStore } from './settings/settings-store';
+import {
+  attachWebContentsNavigationGuard,
+  openSafeExternalUrl,
+  registerSecurityHandlers,
+} from './web-contents-security';
+import { createMainWindowOptions } from './window-options';
 import { attachWindowShortcuts } from './window-shortcuts';
 
 const _filename = fileURLToPath(import.meta.url);
@@ -33,22 +39,14 @@ function cleanupRuntime(): void {
 }
 
 function createWindow(): void {
-  // Create the browser window.
-  const window = new BrowserWindow({
-    width: 1024,
-    height: 768,
-    show: false,
-    autoHideMenuBar: true,
-    titleBarStyle: 'hidden',
-    trafficLightPosition: { x: 12, y: 10 },
-    ...(process.platform === 'linux' ? { icon } : {}),
-    webPreferences: {
-      preload: join(_dirname, '../preload/index.mjs'),
-      contextIsolation: true,
-      nodeIntegration: false,
-      sandbox: false,
-    },
-  });
+  const devRendererUrl = is.dev ? process.env['ELECTRON_RENDERER_URL'] : undefined;
+  const window = new BrowserWindow(
+    createMainWindowOptions({
+      preloadPath: join(_dirname, '../preload/index.cjs'),
+      isDev: is.dev,
+      iconPath: icon,
+    }),
+  );
   mainWindow = window;
 
   window.on('ready-to-show', () => {
@@ -68,14 +66,17 @@ function createWindow(): void {
   });
 
   window.webContents.setWindowOpenHandler((details) => {
-    shell.openExternal(details.url);
+    openSafeExternalUrl(details.url);
     return { action: 'deny' };
+  });
+  attachWebContentsNavigationGuard(window.webContents, {
+    allowedInternalOrigins: devRendererUrl ? [devRendererUrl] : [],
   });
 
   // HMR for renderer base on electron-vite cli.
   // Load the remote URL for development or the local html file for production.
-  if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
-    window.loadURL(process.env['ELECTRON_RENDERER_URL']);
+  if (devRendererUrl) {
+    window.loadURL(devRendererUrl);
   } else {
     window.loadFile(join(_dirname, '../renderer/index.html'));
   }
@@ -87,6 +88,8 @@ function createWindow(): void {
 app.whenReady().then(() => {
   // Set app user model id for windows
   electronApp.setAppUserModelId('net.ytakahashi.evermore');
+
+  registerSecurityHandlers();
 
   // Suppress only Cmd-modified renderer shortcuts (reload / zoom / production DevTools) so that
   // Ctrl-modified key combinations such as Ctrl+R reach xterm for shell reverse-i-search. The
