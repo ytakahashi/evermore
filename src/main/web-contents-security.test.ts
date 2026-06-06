@@ -1,13 +1,30 @@
 import type { WebContents } from 'electron';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { attachWebContentsNavigationGuard, openSafeExternalUrl } from './web-contents-security';
+import {
+  attachWebContentsNavigationGuard,
+  openSafeExternalUrl,
+  registerSecurityHandlers,
+} from './web-contents-security';
 
 const shellMock = vi.hoisted(() => ({
   openExternal: vi.fn(() => Promise.resolve()),
 }));
 
+const sessionMock = vi.hoisted(() => ({
+  defaultSession: {
+    setPermissionRequestHandler: vi.fn(),
+    setPermissionCheckHandler: vi.fn(),
+  },
+}));
+
+const appMock = vi.hoisted(() => ({
+  on: vi.fn(),
+}));
+
 vi.mock('electron', () => ({
   shell: shellMock,
+  session: sessionMock,
+  app: appMock,
 }));
 
 describe('openSafeExternalUrl', () => {
@@ -133,5 +150,89 @@ describe('attachWebContentsNavigationGuard', () => {
     // Then: navigation is still cancelled, but nothing leaves the app.
     expect(preventDefault).toHaveBeenCalledTimes(1);
     expect(shellMock.openExternal).not.toHaveBeenCalled();
+  });
+});
+
+describe('registerSecurityHandlers', () => {
+  type WebviewAttachListener = (event: { preventDefault: () => void }) => void;
+  type WebContentsCreatedListener = (event: unknown, webContents: WebContents) => void;
+  type WebContentsOn = (channel: 'will-attach-webview', handler: WebviewAttachListener) => void;
+
+  beforeEach(() => {
+    sessionMock.defaultSession.setPermissionRequestHandler.mockClear();
+    sessionMock.defaultSession.setPermissionCheckHandler.mockClear();
+    appMock.on.mockClear();
+  });
+
+  it('sets the permission request handler to deny all permissions', () => {
+    // Given: nothing.
+
+    // When: handlers are registered.
+    registerSecurityHandlers();
+
+    // Then: the default session registers a permission handler.
+    expect(sessionMock.defaultSession.setPermissionRequestHandler).toHaveBeenCalledTimes(1);
+
+    // And: when the handler is invoked, it calls the callback with false (denied).
+    const handler = sessionMock.defaultSession.setPermissionRequestHandler.mock.calls[0]?.[0];
+    expect(handler).toBeDefined();
+
+    const callback = vi.fn();
+    handler({} as WebContents, 'geolocation', callback);
+    expect(callback).toHaveBeenCalledWith(false);
+  });
+
+  it('sets the permission check handler to deny synchronous permission lookups', () => {
+    // Given: nothing.
+
+    // When: handlers are registered.
+    registerSecurityHandlers();
+
+    // Then: the default session registers a check handler that returns false.
+    expect(sessionMock.defaultSession.setPermissionCheckHandler).toHaveBeenCalledTimes(1);
+    const handler = sessionMock.defaultSession.setPermissionCheckHandler.mock.calls[0]?.[0];
+    expect(handler).toBeDefined();
+    expect(handler(null, 'geolocation', 'https://example.com', { embeddingOrigin: '' })).toBe(
+      false,
+    );
+  });
+
+  it('registers a web-contents-created listener that prevents webview attachment', () => {
+    // Given: nothing.
+
+    // When: handlers are registered.
+    registerSecurityHandlers();
+
+    // Then: app registers a listener for web-contents-created.
+    expect(appMock.on).toHaveBeenCalledWith('web-contents-created', expect.any(Function));
+
+    // And: when web-contents-created fires, it attaches a will-attach-webview listener.
+    const onCreate = appMock.on.mock.calls.find(
+      (call) => call[0] === 'web-contents-created',
+    )?.[1] as WebContentsCreatedListener | undefined;
+    if (!onCreate) {
+      throw new Error('web-contents-created listener was not registered');
+    }
+
+    const webContentsOn = vi.fn<WebContentsOn>();
+    const fakeWebContents = {
+      on: webContentsOn,
+    } as unknown as WebContents;
+
+    onCreate({}, fakeWebContents);
+
+    expect(webContentsOn).toHaveBeenCalledWith('will-attach-webview', expect.any(Function));
+
+    // And: when will-attach-webview fires, it prevents the default behavior.
+    const onAttachWebview = webContentsOn.mock.calls.find(
+      ([channel]) => channel === 'will-attach-webview',
+    )?.[1];
+    if (!onAttachWebview) {
+      throw new Error('will-attach-webview listener was not registered');
+    }
+
+    const preventDefault = vi.fn();
+    onAttachWebview({ preventDefault });
+    expect(preventDefault).toHaveBeenCalledTimes(1);
   });
 });

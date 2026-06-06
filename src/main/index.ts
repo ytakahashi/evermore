@@ -10,7 +10,11 @@ import { createLogger, resolveLogLevel, type Logger, type LogTransport } from '.
 import { ConsoleTransport } from './logging/transports/console';
 import { QuitConfirmationController } from './quit-confirmation';
 import { SettingsStore } from './settings/settings-store';
-import { attachWebContentsNavigationGuard, openSafeExternalUrl } from './web-contents-security';
+import {
+  attachWebContentsNavigationGuard,
+  openSafeExternalUrl,
+  registerSecurityHandlers,
+} from './web-contents-security';
 import { createMainWindowOptions } from './window-options';
 import { attachWindowShortcuts } from './window-shortcuts';
 
@@ -84,6 +88,8 @@ function createWindow(): void {
 app.whenReady().then(() => {
   // Set app user model id for windows
   electronApp.setAppUserModelId('net.ytakahashi.evermore');
+
+  registerSecurityHandlers();
 
   // Suppress only Cmd-modified renderer shortcuts (reload / zoom / production DevTools) so that
   // Ctrl-modified key combinations such as Ctrl+R reach xterm for shell reverse-i-search. The
