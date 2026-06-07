@@ -289,6 +289,10 @@ The IPC surface is the most important boundary in the app and follows a strict s
   `src/preload/index.ts` keep the renderer-visible surface in sync with the preload implementation.
   Adding a new IPC method requires touching all three layers (channel name → handler → preload → Api
   type) so omissions surface in typecheck.
+- Renderer-facing `PTY_CREATE` requests contain only `cwd` and optional `paneId`. The main-process
+  handler explicitly constructs internal `PtyCreateOptions` from those fields and must not forward
+  the renderer payload directly, so internal-only `shell`, `env`, `cols`, and `rows` options remain
+  unreachable across the public IPC boundary.
 
 ## Testing
 

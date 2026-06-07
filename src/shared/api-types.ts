@@ -8,9 +8,20 @@ import type {
   TunnelStatus,
 } from './types';
 
+/**
+ * Renderer-facing minimal request for creating a PTY.
+ *
+ * Internal-only options such as `shell`, `env`, and initial dimensions remain exclusively on the
+ * main-process `PtyCreateOptions` contract.
+ */
+export interface PtyCreateRequest {
+  cwd: string;
+  paneId?: string;
+}
+
 export interface Api {
   pty: {
-    create: (opts: { cwd: string; paneId?: string; shell?: string }) => Promise<string>;
+    create: (opts: PtyCreateRequest) => Promise<string>;
     write: (id: string, data: string) => Promise<void>;
     resize: (id: string, cols: number, rows: number) => Promise<void>;
     dispose: (id: string) => Promise<void>;

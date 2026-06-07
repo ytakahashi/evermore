@@ -1,6 +1,7 @@
 import { render, waitFor } from '@testing-library/react';
 import type { Mock } from 'vitest';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { PtyCreateRequest } from '../../../../shared/api-types';
 import { DEFAULT_APP_SETTINGS } from '../../../../shared/settings-defaults';
 import type { AppSettings } from '../../../../shared/types';
 import { useSettingsStore } from '../../stores/settingsStore';
@@ -95,9 +96,7 @@ vi.mock('@xterm/addon-unicode11', () => ({
 }));
 
 interface PtyApiMock {
-  create: ReturnType<
-    typeof vi.fn<(options: { cwd: string; paneId?: string; shell?: string }) => Promise<string>>
-  >;
+  create: ReturnType<typeof vi.fn<(options: PtyCreateRequest) => Promise<string>>>;
   write: ReturnType<typeof vi.fn<(id: string, data: string) => Promise<void>>>;
   resize: ReturnType<typeof vi.fn<(id: string, cols: number, rows: number) => Promise<void>>>;
   dispose: ReturnType<typeof vi.fn<(id: string) => Promise<void>>>;
@@ -126,7 +125,6 @@ function TestTerminal({
     isActive,
     onPtyIdChange,
     paneId,
-    shell: '/bin/zsh',
   });
 
   return <div ref={containerRef} />;
@@ -249,7 +247,6 @@ describe('useTerminal', () => {
       expect(ptyApi.create).toHaveBeenCalledWith({
         cwd: '/Users/tester/project',
         paneId: 'pane-1',
-        shell: '/bin/zsh',
       });
       expect(ptyApi.resize).toHaveBeenCalledWith('pty-1', 132, 43);
     });
@@ -562,7 +559,6 @@ describe('useTerminal', () => {
       expect(ptyApi.create).toHaveBeenCalledWith({
         cwd: '/Users/tester/project',
         paneId: 'pane-1',
-        shell: '/bin/zsh',
       });
     });
 

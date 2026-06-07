@@ -19,7 +19,6 @@ interface UseTerminalOptions {
   isActive?: boolean;
   onPtyIdChange?: (ptyId: string | null) => void;
   paneId?: string;
-  shell?: string;
 }
 
 interface UseTerminalResult {
@@ -247,7 +246,6 @@ export function useTerminal(options: UseTerminalOptions): UseTerminalResult {
       .create({
         cwd: initialOptions.cwd,
         paneId: initialOptions.paneId,
-        shell: initialOptions.shell,
       })
       .then((id) => {
         if (disposed) {
