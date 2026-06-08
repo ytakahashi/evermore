@@ -3,12 +3,25 @@ import { IPC } from '../../../shared/ipc-channels';
 import type { SSHHost } from '../../../shared/types';
 import { MAX_ALIAS_LENGTH } from '../validation';
 import {
+  expectIpcRequestNotAllowed,
   expectInvalidPayload,
   ipcMainMock,
   requireHandler,
   resetIpcMainMock,
 } from './test-utils/ipc-main-mock';
 import { registerSshHandlers } from './ssh';
+
+interface TestSshConfigManager {
+  list: ReturnType<typeof vi.fn<() => SSHHost[]>>;
+  refresh: ReturnType<typeof vi.fn<() => SSHHost[]>>;
+}
+
+function createSshConfigManager(hosts: SSHHost[] = []): TestSshConfigManager {
+  return {
+    list: vi.fn(() => hosts),
+    refresh: vi.fn(() => []),
+  };
+}
 
 describe('registerSshHandlers', () => {
   beforeEach(() => {
@@ -25,10 +38,7 @@ describe('registerSshHandlers', () => {
         forwards: [],
       },
     ];
-    const sshConfigManager = {
-      list: vi.fn(() => hosts),
-      refresh: vi.fn(() => []),
-    };
+    const sshConfigManager = createSshConfigManager(hosts);
 
     // When: SSH handlers are registered and the list handler is invoked.
     registerSshHandlers({ sshConfigManager });
@@ -68,7 +78,15 @@ describe('registerSshHandlers', () => {
   });
 
   it('registers ssh:resolve and returns resolver results', async () => {
-    // Given: a resolver with some resolved data.
+    // Given: SSH config contains the alias and the resolver has some resolved data.
+    const sshConfigManager = createSshConfigManager([
+      {
+        alias: 'my-host',
+        hostname: 'my-host.example.com',
+        hasForwarding: false,
+        forwards: [],
+      },
+    ]);
     const resolvedData = { hostname: ['1.2.3.4'] };
     const sshHostResolver = {
       resolve: vi.fn(() => Promise.resolve(resolvedData)),
@@ -76,7 +94,7 @@ describe('registerSshHandlers', () => {
     };
 
     // When: SSH handlers are registered and the resolve handler is invoked.
-    registerSshHandlers({ sshHostResolver });
+    registerSshHandlers({ sshConfigManager, sshHostResolver });
     const result = await requireHandler(IPC.SSH_RESOLVE)({}, { alias: 'my-host' });
 
     // Then: the handler bridges to the resolver.
@@ -84,24 +102,83 @@ describe('registerSshHandlers', () => {
     expect(sshHostResolver.resolve).toHaveBeenCalledWith('my-host');
   });
 
-  it('ignores extra resolve payload keys and still allows well-formed unknown aliases', async () => {
-    // Given: a resolver with some resolved data.
-    const resolvedData = { hostname: ['unknown.example.com'] };
+  it('ignores extra resolve payload keys for listed aliases', async () => {
+    // Given: SSH config contains the alias and the resolver has some resolved data.
+    const sshConfigManager = createSshConfigManager([
+      {
+        alias: 'dev',
+        hostname: 'dev.example.com',
+        hasForwarding: false,
+        forwards: [],
+      },
+    ]);
+    const resolvedData = { hostname: ['dev.example.com'] };
     const sshHostResolver = {
       resolve: vi.fn(() => Promise.resolve(resolvedData)),
       clear: vi.fn(),
     };
 
     // When: SSH handlers are registered and resolve is invoked with extra keys.
-    registerSshHandlers({ sshHostResolver });
-    const result = await requireHandler(IPC.SSH_RESOLVE)(
-      {},
-      { alias: 'unknown-host', command: 'ignored' },
-    );
+    registerSshHandlers({ sshConfigManager, sshHostResolver });
+    const result = await requireHandler(IPC.SSH_RESOLVE)({}, { alias: 'dev', command: 'ignored' });
 
-    // Then: Phase 3 validates shape only and forwards the alias to the resolver.
+    // Then: only the listed alias reaches the resolver.
     expect(result).toBe(resolvedData);
-    expect(sshHostResolver.resolve).toHaveBeenCalledWith('unknown-host');
+    expect(sshHostResolver.resolve).toHaveBeenCalledWith('dev');
+  });
+
+  it('rejects unknown resolve aliases without calling the resolver', () => {
+    // Given: SSH config does not contain the requested alias.
+    const sshConfigManager = createSshConfigManager([
+      {
+        alias: 'dev',
+        hostname: 'dev.example.com',
+        hasForwarding: false,
+        forwards: [],
+      },
+    ]);
+    const sshHostResolver = {
+      resolve: vi.fn(),
+      clear: vi.fn(),
+    };
+
+    // When / Then: the well-formed but unauthorized alias is rejected.
+    registerSshHandlers({ sshConfigManager, sshHostResolver });
+    expectIpcRequestNotAllowed(IPC.SSH_RESOLVE, () =>
+      requireHandler(IPC.SSH_RESOLVE)({}, { alias: 'unknown-host' }),
+    );
+    expect(sshHostResolver.resolve).not.toHaveBeenCalled();
+  });
+
+  it('allows duplicate listed aliases to resolve', async () => {
+    // Given: SSH config contains duplicate concrete aliases.
+    const sshConfigManager = createSshConfigManager([
+      {
+        alias: 'dev',
+        hostname: 'dev-a.example.com',
+        hasForwarding: false,
+        forwards: [],
+      },
+      {
+        alias: 'dev',
+        hostname: 'dev-b.example.com',
+        hasForwarding: false,
+        forwards: [],
+      },
+    ]);
+    const resolvedData = { hostname: ['dev-a.example.com'] };
+    const sshHostResolver = {
+      resolve: vi.fn(() => Promise.resolve(resolvedData)),
+      clear: vi.fn(),
+    };
+
+    // When: the duplicated alias is resolved.
+    registerSshHandlers({ sshConfigManager, sshHostResolver });
+    const result = await requireHandler(IPC.SSH_RESOLVE)({}, { alias: 'dev' });
+
+    // Then: authorization only requires at least one listed alias match.
+    expect(result).toBe(resolvedData);
+    expect(sshHostResolver.resolve).toHaveBeenCalledWith('dev');
   });
 
   it.each([
@@ -125,14 +202,22 @@ describe('registerSshHandlers', () => {
   });
 
   it('propagates resolver errors to the renderer', async () => {
-    // Given: a resolver that rejects (e.g., ssh exits non-zero).
+    // Given: SSH config contains the alias and the resolver rejects (e.g., ssh exits non-zero).
+    const sshConfigManager = createSshConfigManager([
+      {
+        alias: 'broken',
+        hostname: 'broken.example.com',
+        hasForwarding: false,
+        forwards: [],
+      },
+    ]);
     const sshHostResolver = {
       resolve: vi.fn(() => Promise.reject(new Error('ssh failed'))),
       clear: vi.fn(),
     };
 
     // When: SSH handlers are registered and the resolve handler is invoked for a failing alias.
-    registerSshHandlers({ sshHostResolver });
+    registerSshHandlers({ sshConfigManager, sshHostResolver });
 
     // Then: the rejection propagates to the IPC caller without being swallowed.
     await expect(requireHandler(IPC.SSH_RESOLVE)({}, { alias: 'broken' })).rejects.toThrow(
@@ -144,10 +229,7 @@ describe('registerSshHandlers', () => {
   it('removes the ssh handlers during teardown', () => {
     // Given: SSH handlers have been registered.
     const dispose = registerSshHandlers({
-      sshConfigManager: {
-        list: vi.fn(() => []),
-        refresh: vi.fn(() => []),
-      },
+      sshConfigManager: createSshConfigManager(),
     });
 
     // When: registration is disposed.

@@ -5,6 +5,7 @@ import { createLogger, type LogRecord, type LogTransport } from '../../logging/l
 import type { TunnelRuntimeState } from '../../tunnels/types';
 import { MAX_ALIAS_LENGTH } from '../validation';
 import {
+  expectIpcRequestNotAllowed,
   expectInvalidPayload,
   ipcMainMock,
   requireHandler,
@@ -50,11 +51,32 @@ function createSshConfigManager(hosts: SSHHost[] = []): TestSshConfigManager {
   };
 }
 
-function registerWithTunnelManager(tunnelManager: TestTunnelManager): void {
+function createSshHost(alias: string, hasForwarding: boolean): SSHHost {
+  return {
+    alias,
+    hostname: `${alias}.example.com`,
+    hasForwarding,
+    forwards: hasForwarding
+      ? [
+          {
+            type: 'dynamic',
+            bindPort: 1080,
+          },
+        ]
+      : [],
+  };
+}
+
+function registerWithTunnelManager(
+  tunnelManager: TestTunnelManager,
+  hosts: SSHHost[] = [],
+): TestSshConfigManager {
+  const sshConfigManager = createSshConfigManager(hosts);
   registerTunnelHandlers({
-    sshConfigManager: createSshConfigManager(),
+    sshConfigManager,
     tunnelManager,
   });
+  return sshConfigManager;
 }
 
 const invalidAliasPayloads: Array<[string, unknown]> = [
@@ -153,7 +175,7 @@ describe('registerTunnelHandlers', () => {
   it('delegates start, stop, and logs requests to the tunnel manager', () => {
     // Given: tunnel handlers registered with an injected runtime manager.
     const tunnelManager = createTunnelManager();
-    registerWithTunnelManager(tunnelManager);
+    registerWithTunnelManager(tunnelManager, [createSshHost('dev', true)]);
 
     // When: renderer invoke handlers are called.
     requireHandler(IPC.TUNNEL_START)({}, { alias: 'dev' });
@@ -167,23 +189,117 @@ describe('registerTunnelHandlers', () => {
     expect(logs).toEqual(['dev log']);
   });
 
-  it('ignores extra tunnel payload keys and still allows well-formed unknown aliases', () => {
+  it('ignores extra tunnel payload keys for configured forwarding aliases', () => {
     // Given: tunnel handlers registered with an injected runtime manager.
     const tunnelManager = createTunnelManager();
-    registerWithTunnelManager(tunnelManager);
+    registerWithTunnelManager(tunnelManager, [createSshHost('dev', true)]);
 
     // When: renderer invoke handlers are called with extra keys.
-    requireHandler(IPC.TUNNEL_START)({}, { alias: 'unknown-dev', shell: '/bin/bash' });
-    requireHandler(IPC.TUNNEL_STOP)({}, { alias: 'unknown-dev', shell: '/bin/bash' });
-    const logs = requireHandler(IPC.TUNNEL_LOGS)({}, { alias: 'unknown-dev', shell: '/bin/bash' });
-    requireHandler(IPC.TUNNEL_CLEAR_DIAGNOSTICS)({}, { alias: 'unknown-dev', shell: '/bin/bash' });
+    requireHandler(IPC.TUNNEL_START)({}, { alias: 'dev', shell: '/bin/bash' });
+    requireHandler(IPC.TUNNEL_STOP)({}, { alias: 'dev', shell: '/bin/bash' });
+    const logs = requireHandler(IPC.TUNNEL_LOGS)({}, { alias: 'dev', shell: '/bin/bash' });
+    requireHandler(IPC.TUNNEL_CLEAR_DIAGNOSTICS)({}, { alias: 'dev', shell: '/bin/bash' });
 
-    // Then: Phase 3 validates shape only and forwards the alias to the manager.
-    expect(tunnelManager.start).toHaveBeenCalledWith('unknown-dev');
-    expect(tunnelManager.stop).toHaveBeenCalledWith('unknown-dev');
-    expect(tunnelManager.logs).toHaveBeenCalledWith('unknown-dev');
-    expect(logs).toEqual(['unknown-dev log']);
-    expect(tunnelManager.clearDiagnostics).toHaveBeenCalledWith('unknown-dev');
+    // Then: only the allowed alias reaches the manager.
+    expect(tunnelManager.start).toHaveBeenCalledWith('dev');
+    expect(tunnelManager.stop).toHaveBeenCalledWith('dev');
+    expect(tunnelManager.logs).toHaveBeenCalledWith('dev');
+    expect(logs).toEqual(['dev log']);
+    expect(tunnelManager.clearDiagnostics).toHaveBeenCalledWith('dev');
+  });
+
+  it('rejects tunnel:start for configured non-forwarding aliases', () => {
+    // Given: SSH config contains a host without forwarding.
+    const tunnelManager = createTunnelManager();
+    registerWithTunnelManager(tunnelManager, [createSshHost('plain', false)]);
+
+    // When / Then: starting a non-forwarding alias is not exposed as a renderer capability.
+    expectIpcRequestNotAllowed(IPC.TUNNEL_START, () =>
+      requireHandler(IPC.TUNNEL_START)({}, { alias: 'plain' }),
+    );
+    expect(tunnelManager.start).not.toHaveBeenCalled();
+  });
+
+  it('rejects tunnel:start for unknown aliases', () => {
+    // Given: SSH config does not contain the requested alias.
+    const tunnelManager = createTunnelManager();
+    registerWithTunnelManager(tunnelManager, [createSshHost('dev', true)]);
+
+    // When / Then: unknown aliases are not allowed to start tunnels.
+    expectIpcRequestNotAllowed(IPC.TUNNEL_START, () =>
+      requireHandler(IPC.TUNNEL_START)({}, { alias: 'unknown-dev' }),
+    );
+    expect(tunnelManager.start).not.toHaveBeenCalled();
+  });
+
+  it('allows runtime-only aliases for stop, logs, and clear diagnostics', () => {
+    // Given: runtime state contains an alias that is no longer configured.
+    const tunnelManager = createTunnelManager({
+      removed: {
+        status: 'error',
+        recentLogs: ['failed'],
+      },
+    });
+    registerWithTunnelManager(tunnelManager);
+
+    // When: renderer controls the runtime-only tunnel.
+    requireHandler(IPC.TUNNEL_STOP)({}, { alias: 'removed' });
+    const logs = requireHandler(IPC.TUNNEL_LOGS)({}, { alias: 'removed' });
+    requireHandler(IPC.TUNNEL_CLEAR_DIAGNOSTICS)({}, { alias: 'removed' });
+
+    // Then: runtime state presence preserves access after SSH config changes.
+    expect(tunnelManager.stop).toHaveBeenCalledWith('removed');
+    expect(tunnelManager.logs).toHaveBeenCalledWith('removed');
+    expect(logs).toEqual(['removed log']);
+    expect(tunnelManager.clearDiagnostics).toHaveBeenCalledWith('removed');
+  });
+
+  it.each([
+    [IPC.TUNNEL_STOP, 'stop'],
+    [IPC.TUNNEL_LOGS, 'logs'],
+    [IPC.TUNNEL_CLEAR_DIAGNOSTICS, 'clearDiagnostics'],
+  ] as const)(
+    'rejects %s for unknown aliases',
+    (channel, methodName: 'stop' | 'logs' | 'clearDiagnostics') => {
+      // Given: neither SSH config nor runtime state contains the requested alias.
+      const tunnelManager = createTunnelManager();
+      registerWithTunnelManager(tunnelManager, [createSshHost('dev', true)]);
+
+      // When / Then: unknown aliases are not allowed for the channel.
+      expectIpcRequestNotAllowed(channel, () =>
+        requireHandler(channel)({}, { alias: 'unknown-dev' }),
+      );
+      expect(tunnelManager[methodName]).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    [IPC.TUNNEL_STOP, 'stop'],
+    [IPC.TUNNEL_LOGS, 'logs'],
+    [IPC.TUNNEL_CLEAR_DIAGNOSTICS, 'clearDiagnostics'],
+  ] as const)(
+    'rejects %s for configured non-forwarding aliases without runtime state',
+    (channel, methodName: 'stop' | 'logs' | 'clearDiagnostics') => {
+      // Given: SSH config contains a non-forwarding host and runtime state has no matching alias.
+      const tunnelManager = createTunnelManager();
+      registerWithTunnelManager(tunnelManager, [createSshHost('plain', false)]);
+
+      // When / Then: non-forwarding aliases are not exposed unless runtime state exists.
+      expectIpcRequestNotAllowed(channel, () => requireHandler(channel)({}, { alias: 'plain' }));
+      expect(tunnelManager[methodName]).not.toHaveBeenCalled();
+    },
+  );
+
+  it('allows configured forwarding aliases for clear diagnostics', () => {
+    // Given: tunnel handlers are registered with an injected runtime manager.
+    const tunnelManager = createTunnelManager();
+    registerWithTunnelManager(tunnelManager, [createSshHost('dev', true)]);
+
+    // When: the renderer invokes the clear-diagnostics handler.
+    requireHandler(IPC.TUNNEL_CLEAR_DIAGNOSTICS)({}, { alias: 'dev' });
+
+    // Then: the request is bridged to the manager.
+    expect(tunnelManager.clearDiagnostics).toHaveBeenCalledWith('dev');
   });
 
   it.each(invalidAliasPayloads)(
@@ -258,18 +374,6 @@ describe('registerTunnelHandlers', () => {
     expect(ipcMainMock.removeHandler).toHaveBeenCalledWith(IPC.TUNNEL_LOGS);
     expect(ipcMainMock.removeHandler).toHaveBeenCalledWith(IPC.TUNNEL_CLEAR_DIAGNOSTICS);
     expect(tunnelManager.disposeAll).toHaveBeenCalledOnce();
-  });
-
-  it('delegates clearDiagnostics requests to the tunnel manager', () => {
-    // Given: tunnel handlers are registered with an injected runtime manager.
-    const tunnelManager = createTunnelManager();
-    registerWithTunnelManager(tunnelManager);
-
-    // When: the renderer invokes the clear-diagnostics handler.
-    requireHandler(IPC.TUNNEL_CLEAR_DIAGNOSTICS)({}, { alias: 'dev' });
-
-    // Then: the request is bridged to the manager.
-    expect(tunnelManager.clearDiagnostics).toHaveBeenCalledWith('dev');
   });
 
   it('warns when an active runtime tunnel is no longer configured', () => {

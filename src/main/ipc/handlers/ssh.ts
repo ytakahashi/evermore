@@ -2,6 +2,7 @@ import { ipcMain } from 'electron';
 import { IPC } from '../../../shared/ipc-channels';
 import { SshConfigManager } from '../../ssh-config/manager';
 import { SshHostResolver } from '../../ssh-config/host-resolver';
+import { assertIpcRequestAllowed } from '../authorization';
 import { readAliasPayload } from '../validation';
 
 interface RegisterSshHandlersOptions {
@@ -24,9 +25,12 @@ export function registerSshHandlers(options: RegisterSshHandlersOptions = {}): (
     sshHostResolver.clear();
     return hosts;
   });
-  ipcMain.handle(IPC.SSH_RESOLVE, (_event, payload: unknown) =>
-    sshHostResolver.resolve(readAliasPayload(payload, IPC.SSH_RESOLVE)),
-  );
+  ipcMain.handle(IPC.SSH_RESOLVE, (_event, payload: unknown) => {
+    const alias = readAliasPayload(payload, IPC.SSH_RESOLVE);
+    const isConfiguredAlias = sshConfigManager.list().some((host) => host.alias === alias);
+    assertIpcRequestAllowed(IPC.SSH_RESOLVE, isConfiguredAlias);
+    return sshHostResolver.resolve(alias);
+  });
 
   return () => {
     ipcMain.removeHandler(IPC.SSH_LIST_HOSTS);
