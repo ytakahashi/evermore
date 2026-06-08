@@ -2,10 +2,72 @@ import { ipcMain, type BrowserWindow } from 'electron';
 import type { PtyCreateRequest } from '../../../shared/api-types';
 import { IPC } from '../../../shared/ipc-channels';
 import { PtyManager } from '../../pty/pty-manager';
+import {
+  MAX_ID_LENGTH,
+  MAX_PATH_LENGTH,
+  MAX_PTY_DIMENSION,
+  MAX_PTY_WRITE_LENGTH,
+  readObject,
+  readOptionalStringField,
+  readPositiveIntegerField,
+  readStringField,
+  readStringIdPayload,
+} from '../validation';
 
 interface RegisterPtyHandlersOptions {
   getWindow: () => BrowserWindow | null;
   ptyManager?: PtyManager;
+}
+
+interface PtyWritePayload {
+  id: string;
+  data: string;
+}
+
+interface PtyResizePayload {
+  id: string;
+  cols: number;
+  rows: number;
+}
+
+function readPtyCreatePayload(payload: unknown): PtyCreateRequest {
+  const object = readObject(payload, IPC.PTY_CREATE);
+  const cwd = readStringField(object, 'cwd', IPC.PTY_CREATE, {
+    allowEmpty: true,
+    maxLength: MAX_PATH_LENGTH,
+  });
+  const paneId = readOptionalStringField(object, 'paneId', IPC.PTY_CREATE, {
+    maxLength: MAX_ID_LENGTH,
+  });
+
+  return {
+    cwd,
+    ...(paneId !== undefined ? { paneId } : {}),
+  };
+}
+
+function readPtyWritePayload(payload: unknown): PtyWritePayload {
+  const object = readObject(payload, IPC.PTY_WRITE);
+  return {
+    id: readStringField(object, 'id', IPC.PTY_WRITE, { maxLength: MAX_ID_LENGTH }),
+    data: readStringField(object, 'data', IPC.PTY_WRITE, {
+      allowEmpty: true,
+      maxLength: MAX_PTY_WRITE_LENGTH,
+    }),
+  };
+}
+
+function readPtyResizePayload(payload: unknown): PtyResizePayload {
+  const object = readObject(payload, IPC.PTY_RESIZE);
+  return {
+    id: readStringField(object, 'id', IPC.PTY_RESIZE, { maxLength: MAX_ID_LENGTH }),
+    cols: readPositiveIntegerField(object, 'cols', IPC.PTY_RESIZE, {
+      max: MAX_PTY_DIMENSION,
+    }),
+    rows: readPositiveIntegerField(object, 'rows', IPC.PTY_RESIZE, {
+      max: MAX_PTY_DIMENSION,
+    }),
+  };
 }
 
 /**
@@ -38,20 +100,19 @@ export function registerPtyHandlers(options: RegisterPtyHandlersOptions): () => 
       },
     });
 
-  ipcMain.handle(IPC.PTY_CREATE, (_event, payload: PtyCreateRequest) =>
-    ptyManager.create({
-      cwd: payload.cwd,
-      ...(payload.paneId !== undefined ? { paneId: payload.paneId } : {}),
-    }),
+  ipcMain.handle(IPC.PTY_CREATE, (_event, payload: unknown) =>
+    ptyManager.create(readPtyCreatePayload(payload)),
   );
-  ipcMain.handle(IPC.PTY_WRITE, (_event, payload: { id: string; data: string }) => {
-    ptyManager.write(payload.id, payload.data);
+  ipcMain.handle(IPC.PTY_WRITE, (_event, payload: unknown) => {
+    const request = readPtyWritePayload(payload);
+    ptyManager.write(request.id, request.data);
   });
-  ipcMain.handle(IPC.PTY_RESIZE, (_event, payload: { id: string; cols: number; rows: number }) => {
-    ptyManager.resize(payload.id, payload.cols, payload.rows);
+  ipcMain.handle(IPC.PTY_RESIZE, (_event, payload: unknown) => {
+    const request = readPtyResizePayload(payload);
+    ptyManager.resize(request.id, request.cols, request.rows);
   });
-  ipcMain.handle(IPC.PTY_DISPOSE, (_event, payload: { id: string }) => {
-    ptyManager.dispose(payload.id);
+  ipcMain.handle(IPC.PTY_DISPOSE, (_event, payload: unknown) => {
+    ptyManager.dispose(readStringIdPayload(payload, 'id', IPC.PTY_DISPOSE));
   });
 
   return () => {
