@@ -4,6 +4,7 @@ import type { SSHHost, Tunnel } from '../../../shared/types';
 import { createSilentLogger, type Logger } from '../../logging/logger';
 import type { SshConfigManager } from '../../ssh-config/manager';
 import type { TunnelManager } from '../../tunnels/tunnel-manager';
+import { readAliasPayload } from '../validation';
 
 type TunnelSshConfigManager = Pick<SshConfigManager, 'list'>;
 type TunnelRuntimeManager = Pick<
@@ -66,17 +67,17 @@ export function registerTunnelHandlers(options: RegisterTunnelHandlersOptions): 
 
     return hosts.filter((host) => host.hasForwarding).map((host) => toTunnel(host, tunnelManager));
   });
-  ipcMain.handle(IPC.TUNNEL_START, (_event, payload: { alias: string }) => {
-    tunnelManager.start(payload.alias);
+  ipcMain.handle(IPC.TUNNEL_START, (_event, payload: unknown) => {
+    tunnelManager.start(readAliasPayload(payload, IPC.TUNNEL_START));
   });
-  ipcMain.handle(IPC.TUNNEL_STOP, (_event, payload: { alias: string }) => {
-    tunnelManager.stop(payload.alias);
+  ipcMain.handle(IPC.TUNNEL_STOP, (_event, payload: unknown) => {
+    tunnelManager.stop(readAliasPayload(payload, IPC.TUNNEL_STOP));
   });
-  ipcMain.handle(IPC.TUNNEL_LOGS, (_event, payload: { alias: string }) =>
-    tunnelManager.logs(payload.alias),
+  ipcMain.handle(IPC.TUNNEL_LOGS, (_event, payload: unknown) =>
+    tunnelManager.logs(readAliasPayload(payload, IPC.TUNNEL_LOGS)),
   );
-  ipcMain.handle(IPC.TUNNEL_CLEAR_DIAGNOSTICS, (_event, payload: { alias: string }) => {
-    tunnelManager.clearDiagnostics(payload.alias);
+  ipcMain.handle(IPC.TUNNEL_CLEAR_DIAGNOSTICS, (_event, payload: unknown) => {
+    tunnelManager.clearDiagnostics(readAliasPayload(payload, IPC.TUNNEL_CLEAR_DIAGNOSTICS));
   });
 
   return () => {

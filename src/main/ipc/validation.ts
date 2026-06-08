@@ -173,3 +173,11 @@ export function readStringIdPayload(payload: unknown, key: string, channel: stri
   const object = readObject(payload, channel);
   return readStringField(object, key, channel, { maxLength: MAX_ID_LENGTH });
 }
+
+/**
+ * Reads a bounded SSH alias from a renderer-sent IPC payload object.
+ */
+export function readAliasPayload(payload: unknown, channel: string): string {
+  const object = readObject(payload, channel);
+  return readStringField(object, 'alias', channel, { maxLength: MAX_ALIAS_LENGTH });
+}

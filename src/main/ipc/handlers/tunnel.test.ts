@@ -3,22 +3,14 @@ import { IPC } from '../../../shared/ipc-channels';
 import type { SSHHost } from '../../../shared/types';
 import { createLogger, type LogRecord, type LogTransport } from '../../logging/logger';
 import type { TunnelRuntimeState } from '../../tunnels/types';
+import { MAX_ALIAS_LENGTH } from '../validation';
+import {
+  expectInvalidPayload,
+  ipcMainMock,
+  requireHandler,
+  resetIpcMainMock,
+} from './test-utils/ipc-main-mock';
 import { registerTunnelHandlers } from './tunnel';
-
-const ipcMainMock = vi.hoisted(() => ({
-  handle: vi.fn(),
-  removeHandler: vi.fn(),
-}));
-
-vi.mock('electron', () => ({
-  ipcMain: ipcMainMock,
-}));
-
-function getHandler(channel: string): ((event: unknown, payload?: unknown) => unknown) | undefined {
-  return ipcMainMock.handle.mock.calls.find(
-    ([registeredChannel]) => registeredChannel === channel,
-  )?.[1];
-}
 
 interface TestTunnelManager {
   start: ReturnType<typeof vi.fn<(alias: string) => void>>;
@@ -28,6 +20,10 @@ interface TestTunnelManager {
   logs: ReturnType<typeof vi.fn<(alias: string) => string[]>>;
   clearDiagnostics: ReturnType<typeof vi.fn<(alias: string) => void>>;
   disposeAll: ReturnType<typeof vi.fn<() => void>>;
+}
+
+interface TestSshConfigManager {
+  list: ReturnType<typeof vi.fn<() => SSHHost[]>>;
 }
 
 function createTunnelManager(
@@ -48,10 +44,31 @@ function createTunnelManager(
   };
 }
 
+function createSshConfigManager(hosts: SSHHost[] = []): TestSshConfigManager {
+  return {
+    list: vi.fn(() => hosts),
+  };
+}
+
+function registerWithTunnelManager(tunnelManager: TestTunnelManager): void {
+  registerTunnelHandlers({
+    sshConfigManager: createSshConfigManager(),
+    tunnelManager,
+  });
+}
+
+const invalidAliasPayloads: Array<[string, unknown]> = [
+  ['null', null],
+  ['array', []],
+  ['missing alias', {}],
+  ['wrong-type alias', { alias: 1 }],
+  ['empty alias', { alias: '' }],
+  ['over-limit alias', { alias: 'x'.repeat(MAX_ALIAS_LENGTH + 1) }],
+];
+
 describe('registerTunnelHandlers', () => {
   beforeEach(() => {
-    ipcMainMock.handle.mockClear();
-    ipcMainMock.removeHandler.mockClear();
+    resetIpcMainMock();
   });
 
   it('registers tunnel handlers and joins SSH config hosts with runtime state', () => {
@@ -88,9 +105,7 @@ describe('registerTunnelHandlers', () => {
         ],
       },
     ];
-    const sshConfigManager = {
-      list: vi.fn(() => hosts),
-    };
+    const sshConfigManager = createSshConfigManager(hosts);
     const tunnelManager = createTunnelManager({
       dev: {
         status: 'running',
@@ -106,8 +121,7 @@ describe('registerTunnelHandlers', () => {
       sshConfigManager,
       tunnelManager,
     });
-    const handler = getHandler(IPC.TUNNEL_LIST);
-    const tunnels = handler?.({});
+    const tunnels = requireHandler(IPC.TUNNEL_LIST)({});
 
     // Then: only forwarding hosts are returned, with stopped defaults for unseen aliases.
     expect(tunnels).toEqual([
@@ -139,17 +153,12 @@ describe('registerTunnelHandlers', () => {
   it('delegates start, stop, and logs requests to the tunnel manager', () => {
     // Given: tunnel handlers registered with an injected runtime manager.
     const tunnelManager = createTunnelManager();
-    registerTunnelHandlers({
-      sshConfigManager: {
-        list: vi.fn(() => []),
-      },
-      tunnelManager,
-    });
+    registerWithTunnelManager(tunnelManager);
 
     // When: renderer invoke handlers are called.
-    getHandler(IPC.TUNNEL_START)?.({}, { alias: 'dev' });
-    getHandler(IPC.TUNNEL_STOP)?.({}, { alias: 'dev' });
-    const logs = getHandler(IPC.TUNNEL_LOGS)?.({}, { alias: 'dev' });
+    requireHandler(IPC.TUNNEL_START)({}, { alias: 'dev' });
+    requireHandler(IPC.TUNNEL_STOP)({}, { alias: 'dev' });
+    const logs = requireHandler(IPC.TUNNEL_LOGS)({}, { alias: 'dev' });
 
     // Then: each request is bridged to the manager.
     expect(tunnelManager.start).toHaveBeenCalledWith('dev');
@@ -158,13 +167,84 @@ describe('registerTunnelHandlers', () => {
     expect(logs).toEqual(['dev log']);
   });
 
+  it('ignores extra tunnel payload keys and still allows well-formed unknown aliases', () => {
+    // Given: tunnel handlers registered with an injected runtime manager.
+    const tunnelManager = createTunnelManager();
+    registerWithTunnelManager(tunnelManager);
+
+    // When: renderer invoke handlers are called with extra keys.
+    requireHandler(IPC.TUNNEL_START)({}, { alias: 'unknown-dev', shell: '/bin/bash' });
+    requireHandler(IPC.TUNNEL_STOP)({}, { alias: 'unknown-dev', shell: '/bin/bash' });
+    const logs = requireHandler(IPC.TUNNEL_LOGS)({}, { alias: 'unknown-dev', shell: '/bin/bash' });
+    requireHandler(IPC.TUNNEL_CLEAR_DIAGNOSTICS)({}, { alias: 'unknown-dev', shell: '/bin/bash' });
+
+    // Then: Phase 3 validates shape only and forwards the alias to the manager.
+    expect(tunnelManager.start).toHaveBeenCalledWith('unknown-dev');
+    expect(tunnelManager.stop).toHaveBeenCalledWith('unknown-dev');
+    expect(tunnelManager.logs).toHaveBeenCalledWith('unknown-dev');
+    expect(logs).toEqual(['unknown-dev log']);
+    expect(tunnelManager.clearDiagnostics).toHaveBeenCalledWith('unknown-dev');
+  });
+
+  it.each(invalidAliasPayloads)(
+    'rejects invalid tunnel:start payloads: %s',
+    (_label: string, payload: unknown) => {
+      // Given: tunnel handlers registered with an injected runtime manager.
+      const tunnelManager = createTunnelManager();
+      registerWithTunnelManager(tunnelManager);
+
+      // When / Then: malformed payloads are rejected before manager execution.
+      expectInvalidPayload(IPC.TUNNEL_START, () => requireHandler(IPC.TUNNEL_START)({}, payload));
+      expect(tunnelManager.start).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(invalidAliasPayloads)(
+    'rejects invalid tunnel:stop payloads: %s',
+    (_label: string, payload: unknown) => {
+      // Given: tunnel handlers registered with an injected runtime manager.
+      const tunnelManager = createTunnelManager();
+      registerWithTunnelManager(tunnelManager);
+
+      // When / Then: malformed payloads are rejected before manager execution.
+      expectInvalidPayload(IPC.TUNNEL_STOP, () => requireHandler(IPC.TUNNEL_STOP)({}, payload));
+      expect(tunnelManager.stop).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(invalidAliasPayloads)(
+    'rejects invalid tunnel:logs payloads: %s',
+    (_label: string, payload: unknown) => {
+      // Given: tunnel handlers registered with an injected runtime manager.
+      const tunnelManager = createTunnelManager();
+      registerWithTunnelManager(tunnelManager);
+
+      // When / Then: malformed payloads are rejected before manager execution.
+      expectInvalidPayload(IPC.TUNNEL_LOGS, () => requireHandler(IPC.TUNNEL_LOGS)({}, payload));
+      expect(tunnelManager.logs).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(invalidAliasPayloads)(
+    'rejects invalid tunnel:clear-diagnostics payloads: %s',
+    (_label: string, payload: unknown) => {
+      // Given: tunnel handlers registered with an injected runtime manager.
+      const tunnelManager = createTunnelManager();
+      registerWithTunnelManager(tunnelManager);
+
+      // When / Then: malformed payloads are rejected before manager execution.
+      expectInvalidPayload(IPC.TUNNEL_CLEAR_DIAGNOSTICS, () =>
+        requireHandler(IPC.TUNNEL_CLEAR_DIAGNOSTICS)({}, payload),
+      );
+      expect(tunnelManager.clearDiagnostics).not.toHaveBeenCalled();
+    },
+  );
+
   it('removes handlers and disposes all tunnels during teardown', () => {
     // Given: tunnel handlers have been registered.
     const tunnelManager = createTunnelManager();
     const dispose = registerTunnelHandlers({
-      sshConfigManager: {
-        list: vi.fn(() => []),
-      },
+      sshConfigManager: createSshConfigManager(),
       tunnelManager,
     });
 
@@ -183,13 +263,10 @@ describe('registerTunnelHandlers', () => {
   it('delegates clearDiagnostics requests to the tunnel manager', () => {
     // Given: tunnel handlers are registered with an injected runtime manager.
     const tunnelManager = createTunnelManager();
-    registerTunnelHandlers({
-      sshConfigManager: { list: vi.fn(() => []) },
-      tunnelManager,
-    });
+    registerWithTunnelManager(tunnelManager);
 
     // When: the renderer invokes the clear-diagnostics handler.
-    getHandler(IPC.TUNNEL_CLEAR_DIAGNOSTICS)?.({}, { alias: 'dev' });
+    requireHandler(IPC.TUNNEL_CLEAR_DIAGNOSTICS)({}, { alias: 'dev' });
 
     // Then: the request is bridged to the manager.
     expect(tunnelManager.clearDiagnostics).toHaveBeenCalledWith('dev');
@@ -235,7 +312,7 @@ describe('registerTunnelHandlers', () => {
       tunnelManager,
       logger,
     });
-    getHandler(IPC.TUNNEL_LIST)?.({});
+    requireHandler(IPC.TUNNEL_LIST)({});
 
     // Then: only the active unconfigured runtime tunnel is reported through the injected logger.
     const warnRecords = records.filter((record) => record.level === 'warn');

@@ -1,21 +1,18 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { IPC } from '../../../shared/ipc-channels';
 import type { SSHHost } from '../../../shared/types';
+import { MAX_ALIAS_LENGTH } from '../validation';
+import {
+  expectInvalidPayload,
+  ipcMainMock,
+  requireHandler,
+  resetIpcMainMock,
+} from './test-utils/ipc-main-mock';
 import { registerSshHandlers } from './ssh';
-
-const ipcMainMock = vi.hoisted(() => ({
-  handle: vi.fn(),
-  removeHandler: vi.fn(),
-}));
-
-vi.mock('electron', () => ({
-  ipcMain: ipcMainMock,
-}));
 
 describe('registerSshHandlers', () => {
   beforeEach(() => {
-    ipcMainMock.handle.mockClear();
-    ipcMainMock.removeHandler.mockClear();
+    resetIpcMainMock();
   });
 
   it('registers ssh:list-hosts and returns manager results', () => {
@@ -35,12 +32,9 @@ describe('registerSshHandlers', () => {
 
     // When: SSH handlers are registered and the list handler is invoked.
     registerSshHandlers({ sshConfigManager });
-    const handler = ipcMainMock.handle.mock.calls.find(
-      ([channel]) => channel === IPC.SSH_LIST_HOSTS,
-    )?.[1];
 
     // Then: the handler bridges to the manager.
-    expect(handler?.({})).toBe(hosts);
+    expect(requireHandler(IPC.SSH_LIST_HOSTS)({})).toBe(hosts);
     expect(sshConfigManager.list).toHaveBeenCalledOnce();
   });
 
@@ -65,11 +59,7 @@ describe('registerSshHandlers', () => {
 
     // When: SSH handlers are registered and the reload handler is invoked.
     registerSshHandlers({ sshConfigManager, sshHostResolver });
-    const handler = ipcMainMock.handle.mock.calls.find(
-      ([channel]) => channel === IPC.SSH_RELOAD_HOSTS,
-    )?.[1];
-
-    const result = handler?.({});
+    const result = requireHandler(IPC.SSH_RELOAD_HOSTS)({});
 
     // Then: the handler bridges to refresh and clears the resolver cache.
     expect(result).toBe(hosts);
@@ -87,15 +77,51 @@ describe('registerSshHandlers', () => {
 
     // When: SSH handlers are registered and the resolve handler is invoked.
     registerSshHandlers({ sshHostResolver });
-    const handler = ipcMainMock.handle.mock.calls.find(
-      ([channel]) => channel === IPC.SSH_RESOLVE,
-    )?.[1];
-
-    const result = await handler?.({}, { alias: 'my-host' });
+    const result = await requireHandler(IPC.SSH_RESOLVE)({}, { alias: 'my-host' });
 
     // Then: the handler bridges to the resolver.
     expect(result).toBe(resolvedData);
     expect(sshHostResolver.resolve).toHaveBeenCalledWith('my-host');
+  });
+
+  it('ignores extra resolve payload keys and still allows well-formed unknown aliases', async () => {
+    // Given: a resolver with some resolved data.
+    const resolvedData = { hostname: ['unknown.example.com'] };
+    const sshHostResolver = {
+      resolve: vi.fn(() => Promise.resolve(resolvedData)),
+      clear: vi.fn(),
+    };
+
+    // When: SSH handlers are registered and resolve is invoked with extra keys.
+    registerSshHandlers({ sshHostResolver });
+    const result = await requireHandler(IPC.SSH_RESOLVE)(
+      {},
+      { alias: 'unknown-host', command: 'ignored' },
+    );
+
+    // Then: Phase 3 validates shape only and forwards the alias to the resolver.
+    expect(result).toBe(resolvedData);
+    expect(sshHostResolver.resolve).toHaveBeenCalledWith('unknown-host');
+  });
+
+  it.each([
+    ['null', null],
+    ['array', []],
+    ['missing alias', {}],
+    ['wrong-type alias', { alias: 1 }],
+    ['empty alias', { alias: '' }],
+    ['over-limit alias', { alias: 'x'.repeat(MAX_ALIAS_LENGTH + 1) }],
+  ])('rejects invalid resolve payloads: %s', (_label: string, payload: unknown) => {
+    // Given: SSH handlers are registered with an injected resolver.
+    const sshHostResolver = {
+      resolve: vi.fn(),
+      clear: vi.fn(),
+    };
+    registerSshHandlers({ sshHostResolver });
+
+    // When / Then: malformed payloads are rejected before resolver execution.
+    expectInvalidPayload(IPC.SSH_RESOLVE, () => requireHandler(IPC.SSH_RESOLVE)({}, payload));
+    expect(sshHostResolver.resolve).not.toHaveBeenCalled();
   });
 
   it('propagates resolver errors to the renderer', async () => {
@@ -107,12 +133,11 @@ describe('registerSshHandlers', () => {
 
     // When: SSH handlers are registered and the resolve handler is invoked for a failing alias.
     registerSshHandlers({ sshHostResolver });
-    const handler = ipcMainMock.handle.mock.calls.find(
-      ([channel]) => channel === IPC.SSH_RESOLVE,
-    )?.[1];
 
     // Then: the rejection propagates to the IPC caller without being swallowed.
-    await expect(handler?.({}, { alias: 'broken' })).rejects.toThrow('ssh failed');
+    await expect(requireHandler(IPC.SSH_RESOLVE)({}, { alias: 'broken' })).rejects.toThrow(
+      'ssh failed',
+    );
     expect(sshHostResolver.resolve).toHaveBeenCalledWith('broken');
   });
 
