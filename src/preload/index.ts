@@ -9,7 +9,7 @@ import type {
   Tunnel,
   TunnelStatus,
 } from '../shared/types';
-import type { Api, SettingsUpdate } from '../shared/api-types';
+import type { Api, PtyCreateRequest, SettingsUpdate } from '../shared/api-types';
 
 // Each pane subscribes its own callback via onData/onExit. Registering a new ipcRenderer.on()
 // per pane would exceed Node's default 10-listener limit with many open panes. A single
@@ -48,8 +48,7 @@ ipcRenderer.on(
 
 const api = {
   pty: {
-    create: (opts: { cwd: string; paneId?: string; shell?: string }): Promise<string> =>
-      ipcRenderer.invoke(IPC.PTY_CREATE, opts),
+    create: (opts: PtyCreateRequest): Promise<string> => ipcRenderer.invoke(IPC.PTY_CREATE, opts),
     write: (id: string, data: string): Promise<void> =>
       ipcRenderer.invoke(IPC.PTY_WRITE, { id, data }),
     resize: (id: string, cols: number, rows: number): Promise<void> =>

@@ -1,7 +1,7 @@
 import { ipcMain, type BrowserWindow } from 'electron';
+import type { PtyCreateRequest } from '../../../shared/api-types';
 import { IPC } from '../../../shared/ipc-channels';
 import { PtyManager } from '../../pty/pty-manager';
-import type { PtyCreateOptions } from '../../pty/types';
 
 interface RegisterPtyHandlersOptions {
   getWindow: () => BrowserWindow | null;
@@ -38,8 +38,11 @@ export function registerPtyHandlers(options: RegisterPtyHandlersOptions): () => 
       },
     });
 
-  ipcMain.handle(IPC.PTY_CREATE, (_event, createOptions: PtyCreateOptions) =>
-    ptyManager.create(createOptions),
+  ipcMain.handle(IPC.PTY_CREATE, (_event, payload: PtyCreateRequest) =>
+    ptyManager.create({
+      cwd: payload.cwd,
+      ...(payload.paneId !== undefined ? { paneId: payload.paneId } : {}),
+    }),
   );
   ipcMain.handle(IPC.PTY_WRITE, (_event, payload: { id: string; data: string }) => {
     ptyManager.write(payload.id, payload.data);
