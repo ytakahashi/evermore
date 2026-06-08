@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { assert, describe, expect, it } from 'vitest';
 import {
   MAX_ID_LENGTH,
   readFiniteNumberField,
@@ -237,8 +237,8 @@ describe('IPC validation helpers', () => {
     }
 
     // Then: the fixed error message names the channel without echoing the value.
-    expect(error).toBeInstanceOf(Error);
-    expect((error as Error).message).toContain(CHANNEL);
-    expect((error as Error).message).not.toContain(arbitraryValue);
+    assert(error instanceof Error);
+    expect(error.message).toContain(CHANNEL);
+    expect(error.message).not.toContain(arbitraryValue);
   });
 });
