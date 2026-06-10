@@ -1,13 +1,12 @@
 import { create, type StoreApi, type UseBoundStore } from 'zustand';
 import { flattenLayout, type PaneRect } from '../../../shared/pane-layout';
+import { MAX_SPLIT_RATIO, MIN_SPLIT_RATIO } from '../../../shared/pane-layout-constants';
 import { getPathBasename } from '../../../shared/path-label';
 import type { Pane, PaneLayout, Tab, Workspace } from '../../../shared/types';
 
 const DEFAULT_SAVE_DEBOUNCE_MS = 300;
 const DEFAULT_CWD_SAVE_DEBOUNCE_MS = 1000;
 const DEFAULT_SPLIT_RATIO = 0.5;
-const MAX_SPLIT_RATIO = 0.85;
-const MIN_SPLIT_RATIO = 0.15;
 /**
  * Tolerance for comparing pane edge positions in container-percentage units. `flattenLayout`
  * produces values derived from float multiplication on `ratio`, so exact equality cannot be

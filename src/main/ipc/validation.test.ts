@@ -2,6 +2,7 @@ import { assert, describe, expect, it } from 'vitest';
 import {
   MAX_ALIAS_LENGTH,
   MAX_ID_LENGTH,
+  assertIpcPayloadValid,
   readAliasPayload,
   readFiniteNumberField,
   readNullableStringField,
@@ -19,6 +20,22 @@ function expectInvalidPayload(callback: () => unknown): void {
 }
 
 describe('IPC validation helpers', () => {
+  describe('assertIpcPayloadValid', () => {
+    it('accepts a satisfied cross-field invariant', () => {
+      // Given: a renderer payload invariant that is satisfied.
+
+      // When / Then: validation completes without throwing.
+      expect(() => assertIpcPayloadValid(CHANNEL, true)).not.toThrow();
+    });
+
+    it('rejects an unsatisfied cross-field invariant', () => {
+      // Given: a renderer payload invariant that is not satisfied.
+
+      // When / Then: the shared fixed validation error is thrown.
+      expectInvalidPayload(() => assertIpcPayloadValid(CHANNEL, false));
+    });
+  });
+
   describe('readObject', () => {
     it('accepts plain objects', () => {
       // Given: a renderer payload shaped as a plain object.
