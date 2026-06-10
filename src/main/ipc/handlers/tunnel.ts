@@ -4,6 +4,8 @@ import type { SSHHost, Tunnel } from '../../../shared/types';
 import { createSilentLogger, type Logger } from '../../logging/logger';
 import type { SshConfigManager } from '../../ssh-config/manager';
 import type { TunnelManager } from '../../tunnels/tunnel-manager';
+import { assertIpcRequestAllowed } from '../authorization';
+import { readAliasPayload } from '../validation';
 
 type TunnelSshConfigManager = Pick<SshConfigManager, 'list'>;
 type TunnelRuntimeManager = Pick<
@@ -36,12 +38,20 @@ function toTunnel(host: SSHHost, tunnelManager: TunnelRuntimeManager): Tunnel {
   };
 }
 
+function isConfiguredForwardingAlias(hosts: SSHHost[], alias: string): boolean {
+  return hosts.some((host) => host.alias === alias && host.hasForwarding);
+}
+
 /**
  * Bridges renderer tunnel requests to the main-process tunnel runtime manager.
  */
 export function registerTunnelHandlers(options: RegisterTunnelHandlersOptions): () => void {
   const { tunnelManager } = options;
   const logger = options.logger ?? createSilentLogger();
+
+  const canControlExistingTunnel = (hosts: SSHHost[], alias: string): boolean =>
+    isConfiguredForwardingAlias(hosts, alias) ||
+    tunnelManager.list().some((entry) => entry.alias === alias);
 
   const warnAboutUnconfiguredActiveTunnels = (hosts: SSHHost[]): void => {
     const configuredTunnelAliases = new Set(
@@ -66,17 +76,29 @@ export function registerTunnelHandlers(options: RegisterTunnelHandlersOptions): 
 
     return hosts.filter((host) => host.hasForwarding).map((host) => toTunnel(host, tunnelManager));
   });
-  ipcMain.handle(IPC.TUNNEL_START, (_event, payload: { alias: string }) => {
-    tunnelManager.start(payload.alias);
+  ipcMain.handle(IPC.TUNNEL_START, (_event, payload: unknown) => {
+    const alias = readAliasPayload(payload, IPC.TUNNEL_START);
+    const hosts = options.sshConfigManager.list();
+    assertIpcRequestAllowed(IPC.TUNNEL_START, isConfiguredForwardingAlias(hosts, alias));
+    tunnelManager.start(alias);
   });
-  ipcMain.handle(IPC.TUNNEL_STOP, (_event, payload: { alias: string }) => {
-    tunnelManager.stop(payload.alias);
+  ipcMain.handle(IPC.TUNNEL_STOP, (_event, payload: unknown) => {
+    const alias = readAliasPayload(payload, IPC.TUNNEL_STOP);
+    const hosts = options.sshConfigManager.list();
+    assertIpcRequestAllowed(IPC.TUNNEL_STOP, canControlExistingTunnel(hosts, alias));
+    tunnelManager.stop(alias);
   });
-  ipcMain.handle(IPC.TUNNEL_LOGS, (_event, payload: { alias: string }) =>
-    tunnelManager.logs(payload.alias),
-  );
-  ipcMain.handle(IPC.TUNNEL_CLEAR_DIAGNOSTICS, (_event, payload: { alias: string }) => {
-    tunnelManager.clearDiagnostics(payload.alias);
+  ipcMain.handle(IPC.TUNNEL_LOGS, (_event, payload: unknown) => {
+    const alias = readAliasPayload(payload, IPC.TUNNEL_LOGS);
+    const hosts = options.sshConfigManager.list();
+    assertIpcRequestAllowed(IPC.TUNNEL_LOGS, canControlExistingTunnel(hosts, alias));
+    return tunnelManager.logs(alias);
+  });
+  ipcMain.handle(IPC.TUNNEL_CLEAR_DIAGNOSTICS, (_event, payload: unknown) => {
+    const alias = readAliasPayload(payload, IPC.TUNNEL_CLEAR_DIAGNOSTICS);
+    const hosts = options.sshConfigManager.list();
+    assertIpcRequestAllowed(IPC.TUNNEL_CLEAR_DIAGNOSTICS, canControlExistingTunnel(hosts, alias));
+    tunnelManager.clearDiagnostics(alias);
   });
 
   return () => {

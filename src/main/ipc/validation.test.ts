@@ -1,6 +1,8 @@
 import { assert, describe, expect, it } from 'vitest';
 import {
+  MAX_ALIAS_LENGTH,
   MAX_ID_LENGTH,
+  readAliasPayload,
   readFiniteNumberField,
   readNullableStringField,
   readObject,
@@ -221,6 +223,27 @@ describe('IPC validation helpers', () => {
 
       // When / Then: the id payload helper enforces the shared id limit.
       expectInvalidPayload(() => readStringIdPayload(payload, 'id', CHANNEL));
+    });
+  });
+
+  describe('readAliasPayload', () => {
+    it('reads a bounded alias from a payload object', () => {
+      // Given: a payload with a valid alias field.
+      const payload = { alias: 'dev' };
+
+      // When: the alias payload helper is used.
+      const result = readAliasPayload(payload, CHANNEL);
+
+      // Then: the alias is returned.
+      expect(result).toBe('dev');
+    });
+
+    it('rejects aliases over the shared alias length limit', () => {
+      // Given: a payload with an over-limit alias.
+      const payload = { alias: 'x'.repeat(MAX_ALIAS_LENGTH + 1) };
+
+      // When / Then: the alias payload helper enforces the shared alias limit.
+      expectInvalidPayload(() => readAliasPayload(payload, CHANNEL));
     });
   });
 

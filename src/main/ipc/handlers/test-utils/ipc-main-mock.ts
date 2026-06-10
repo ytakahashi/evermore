@@ -50,3 +50,10 @@ export function requireHandler(channel: string): IpcInvokeHandler {
 export function expectInvalidPayload(channel: string, callback: () => unknown): void {
   expect(callback).toThrow(`Invalid IPC payload for ${channel}`);
 }
+
+/**
+ * Asserts that a well-formed IPC request was rejected by capability policy.
+ */
+export function expectIpcRequestNotAllowed(channel: string, callback: () => unknown): void {
+  expect(callback).toThrow(`IPC request is not allowed for ${channel}`);
+}
