@@ -20,6 +20,15 @@ function invalidPayload(channel: string): Error {
   return new Error(`Invalid IPC payload for ${channel}`);
 }
 
+/**
+ * Rejects a renderer-sent IPC payload when a schema or cross-field invariant is not satisfied.
+ */
+export function assertIpcPayloadValid(channel: string, valid: boolean): asserts valid {
+  if (!valid) {
+    throw invalidPayload(channel);
+  }
+}
+
 function isStrictPlainObject(value: unknown): value is Record<string, unknown> {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
     return false;
