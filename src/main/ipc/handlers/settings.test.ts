@@ -145,6 +145,45 @@ describe('registerSettingsHandlers', () => {
     expect(result.paneInfo.pollIntervalMs).toBe(0);
   });
 
+  it.each([
+    ['null payload', null],
+    ['array payload', []],
+    ['missing settings field', {}],
+    ['null settings field', { settings: null }],
+    ['array settings field', { settings: [] }],
+  ])('treats a %s as an empty update', async (_label: string, payload: unknown) => {
+    // Given: handlers are registered and the update container is malformed or absent.
+    registerSettingsHandlers({ settingsStore });
+
+    // When: the renderer invokes settings:update with the invalid container.
+    const result = (await findHandler(IPC.SETTINGS_UPDATE)?.({}, payload)) as AppSettings;
+
+    // Then: the request does not throw or mutate settings.
+    expect(result).toEqual(DEFAULT_APP_SETTINGS);
+    expect(storage.payload).toEqual({});
+  });
+
+  it('ignores unknown update sections while applying known sibling sections', async () => {
+    // Given: an update containing an unknown section and a valid known section.
+    registerSettingsHandlers({ settingsStore });
+
+    // When: the renderer invokes settings:update.
+    const result = (await findHandler(IPC.SETTINGS_UPDATE)?.(
+      {},
+      {
+        settings: {
+          unknown: { enabled: true },
+          terminal: { cursorStyle: 'underline' },
+        },
+      },
+    )) as AppSettings;
+
+    // Then: the known update is applied and the unknown section is never persisted.
+    expect(result.terminal.cursorStyle).toBe('underline');
+    expect(result).not.toHaveProperty('unknown');
+    expect(storage.payload).toEqual({ terminal: { cursorStyle: 'underline' } });
+  });
+
   it('reset returns to defaults', async () => {
     // Given: settings have drifted from defaults.
     registerSettingsHandlers({ settingsStore });

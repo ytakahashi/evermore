@@ -293,6 +293,15 @@ The IPC surface is the most important boundary in the app and follows a strict s
   handler explicitly constructs internal `PtyCreateOptions` from those fields and must not forward
   the renderer payload directly, so internal-only `shell`, `env`, `cols`, and `rows` options remain
   unreachable across the public IPC boundary.
+- **Payload Validation**: All renderer-to-main payloads are accepted as `unknown` and structurally
+  validated in the handlers before accessing runtime services or persistence layers.
+- **Unknown Keys**: Unknown keys in incoming payloads are ignored and never forwarded. Handlers and
+  schema readers reconstruct objects from validated known fields instead of casting and forwarding
+  the raw input object.
+- **Malformed Rejection vs. Allowlisting**: Malformed payloads (e.g. invalid types or lengths
+  exceeding limits) throw an error containing only the channel name to avoid echoing arbitrary
+  strings. Allowlisting check failures (e.g. requesting unauthorized SSH or tunnel aliases) throw a
+  fixed authorization error.
 
 ## Testing
 

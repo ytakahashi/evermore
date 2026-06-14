@@ -2,7 +2,11 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { DEFAULT_APP_SETTINGS } from '../../shared/settings-defaults';
 import type { AppSettings } from '../../shared/types';
 import { createLogger, type LogRecord, type LogTransport } from '../logging/logger';
-import { SettingsStore } from './settings-store';
+import {
+  MAX_ACCELERATOR_LENGTH,
+  MAX_SETTINGS_STRING_LENGTH,
+  SettingsStore,
+} from './settings-store';
 import type { PersistedSettings, SettingsStorageAdapter } from './types';
 
 class MemorySettingsStorageAdapter implements SettingsStorageAdapter {
@@ -69,6 +73,91 @@ describe('SettingsStore', () => {
 
     // Then: the invalid value is rejected, so no field differs from defaults and the file stays empty.
     expect(next.terminal.cursorStyle).toBe(DEFAULT_APP_SETTINGS.terminal.cursorStyle);
+    expect(storage.payload).toEqual({});
+  });
+
+  it('pins payload-size limits so renderer-impacting changes require a deliberate review', () => {
+    // Given: the bounded-string limits are part of the IPC contract documented in the design.
+
+    // When: the production constants are read.
+
+    // Then: their numeric values are pinned. Changing either constant must update this assertion,
+    // which forces a deliberate review of the renderer-visible payload contract.
+    expect(MAX_SETTINGS_STRING_LENGTH).toBe(4_096);
+    expect(MAX_ACCELERATOR_LENGTH).toBe(1_024);
+  });
+
+  it('accepts settings strings and keybinding accelerators at their maximum lengths', () => {
+    // Given: user-controlled strings exactly at their configured payload limits.
+    const fontFamily = 'f'.repeat(MAX_SETTINGS_STRING_LENGTH);
+    const hotkey = 'h'.repeat(MAX_SETTINGS_STRING_LENGTH);
+    const accelerator = 'a'.repeat(MAX_ACCELERATOR_LENGTH);
+
+    // When: the renderer updates the bounded string settings.
+    const next = store.update({
+      terminal: { fontFamily },
+      shortcuts: {
+        activateAppHotkey: hotkey,
+        keybindings: { 'workspace.newTab': accelerator },
+      },
+    });
+
+    // Then: values at the limits remain valid and are persisted.
+    expect(next.terminal.fontFamily).toBe(fontFamily);
+    expect(next.shortcuts.activateAppHotkey).toBe(hotkey);
+    expect(next.shortcuts.keybindings['workspace.newTab']).toBe(accelerator);
+    expect(storage.payload).toEqual({
+      terminal: { fontFamily },
+      shortcuts: {
+        activateAppHotkey: hotkey,
+        keybindings: { 'workspace.newTab': accelerator },
+      },
+    });
+  });
+
+  it('normalizes over-limit settings strings during update', () => {
+    // Given: renderer-provided strings that exceed their configured payload limits.
+    const fontFamily = 'f'.repeat(MAX_SETTINGS_STRING_LENGTH + 1);
+    const hotkey = 'h'.repeat(MAX_SETTINGS_STRING_LENGTH + 1);
+    const accelerator = 'a'.repeat(MAX_ACCELERATOR_LENGTH + 1);
+
+    // When: the renderer update reaches the store.
+    const next = store.update({
+      terminal: { fontFamily },
+      shortcuts: {
+        activateAppHotkey: hotkey,
+        keybindings: { 'workspace.newTab': accelerator },
+      },
+    });
+
+    // Then: string settings fall back to defaults and the over-limit keybinding override is dropped.
+    expect(next.terminal.fontFamily).toBe(DEFAULT_APP_SETTINGS.terminal.fontFamily);
+    expect(next.shortcuts.activateAppHotkey).toBe(DEFAULT_APP_SETTINGS.shortcuts.activateAppHotkey);
+    expect(next.shortcuts.keybindings['workspace.newTab']).toBe(
+      DEFAULT_APP_SETTINGS.shortcuts.keybindings['workspace.newTab'],
+    );
+    expect(storage.payload).toEqual({});
+  });
+
+  it('normalizes and removes over-limit settings strings during reload', () => {
+    // Given: a hand-edited settings file containing strings above their configured limits.
+    storage.payload = {
+      terminal: { fontFamily: 'f'.repeat(MAX_SETTINGS_STRING_LENGTH + 1) },
+      shortcuts: {
+        activateAppHotkey: 'h'.repeat(MAX_SETTINGS_STRING_LENGTH + 1),
+        keybindings: { 'workspace.newTab': 'a'.repeat(MAX_ACCELERATOR_LENGTH + 1) },
+      },
+    };
+
+    // When: the store reloads and canonicalizes the file.
+    const next = store.reload();
+
+    // Then: the invalid values fall back or are dropped, and no invalid diff remains on disk.
+    expect(next.terminal.fontFamily).toBe(DEFAULT_APP_SETTINGS.terminal.fontFamily);
+    expect(next.shortcuts.activateAppHotkey).toBe(DEFAULT_APP_SETTINGS.shortcuts.activateAppHotkey);
+    expect(next.shortcuts.keybindings['workspace.newTab']).toBe(
+      DEFAULT_APP_SETTINGS.shortcuts.keybindings['workspace.newTab'],
+    );
     expect(storage.payload).toEqual({});
   });
 
