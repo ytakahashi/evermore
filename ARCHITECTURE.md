@@ -302,14 +302,6 @@ The IPC surface is the most important boundary in the app and follows a strict s
   exceeding limits) throw an error containing only the channel name to avoid echoing arbitrary
   strings. Allowlisting check failures (e.g. requesting unauthorized SSH or tunnel aliases) throw a
   fixed authorization error.
-- **Workspace Schema Validation**: Workspace updates via `WS_UPDATE` are structurally validated,
-  bounded, graph-consistent, and reconstructed before persistence. This validator applies only to
-  renderer-sent IPC updates; legacy persisted data loaded at startup continues through the existing
-  migration/sanitization path in `WorkspaceStore`.
-- **Settings Exception**: Settings updates deliberately use forgiving normalization. Malformed
-  sections or properties that fail validation are ignored or fallback to defaults instead of causing
-  the entire IPC request to throw, preserving consistent behavior between IPC updates and
-  hand-edited disk reloads.
 
 ## Testing
 

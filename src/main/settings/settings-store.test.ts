@@ -2,11 +2,12 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { DEFAULT_APP_SETTINGS } from '../../shared/settings-defaults';
 import type { AppSettings } from '../../shared/types';
 import { createLogger, type LogRecord, type LogTransport } from '../logging/logger';
-import { SettingsStore } from './settings-store';
+import {
+  MAX_ACCELERATOR_LENGTH,
+  MAX_SETTINGS_STRING_LENGTH,
+  SettingsStore,
+} from './settings-store';
 import type { PersistedSettings, SettingsStorageAdapter } from './types';
-
-const MAX_SETTINGS_STRING_LENGTH = 4_096;
-const MAX_ACCELERATOR_LENGTH = 1_024;
 
 class MemorySettingsStorageAdapter implements SettingsStorageAdapter {
   public payload: unknown;
@@ -73,6 +74,17 @@ describe('SettingsStore', () => {
     // Then: the invalid value is rejected, so no field differs from defaults and the file stays empty.
     expect(next.terminal.cursorStyle).toBe(DEFAULT_APP_SETTINGS.terminal.cursorStyle);
     expect(storage.payload).toEqual({});
+  });
+
+  it('pins payload-size limits so renderer-impacting changes require a deliberate review', () => {
+    // Given: the bounded-string limits are part of the IPC contract documented in the design.
+
+    // When: the production constants are read.
+
+    // Then: their numeric values are pinned. Changing either constant must update this assertion,
+    // which forces a deliberate review of the renderer-visible payload contract.
+    expect(MAX_SETTINGS_STRING_LENGTH).toBe(4_096);
+    expect(MAX_ACCELERATOR_LENGTH).toBe(1_024);
   });
 
   it('accepts settings strings and keybinding accelerators at their maximum lengths', () => {

@@ -54,8 +54,8 @@ type QuitConfirm = AppSettings['app']['quitConfirm'];
 
 const CURSOR_STYLES: readonly CursorStyle[] = ['block', 'bar', 'underline'];
 const QUIT_CONFIRM_VALUES: readonly QuitConfirm[] = ['always', 'never', 'running-only'];
-const MAX_SETTINGS_STRING_LENGTH = 4_096;
-const MAX_ACCELERATOR_LENGTH = 1_024;
+export const MAX_SETTINGS_STRING_LENGTH = 4_096;
+export const MAX_ACCELERATOR_LENGTH = 1_024;
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -80,6 +80,18 @@ function pickFiniteNumber<T extends number | undefined>(value: unknown, fallback
   return value;
 }
 
+/**
+ * Validates a bounded user-controlled string. Invalid inputs (missing, wrong type, empty, or
+ * over the configured `maxLength`) return `fallback` — the **default**, not the previously
+ * persisted value.
+ *
+ * Both `update()` and `reload()` route through `readCurrentSettings`, so a renderer-sent
+ * over-limit `fontFamily` collapses to the default just like a hand-edited file would. This is
+ * intentional: a single normalization path keeps IPC updates and disk reloads behaviorally
+ * identical, at the cost of not preserving the user's prior valid value when an invalid update
+ * slips through. Over-limit strings are expected to come from bugs or tampering rather than
+ * normal renderer flows.
+ */
 function pickString(value: unknown, fallback: string, options: { maxLength: number }): string {
   if (typeof value === 'string' && value.length > 0 && value.length <= options.maxLength) {
     return value;
@@ -87,6 +99,10 @@ function pickString(value: unknown, fallback: string, options: { maxLength: numb
   return fallback;
 }
 
+/**
+ * Nullable variant of {@link pickString}. `null` is treated as an explicit "disabled" signal and
+ * preserved; the same default-fallback semantics apply to all other invalid inputs.
+ */
 function pickStringOrNull(
   value: unknown,
   fallback: string | null,

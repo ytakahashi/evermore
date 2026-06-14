@@ -15,6 +15,14 @@ interface RegisterSettingsHandlersOptions {
   openInFileManager?: (filePath: string) => void;
 }
 
+/**
+ * Local plain-object check used instead of the shared `readObject` helper in `ipc/validation.ts`.
+ *
+ * Settings updates intentionally use forgiving normalization: malformed payloads or sections fall
+ * back to `{}` / defaults rather than throwing, so that IPC updates and hand-edited disk reloads
+ * behave consistently. The shared validation helpers throw on invalid input, which would make
+ * `SETTINGS_UPDATE` reject payloads that the disk-reload path would silently normalize.
+ */
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
