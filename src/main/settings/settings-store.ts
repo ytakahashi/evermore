@@ -54,6 +54,8 @@ type QuitConfirm = AppSettings['app']['quitConfirm'];
 
 const CURSOR_STYLES: readonly CursorStyle[] = ['block', 'bar', 'underline'];
 const QUIT_CONFIRM_VALUES: readonly QuitConfirm[] = ['always', 'never', 'running-only'];
+const MAX_SETTINGS_STRING_LENGTH = 4_096;
+const MAX_ACCELERATOR_LENGTH = 1_024;
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -78,11 +80,22 @@ function pickFiniteNumber<T extends number | undefined>(value: unknown, fallback
   return value;
 }
 
-function pickStringOrNull(value: unknown, fallback: string | null): string | null {
+function pickString(value: unknown, fallback: string, options: { maxLength: number }): string {
+  if (typeof value === 'string' && value.length > 0 && value.length <= options.maxLength) {
+    return value;
+  }
+  return fallback;
+}
+
+function pickStringOrNull(
+  value: unknown,
+  fallback: string | null,
+  options: { maxLength: number },
+): string | null {
   if (value === null) {
     return null;
   }
-  if (typeof value === 'string' && value.length > 0) {
+  if (typeof value === 'string' && value.length > 0 && value.length <= options.maxLength) {
     return value;
   }
   return fallback;
@@ -98,7 +111,11 @@ function pickKeybindings(value: unknown): Record<string, string> {
     // Unknown action ids (typos, removed actions) are dropped at the boundary so the resolved
     // settings only carry the closed `KeyboardShortcutActionId` union. Empty string is preserved
     // for known ids as the "explicitly unbound" signal so the default binding does not apply.
-    if (typeof accelerator === 'string' && isKeyboardShortcutActionId(actionId)) {
+    if (
+      typeof accelerator === 'string' &&
+      accelerator.length <= MAX_ACCELERATOR_LENGTH &&
+      isKeyboardShortcutActionId(actionId)
+    ) {
       result[actionId] = accelerator;
     }
   }
@@ -163,10 +180,9 @@ function readCurrentSettings(raw: unknown): AppSettings {
       100,
       Math.max(6, pickFiniteNumber(terminalRaw.fontSize, defaults.terminal.fontSize)),
     ),
-    fontFamily:
-      typeof terminalRaw.fontFamily === 'string' && terminalRaw.fontFamily.length > 0
-        ? terminalRaw.fontFamily
-        : defaults.terminal.fontFamily,
+    fontFamily: pickString(terminalRaw.fontFamily, defaults.terminal.fontFamily, {
+      maxLength: MAX_SETTINGS_STRING_LENGTH,
+    }),
     fontWeight: pickFontWeight(terminalRaw.fontWeight, defaults.terminal.fontWeight),
     fontWeightBold: pickFontWeight(terminalRaw.fontWeightBold, defaults.terminal.fontWeightBold),
     closePaneOnExit: pickBoolean(terminalRaw.closePaneOnExit, defaults.terminal.closePaneOnExit),
@@ -184,6 +200,7 @@ function readCurrentSettings(raw: unknown): AppSettings {
       activateAppHotkey: pickStringOrNull(
         shortcutsRaw.activateAppHotkey,
         defaults.shortcuts.activateAppHotkey,
+        { maxLength: MAX_SETTINGS_STRING_LENGTH },
       ),
       // Layer user overrides on top of defaults so default bindings apply unless explicitly
       // overridden. A user-provided empty string surfaces here as `""` and signals "explicitly
