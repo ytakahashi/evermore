@@ -28,6 +28,10 @@ Refer to [ARCHITECTURE.md](./ARCHITECTURE.md) for details.
 - Main-process capabilities should be exposed to the renderer only through preload `window.api`.
 - PTY processes are runtime-only state owned by the main process.
 - `cwd` is a PTY creation input. Do not recreate a running PTY just because a pane cwd prop changes.
+- Renderer-to-main IPC payloads must be accepted as `unknown` and structurally validated in the
+  handlers.
+- Handlers must reconstruct clean objects from validated fields only; do not cast or forward the raw
+  `unknown` payload object, ensuring unknown keys are ignored and never forwarded.
 
 ### Code Comments
 
