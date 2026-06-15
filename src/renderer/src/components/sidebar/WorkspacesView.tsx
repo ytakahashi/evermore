@@ -16,6 +16,7 @@ function formatPaneCount(count: number): string {
 interface PaneSummaryProps {
   info?: PaneRuntimeInfo;
   isActivePane: boolean;
+  isActiveTab: boolean;
   onClick: () => void;
   pane: Pane;
   paneIndex: number;
@@ -98,6 +99,7 @@ function getAgentIconAnimationClass(info: PaneRuntimeInfo): string {
 function PaneSummary({
   info,
   isActivePane,
+  isActiveTab,
   onClick,
   pane,
   paneIndex,
@@ -112,11 +114,16 @@ function PaneSummary({
 
   return (
     <div className="pl-6">
-      <div className="border-l border-border-subtle">
+      {/*
+        A vertical line representing the pane group under a tab.
+        The active tab is brighter than inactive tabs but the line for inactive panes
+        is still visible to maintain tab structure visibility.
+      */}
+      <div className={`border-l ${isActiveTab ? 'border-border-strong' : 'border-border'}`}>
         <button
           aria-current={isActivePane ? 'true' : undefined}
           className={`flex w-full min-w-0 items-start gap-1.5 rounded-md pl-3 pr-2 py-1 text-left text-sm ${
-            isActivePane ? 'bg-tab-active/80 text-foreground' : 'text-muted hover:bg-raised/40'
+            isActivePane ? 'bg-tab-active/90 text-foreground' : 'text-muted hover:bg-raised/40'
           }`}
           type="button"
           onClick={onClick}
@@ -544,6 +551,7 @@ export function WorkspacesView(): React.JSX.Element {
                                 key={pane.id}
                                 info={info}
                                 isActivePane={isActivePane}
+                                isActiveTab={isActiveTab}
                                 pane={pane}
                                 paneIndex={paneIndex}
                                 onClick={() => {

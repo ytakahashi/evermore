@@ -5,7 +5,7 @@
   --color-background: #020408; /* body → bg-background */
   --color-surface: #060b1a; /* app base color → bg-surface */
   --color-panel: #010101; /* sidebar, panel, tab bar → bg-panel */
-  --color-raised: #242424; /* hover, modal, popover → bg-raised */
+  --color-raised: #373737; /* hover, modal, popover → bg-raised */
   --color-terminal: #03060e; /* xterm.js background → bg-terminal */
 
   /* ── Foreground ── */
@@ -22,12 +22,12 @@
   --color-accent: #4d7bc9;
 
   /* ── Border ── */
-  --color-border: rgb(255 255 255 / 0.1);
+  --color-border: rgb(255 255 255 / 0.2);
   --color-border-subtle: rgb(255 255 255 / 0.06);
-  --color-border-strong: rgb(255 255 255 / 0.16);
-  --color-border-pane-active: rgba(from var(--color-brand) r g b / 0.3);
-  --color-tab-active: rgba(from var(--color-raised) r g b / 0.7);
-  --color-pane-inactive-overlay: rgb(255 255 255 / 0.08);
+  --color-border-strong: rgb(255 255 255 / 0.4);
+  --color-border-pane-active: rgba(from var(--color-brand) r g b / 0.5);
+  --color-tab-active: rgba(from var(--color-raised) r g b / 0.9);
+  --color-pane-inactive-overlay: rgb(255 255 255 / 0.15);
   --color-ring: #ff6ea0; /* focus ring */
 
   /* ── Status ── */
