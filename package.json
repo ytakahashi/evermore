@@ -1,7 +1,7 @@
 {
   "name": "evermore",
   "description": "A simple terminal workspace for developers.",
-  "version": "0.0.1",
+  "version": "1.0.0",
   "author": "ytakahashi",
   "dependencies": {
     "@electron-toolkit/preload": "3.0.2",
