@@ -1,3 +1,6 @@
+nodeLinker: hoisted
+shamefullyHoist: true
+ignoreScripts: false
 allowBuilds:
   electron: true
   electron-winstaller: false
