@@ -1,12 +1,13 @@
 import type { IDisposable, IMarker, Terminal } from '@xterm/xterm';
 import { decodeOsc633CommandLine } from '../../../../shared/shell-integration/osc633-decode';
+import {
+  createTerminalOutputFingerprint,
+  extractNormalizedTerminalOutput,
+  type TerminalBufferBoundary,
+  type TerminalOutputFingerprint,
+} from './command-output';
 
-export interface TerminalBufferBoundary {
-  /** Zero-based xterm buffer column captured with the marker. */
-  column: number;
-  /** Marker that tracks the boundary line through scrollback trim and reflow. */
-  marker: IMarker;
-}
+export type { TerminalBufferBoundary } from './command-output';
 
 interface PromptReadyState {
   kind: 'prompt-ready';
@@ -57,6 +58,8 @@ export interface TerminalCommandHistoryEntry {
   outputStart: TerminalBufferBoundary;
   /** Exclusive output buffer position captured at OSC 133;D. */
   outputEnd: TerminalBufferBoundary;
+  /** Compact completion-time identity of the normalized output; the output itself is not stored. */
+  outputFingerprint: TerminalOutputFingerprint;
   /** Whether OSC 133;D arrived at column zero, indicating newline-terminated output. */
   endsAtLineStart: boolean;
 }
@@ -244,12 +247,19 @@ export class TerminalCommandHistory {
         continue;
       }
 
+      const output = extractNormalizedTerminalOutput(this.terminal.buffer.normal, command);
+      if (output === null) {
+        disposeCommandMarkers(command);
+        continue;
+      }
+
       const entry: TerminalCommandHistoryEntry = {
         id: `terminal-command-${++nextCommandId}`,
         command: command.command,
         promptMarker: command.promptMarker,
         outputStart: command.outputStart,
         outputEnd: command.outputEnd,
+        outputFingerprint: createTerminalOutputFingerprint(output),
         endsAtLineStart: command.outputEnd.column === 0,
       };
       const stored: StoredCommand = {

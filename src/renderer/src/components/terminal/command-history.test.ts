@@ -1,4 +1,4 @@
-import type { IBuffer, IDisposable, IMarker, Terminal } from '@xterm/xterm';
+import type { IBuffer, IBufferLine, IDisposable, IMarker, Terminal } from '@xterm/xterm';
 import { describe, expect, it, vi } from 'vitest';
 import { encodeOsc633CommandLine } from '../../../../shared/shell-integration/osc633-encode';
 import { TerminalCommandHistory, type TerminalCommandHistoryEntry } from './command-history';
@@ -40,6 +40,25 @@ class MockMarker implements IMarker {
 }
 
 class MockTerminal {
+  private readonly emptyLine: IBufferLine = {
+    isWrapped: false,
+    length: 80,
+    getCell: () => undefined,
+    translateToString: () => '',
+  };
+  private readonly normalBuffer = {
+    type: 'normal' as const,
+    cursorX: 0,
+    cursorY: 0,
+    viewportY: 0,
+    baseY: 0,
+    length: 100,
+    getLine: (index: number): IBufferLine | undefined =>
+      index >= 0 && index < 100 ? this.emptyLine : undefined,
+    getNullCell: () => {
+      throw new Error('getNullCell is not used by command history');
+    },
+  };
   public readonly parser = {
     registerOscHandler: vi.fn(
       (ident: number, handler: (data: string) => boolean | Promise<boolean>) => {
@@ -49,10 +68,8 @@ class MockTerminal {
     ),
   };
   public readonly buffer = {
-    active: {
-      cursorX: 0,
-      type: 'normal' as 'alternate' | 'normal',
-    },
+    active: this.normalBuffer as IBuffer,
+    normal: this.normalBuffer as IBuffer,
     onBufferChange: (listener: (buffer: Pick<IBuffer, 'type'>) => void): IDisposable => {
       this.bufferChangeListener = listener;
       return this.trackDisposable();
@@ -83,12 +100,18 @@ class MockTerminal {
   }
 
   public setBuffer(type: 'alternate' | 'normal'): void {
-    this.buffer.active.type = type;
+    this.buffer.active = {
+      ...this.normalBuffer,
+      type,
+    };
     this.bufferChangeListener?.({ type });
   }
 
   public setCursorX(cursorX: number): void {
-    this.buffer.active.cursorX = cursorX;
+    this.normalBuffer.cursorX = cursorX;
+    if (this.buffer.active.type === 'normal') {
+      this.buffer.active = this.normalBuffer;
+    }
   }
 
   private trackDisposable(): MockDisposable {
@@ -136,6 +159,10 @@ describe('TerminalCommandHistory', () => {
     expect(entries.map((entry) => entry.command)).toEqual(['echo one', 'printf two']);
     expect(entries[0]?.endsAtLineStart).toBe(true);
     expect(entries[1]?.endsAtLineStart).toBe(false);
+    expect(entries[0]?.outputFingerprint).toEqual({
+      length: 0,
+      hash: '811c9dc5',
+    });
     expect(entries[0]?.id).not.toBe(entries[1]?.id);
     expect(onCommandCompleted).toHaveBeenCalledTimes(2);
   });
