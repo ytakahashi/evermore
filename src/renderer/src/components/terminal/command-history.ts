@@ -60,6 +60,8 @@ export interface TerminalCommandHistoryEntry {
   outputEnd: TerminalBufferBoundary;
   /** Compact completion-time identity of the normalized output; the output itself is not stored. */
   outputFingerprint: TerminalOutputFingerprint;
+  /** Terminal width used to invalidate non-newline-terminated output after reflow. */
+  completionCols: number;
   /** Whether OSC 133;D arrived at column zero, indicating newline-terminated output. */
   endsAtLineStart: boolean;
 }
@@ -260,6 +262,7 @@ export class TerminalCommandHistory {
         outputStart: command.outputStart,
         outputEnd: command.outputEnd,
         outputFingerprint: createTerminalOutputFingerprint(output),
+        completionCols: this.terminal.cols,
         endsAtLineStart: command.outputEnd.column === 0,
       };
       const stored: StoredCommand = {

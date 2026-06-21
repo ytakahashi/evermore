@@ -40,6 +40,7 @@ class MockMarker implements IMarker {
 }
 
 class MockTerminal {
+  public readonly cols = 80;
   private readonly emptyLine: IBufferLine = {
     isWrapped: false,
     length: 80,
@@ -163,6 +164,7 @@ describe('TerminalCommandHistory', () => {
       length: 0,
       hash: '811c9dc5',
     });
+    expect(entries[0]?.completionCols).toBe(80);
     expect(entries[0]?.id).not.toBe(entries[1]?.id);
     expect(onCommandCompleted).toHaveBeenCalledTimes(2);
   });
