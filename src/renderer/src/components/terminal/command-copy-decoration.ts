@@ -54,7 +54,7 @@ class CommandCopyDecorationController implements IDisposable {
   private readonly onDisposed: (() => void) | undefined;
   private readonly renderDisposable: IDisposable;
   private readonly decorationDisposeDisposable: IDisposable;
-  private readonly resizeDisposable: IDisposable;
+  private readonly resizeDisposable: IDisposable | null;
   private button: HTMLButtonElement | null = null;
   private feedbackTimer: ReturnType<typeof globalThis.setTimeout> | null = null;
   private copyInProgress = false;
@@ -77,11 +77,15 @@ class CommandCopyDecorationController implements IDisposable {
     this.decorationDisposeDisposable = decoration.onDispose(() => {
       this.disposeOwnedResources();
     });
-    this.resizeDisposable = this.terminal.onResize(({ cols }) => {
-      if (!this.entry.endsAtLineStart && cols !== this.entry.completionCols) {
-        this.dispose();
-      }
-    });
+    // Only non-newline-terminated output loses its end column when reflow moves the cursor line.
+    // Newline-terminated commands stay reconstructible across resizes, so they need no listener.
+    this.resizeDisposable = this.entry.endsAtLineStart
+      ? null
+      : this.terminal.onResize(({ cols }) => {
+          if (cols !== this.entry.completionCols) {
+            this.dispose();
+          }
+        });
   }
 
   public dispose(): void {
@@ -194,7 +198,7 @@ class CommandCopyDecorationController implements IDisposable {
     this.clearFeedbackTimer();
     this.renderDisposable.dispose();
     this.decorationDisposeDisposable.dispose();
-    this.resizeDisposable.dispose();
+    this.resizeDisposable?.dispose();
     this.removeButton();
     this.onDisposed?.();
   }

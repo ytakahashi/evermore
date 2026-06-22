@@ -397,7 +397,7 @@ describe('createTerminalCommandCopyDecoration', () => {
   });
 
   it('disposes non-newline-terminated output decoration after a column resize', () => {
-    // Given: a command completed mid-line, where Phase 0 found reflow cannot preserve the column.
+    // Given: a command completed mid-line, where reflow cannot preserve the recorded end column.
     const fixture = createTerminalFixture();
     const entry = {
       ...createEntry(fixture.decoration.marker),

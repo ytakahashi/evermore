@@ -214,6 +214,8 @@ export function useTerminal(options: UseTerminalOptions): UseTerminalResult {
     const commandHistory = new TerminalCommandHistory({
       terminal,
       onCommandCompleted: (entry: TerminalCommandHistoryEntry) => {
+        // Entry ids are unique, so this only guards against an unexpected duplicate completion for
+        // the same id leaking a previous decoration.
         commandDecorations.get(entry.id)?.dispose();
         let decoration: IDisposable | null = null;
         decoration = createTerminalCommandCopyDecoration({
