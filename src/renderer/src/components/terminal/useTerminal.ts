@@ -2,10 +2,12 @@ import { useCallback, useEffect, useRef, type MutableRefObject } from 'react';
 import { FitAddon } from '@xterm/addon-fit';
 import { Unicode11Addon } from '@xterm/addon-unicode11';
 import { WebLinksAddon } from '@xterm/addon-web-links';
-import { Terminal } from '@xterm/xterm';
+import { Terminal, type IDisposable } from '@xterm/xterm';
 import { useResizeObserver } from '../../hooks/useResizeObserver';
 import { DEFAULT_APP_SETTINGS } from '../../../../shared/settings-defaults';
 import { useSettingsStore } from '../../stores/settingsStore';
+import { createTerminalCommandCopyDecoration } from './command-copy-decoration';
+import { TerminalCommandHistory, type TerminalCommandHistoryEntry } from './command-history';
 import { terminalTheme } from './theme';
 
 const BACKSPACE = '\x7f';
@@ -208,6 +210,30 @@ export function useTerminal(options: UseTerminalOptions): UseTerminalResult {
     }
 
     let disposed = false;
+    const commandDecorations = new Map<string, IDisposable>();
+    const commandHistory = new TerminalCommandHistory({
+      terminal,
+      onCommandCompleted: (entry: TerminalCommandHistoryEntry) => {
+        commandDecorations.get(entry.id)?.dispose();
+        let decoration: IDisposable | null = null;
+        decoration = createTerminalCommandCopyDecoration({
+          terminal,
+          entry,
+          onDisposed: () => {
+            if (commandDecorations.get(entry.id) === decoration) {
+              commandDecorations.delete(entry.id);
+            }
+          },
+        });
+        if (decoration) {
+          commandDecorations.set(entry.id, decoration);
+        }
+      },
+      onCommandRemoved: (entry: TerminalCommandHistoryEntry) => {
+        commandDecorations.get(entry.id)?.dispose();
+        commandDecorations.delete(entry.id);
+      },
+    });
     const dataCleanup = ptyApi.onData((id, data) => {
       if (id === ptyIdRef.current) {
         terminal.write(data);
@@ -281,6 +307,11 @@ export function useTerminal(options: UseTerminalOptions): UseTerminalResult {
       inputDisposable.dispose();
       dataCleanup();
       exitCleanup();
+      for (const decoration of commandDecorations.values()) {
+        decoration.dispose();
+      }
+      commandDecorations.clear();
+      commandHistory.dispose();
       terminal.dispose();
       terminalRef.current = null;
       fitAddonRef.current = null;

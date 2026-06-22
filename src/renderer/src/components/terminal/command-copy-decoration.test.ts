@@ -263,6 +263,65 @@ describe('createTerminalCommandCopyDecoration', () => {
     disposable?.dispose();
   });
 
+  it('preserves the browser receiver when scheduling and clearing success feedback', async () => {
+    // Given: Chromium-like timers throw when called without the global Window receiver.
+    const originalSetTimeout = globalThis.setTimeout;
+    const originalClearTimeout = globalThis.clearTimeout;
+    const timer = 123 as unknown as ReturnType<typeof globalThis.setTimeout>;
+    const setTimeoutSpy = vi.fn(function (
+      this: unknown,
+      _callback: TimerHandler,
+      _delay?: number,
+    ): ReturnType<typeof globalThis.setTimeout> {
+      if (this !== globalThis) {
+        throw new TypeError('Illegal invocation');
+      }
+      return timer;
+    });
+    const clearTimeoutSpy = vi.fn(function (this: unknown): void {
+      if (this !== globalThis) {
+        throw new TypeError('Illegal invocation');
+      }
+    });
+    Object.defineProperty(globalThis, 'setTimeout', {
+      configurable: true,
+      value: setTimeoutSpy,
+    });
+    Object.defineProperty(globalThis, 'clearTimeout', {
+      configurable: true,
+      value: clearTimeoutSpy,
+    });
+    const fixture = createTerminalFixture();
+    const disposable = createTerminalCommandCopyDecoration({
+      terminal: fixture.terminal,
+      entry: createEntry(fixture.decoration.marker),
+      writeClipboardText: () => Promise.resolve(),
+    });
+    const button = renderButton(fixture.decoration);
+
+    try {
+      // When: clipboard writing succeeds and schedules the temporary check state.
+      button.click();
+      await Promise.resolve();
+      await Promise.resolve();
+
+      // Then: timer scheduling succeeds instead of converting the copied state to an error.
+      expect(button.dataset.state).toBe('copied');
+      expect(setTimeoutSpy).toHaveBeenCalledOnce();
+      disposable?.dispose();
+      expect(clearTimeoutSpy).toHaveBeenCalledWith(timer);
+    } finally {
+      Object.defineProperty(globalThis, 'setTimeout', {
+        configurable: true,
+        value: originalSetTimeout,
+      });
+      Object.defineProperty(globalThis, 'clearTimeout', {
+        configurable: true,
+        value: originalClearTimeout,
+      });
+    }
+  });
+
   it('shows an error without writing when the buffer no longer matches the fingerprint', () => {
     // Given: the entry fingerprint refers to different completion-time output.
     const fixture = createTerminalFixture('changed');
@@ -344,9 +403,11 @@ describe('createTerminalCommandCopyDecoration', () => {
       ...createEntry(fixture.decoration.marker),
       endsAtLineStart: false,
     };
+    const onDisposed = vi.fn();
     createTerminalCommandCopyDecoration({
       terminal: fixture.terminal,
       entry,
+      onDisposed,
     });
     const button = renderButton(fixture.decoration);
 
@@ -356,6 +417,7 @@ describe('createTerminalCommandCopyDecoration', () => {
     // Then: the potentially inaccurate command is no longer offered for copying.
     expect(fixture.decoration.isDisposed).toBe(true);
     expect(button.parentElement).toBeNull();
+    expect(onDisposed).toHaveBeenCalledOnce();
   });
 
   it('keeps newline-terminated output decoration across column resizes', () => {

@@ -5,13 +5,19 @@ import type { TerminalCommandHistoryEntry } from './command-history';
 const COPY_FEEDBACK_DURATION_MS = 1500;
 
 type CopyState = 'copied' | 'error' | 'idle';
+type SetTimeout = (
+  callback: () => void,
+  delayMs: number,
+) => ReturnType<typeof globalThis.setTimeout>;
+type ClearTimeout = (timer: ReturnType<typeof globalThis.setTimeout>) => void;
 
 export interface TerminalCommandCopyDecorationOptions {
   terminal: Terminal;
   entry: TerminalCommandHistoryEntry;
   writeClipboardText?: (text: string) => Promise<void>;
-  setTimeoutFn?: typeof globalThis.setTimeout;
-  clearTimeoutFn?: typeof globalThis.clearTimeout;
+  setTimeoutFn?: SetTimeout;
+  clearTimeoutFn?: ClearTimeout;
+  onDisposed?: () => void;
 }
 
 /**
@@ -43,8 +49,9 @@ class CommandCopyDecorationController implements IDisposable {
   private readonly entry: TerminalCommandHistoryEntry;
   private readonly decoration: IDecoration;
   private readonly writeClipboardText: (text: string) => Promise<void>;
-  private readonly setTimeoutFn: typeof globalThis.setTimeout;
-  private readonly clearTimeoutFn: typeof globalThis.clearTimeout;
+  private readonly setTimeoutFn: SetTimeout;
+  private readonly clearTimeoutFn: ClearTimeout;
+  private readonly onDisposed: (() => void) | undefined;
   private readonly renderDisposable: IDisposable;
   private readonly decorationDisposeDisposable: IDisposable;
   private readonly resizeDisposable: IDisposable;
@@ -58,8 +65,12 @@ class CommandCopyDecorationController implements IDisposable {
     this.entry = options.entry;
     this.decoration = decoration;
     this.writeClipboardText = options.writeClipboardText ?? writeClipboardText;
-    this.setTimeoutFn = options.setTimeoutFn ?? globalThis.setTimeout;
-    this.clearTimeoutFn = options.clearTimeoutFn ?? globalThis.clearTimeout;
+    // Chromium timer functions require the Window receiver. Retaining the raw functions and later
+    // invoking them as controller methods throws `Illegal invocation` after clipboard success.
+    this.setTimeoutFn =
+      options.setTimeoutFn ?? ((callback, delayMs) => globalThis.setTimeout(callback, delayMs));
+    this.clearTimeoutFn = options.clearTimeoutFn ?? ((timer) => globalThis.clearTimeout(timer));
+    this.onDisposed = options.onDisposed;
     this.renderDisposable = decoration.onRender((element) => {
       this.renderButton(element);
     });
@@ -185,6 +196,7 @@ class CommandCopyDecorationController implements IDisposable {
     this.decorationDisposeDisposable.dispose();
     this.resizeDisposable.dispose();
     this.removeButton();
+    this.onDisposed?.();
   }
 
   private removeButton(): void {

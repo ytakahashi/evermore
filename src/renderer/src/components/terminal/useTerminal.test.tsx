@@ -7,6 +7,38 @@ import type { AppSettings } from '../../../../shared/types';
 import { useSettingsStore } from '../../stores/settingsStore';
 import { useTerminal } from './useTerminal';
 
+const commandIntegrationMock = vi.hoisted(() => {
+  interface HistoryOptions {
+    terminal: unknown;
+    onCommandCompleted?: (entry: unknown) => void;
+    onCommandRemoved?: (entry: unknown) => void;
+  }
+
+  class MockTerminalCommandHistory {
+    public readonly dispose = vi.fn();
+    public readonly options: HistoryOptions;
+
+    public constructor(options: HistoryOptions) {
+      this.options = options;
+      commandIntegrationMock.historyInstances.push(this);
+    }
+
+    public emitCompleted(entry: unknown): void {
+      this.options.onCommandCompleted?.(entry);
+    }
+
+    public emitRemoved(entry: unknown): void {
+      this.options.onCommandRemoved?.(entry);
+    }
+  }
+
+  return {
+    historyInstances: [] as MockTerminalCommandHistory[],
+    MockTerminalCommandHistory,
+    createDecoration: vi.fn(),
+  };
+});
+
 const xtermMock = vi.hoisted(() => {
   const terminalInstances: MockTerminal[] = [];
   const fitAddonInstances: MockFitAddon[] = [];
@@ -95,6 +127,14 @@ vi.mock('@xterm/addon-unicode11', () => ({
   Unicode11Addon: class MockUnicode11Addon {},
 }));
 
+vi.mock('./command-history', () => ({
+  TerminalCommandHistory: commandIntegrationMock.MockTerminalCommandHistory,
+}));
+
+vi.mock('./command-copy-decoration', () => ({
+  createTerminalCommandCopyDecoration: commandIntegrationMock.createDecoration,
+}));
+
 interface PtyApiMock {
   create: ReturnType<typeof vi.fn<(options: PtyCreateRequest) => Promise<string>>>;
   write: ReturnType<typeof vi.fn<(id: string, data: string) => Promise<void>>>;
@@ -160,6 +200,8 @@ describe('useTerminal', () => {
     resizeObserverCallback = null;
     xtermMock.terminalInstances.length = 0;
     xtermMock.fitAddonInstances.length = 0;
+    commandIntegrationMock.historyInstances.length = 0;
+    commandIntegrationMock.createDecoration.mockReset();
     useSettingsStore.setState({
       settings: structuredClone(DEFAULT_APP_SETTINGS),
       isLoading: false,
@@ -373,6 +415,69 @@ describe('useTerminal', () => {
     expect(clipboardWriteText).toHaveBeenCalledOnce();
   });
 
+  it('creates command history before forwarding PTY output to xterm', async () => {
+    // Given: a terminal pane is mounting with the PTY data bridge available.
+    render(<TestTerminal />);
+    await waitFor(() => {
+      expect(dataListener).not.toBeNull();
+    });
+
+    // When: main forwards the first PTY output chunk.
+    dataListener?.('pty-1', 'first output');
+
+    // Then: one history controller already observes the same xterm instance and raw output is
+    // still forwarded unchanged.
+    expect(commandIntegrationMock.historyInstances).toHaveLength(1);
+    expect(commandIntegrationMock.historyInstances[0]?.options.terminal).toBe(
+      xtermMock.terminalInstances[0],
+    );
+    expect(xtermMock.terminalInstances[0]?.write).toHaveBeenCalledWith('first output');
+  });
+
+  it('creates and removes one decoration for each completed command entry', async () => {
+    // Given: a mounted terminal with a command history controller.
+    const decorationDisposable = { dispose: vi.fn() };
+    commandIntegrationMock.createDecoration.mockReturnValue(decorationDisposable);
+    render(<TestTerminal />);
+    await waitFor(() => {
+      expect(commandIntegrationMock.historyInstances).toHaveLength(1);
+    });
+    const history = commandIntegrationMock.historyInstances[0];
+    const entry = { id: 'terminal-command-1' };
+
+    // When: history publishes and later removes a completed command.
+    history?.emitCompleted(entry);
+    history?.emitRemoved(entry);
+
+    // Then: useTerminal owns the matching decoration lifecycle.
+    expect(commandIntegrationMock.createDecoration).toHaveBeenCalledWith({
+      terminal: xtermMock.terminalInstances[0],
+      entry,
+      onDisposed: expect.any(Function),
+    });
+    expect(decorationDisposable.dispose).toHaveBeenCalledOnce();
+  });
+
+  it('keeps command history and decorations after PTY exit', async () => {
+    // Given: a completed command has a live decoration.
+    const decorationDisposable = { dispose: vi.fn() };
+    commandIntegrationMock.createDecoration.mockReturnValue(decorationDisposable);
+    render(<TestTerminal />);
+    await waitFor(() => {
+      expect(commandIntegrationMock.historyInstances).toHaveLength(1);
+      expect(exitListener).not.toBeNull();
+    });
+    const history = commandIntegrationMock.historyInstances[0];
+    history?.emitCompleted({ id: 'terminal-command-1' });
+
+    // When: the backing PTY exits but the pane remains mounted.
+    exitListener?.('pty-1', 0);
+
+    // Then: xterm history remains available until the pane itself is closed.
+    expect(history?.dispose).not.toHaveBeenCalled();
+    expect(decorationDisposable.dispose).not.toHaveBeenCalled();
+  });
+
   it('reports PTY id lifecycle changes', async () => {
     // Given: a terminal pane receives a PTY id callback.
     const onPtyIdChange = vi.fn<(ptyId: string | null) => void>();
@@ -502,7 +607,32 @@ describe('useTerminal', () => {
     expect(xtermMock.terminalInstances[0]?.inputDisposable.dispose).toHaveBeenCalledOnce();
     expect(dataCleanup).toHaveBeenCalledOnce();
     expect(exitCleanup).toHaveBeenCalledOnce();
+    expect(commandIntegrationMock.historyInstances[0]?.dispose).toHaveBeenCalledOnce();
     expect(xtermMock.terminalInstances[0]?.dispose).toHaveBeenCalledOnce();
+  });
+
+  it('disposes all remaining command decorations before terminal cleanup', async () => {
+    // Given: two completed commands still have live decorations.
+    const decorationA = { dispose: vi.fn() };
+    const decorationB = { dispose: vi.fn() };
+    commandIntegrationMock.createDecoration
+      .mockReturnValueOnce(decorationA)
+      .mockReturnValueOnce(decorationB);
+    const { unmount } = render(<TestTerminal />);
+    await waitFor(() => {
+      expect(commandIntegrationMock.historyInstances).toHaveLength(1);
+    });
+    const history = commandIntegrationMock.historyInstances[0];
+    history?.emitCompleted({ id: 'terminal-command-a' });
+    history?.emitCompleted({ id: 'terminal-command-b' });
+
+    // When: the owning React terminal unmounts.
+    unmount();
+
+    // Then: every decoration and the history controller are released exactly once.
+    expect(decorationA.dispose).toHaveBeenCalledOnce();
+    expect(decorationB.dispose).toHaveBeenCalledOnce();
+    expect(history?.dispose).toHaveBeenCalledOnce();
   });
 
   it('clears the PTY id when the process exits', async () => {
