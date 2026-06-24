@@ -229,6 +229,59 @@ function ensureGloballyUniquePaneIds(
 }
 
 /**
+ * Guarantees that every `tab.id` is unique across all persisted workspaces.
+ *
+ * The renderer mounts every tab of every workspace in a single list keyed by `tab.id` so that a tab
+ * keeps its React identity — and therefore its live terminals — when it moves between workspaces
+ * (see `MainTerminalArea`). Duplicate tab ids across workspaces would collide as React keys, so they
+ * are reassigned here, mirroring the pane-id guarantee. Tab ids are not referenced by layouts, so
+ * only the owning workspace's `activeTabId` needs rewriting alongside the id. The first occurrence
+ * keeps its id; later collisions (cross-workspace, or a duplicate within one workspace) get a fresh
+ * id.
+ */
+function ensureGloballyUniqueTabIds(workspaces: Workspace[], createId: () => string): Workspace[] {
+  const seenTabIds = new Set<string>();
+
+  return workspaces.map((workspace) => {
+    // Assign ids per tab occurrence (not via an old-id keyed map) so that a tab id duplicated within
+    // one workspace yields two distinct ids rather than collapsing both onto the same replacement.
+    const usedInWorkspace = new Set<string>();
+    const firstFinalIdByOriginalId = new Map<string, string>();
+    let changed = false;
+
+    const tabs = workspace.tabs.map((tab) => {
+      let finalId = tab.id;
+      while (seenTabIds.has(finalId) || usedInWorkspace.has(finalId)) {
+        finalId = createId();
+      }
+      usedInWorkspace.add(finalId);
+      seenTabIds.add(finalId);
+      if (!firstFinalIdByOriginalId.has(tab.id)) {
+        firstFinalIdByOriginalId.set(tab.id, finalId);
+      }
+      if (finalId === tab.id) {
+        return tab;
+      }
+      changed = true;
+      return { ...tab, id: finalId };
+    });
+
+    if (!changed) {
+      return workspace;
+    }
+
+    // `activeTabId` is ambiguous if it pointed at a duplicated id; resolve it to the first occurrence.
+    return {
+      ...workspace,
+      tabs,
+      activeTabId: workspace.activeTabId
+        ? (firstFinalIdByOriginalId.get(workspace.activeTabId) ?? workspace.activeTabId)
+        : workspace.activeTabId,
+    };
+  });
+}
+
+/**
  * Persists workspace layouts and creates the initial single-workspace state for first launch.
  */
 export class WorkspaceStore {
@@ -337,10 +390,9 @@ export class WorkspaceStore {
   private normalizeWorkspacesForStorage(
     workspaces: Array<Workspace | LegacyWorkspace>,
   ): Workspace[] {
-    return ensureGloballyUniquePaneIds(
-      workspaces.map(sanitizeWorkspace),
+    return ensureGloballyUniqueTabIds(
+      ensureGloballyUniquePaneIds(workspaces.map(sanitizeWorkspace), this.createId, this.logger),
       this.createId,
-      this.logger,
     );
   }
 

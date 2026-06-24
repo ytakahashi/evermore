@@ -319,7 +319,7 @@ describe('WorkspaceStore', () => {
     expect(storage.workspaces).toEqual(workspaces);
   });
 
-  describe('global pane id uniqueness', () => {
+  describe('global id uniqueness', () => {
     function workspaceWithPane(id: string, paneId: string, cwd: string): Workspace {
       return {
         id,
@@ -583,6 +583,75 @@ describe('WorkspaceStore', () => {
         { id: 'synthesized-pane', cwd: '/Users/tester/dup' },
       ]);
       expect(logger.warn).toHaveBeenCalledOnce();
+    });
+
+    it('remaps a tab id that collides across workspaces and updates activeTabId', () => {
+      // Given: a second workspace reuses the first workspace's tab id.
+      const first = workspaceWithPane('workspace-1', 'pane-1', '/Users/tester/one');
+      const second: Workspace = {
+        ...workspaceWithPane('workspace-2', 'pane-2', '/Users/tester/two'),
+        tabs: [
+          {
+            id: 'workspace-1-tab',
+            name: 'zsh',
+            layout: { type: 'leaf', paneId: 'pane-2' },
+            activePaneId: 'pane-2',
+          },
+        ],
+        activeTabId: 'workspace-1-tab',
+      };
+      const { store: seededStore, storage: seededStorage } = buildStore(
+        [first, second],
+        ['tab-unique'],
+      );
+
+      // When: callers load the workspace list.
+      const workspaces = seededStore.list();
+
+      // Then: the first keeps the tab id, the second is remapped, and its activeTabId follows.
+      expect(workspaces[0]?.tabs[0]?.id).toBe('workspace-1-tab');
+      expect(workspaces[1]?.tabs[0]?.id).toBe('tab-unique');
+      expect(workspaces[1]?.activeTabId).toBe('tab-unique');
+      expect(seededStorage.workspaces).toEqual(workspaces);
+    });
+
+    it('reassigns a tab id duplicated within a single workspace', () => {
+      // Given: a workspace whose two (pane-consistent) tabs share a tab id.
+      const corrupt: Workspace = {
+        id: 'workspace-1',
+        name: 'workspace-1',
+        rootPath: '/Users/tester',
+        tabs: [
+          {
+            id: 'dup-tab',
+            name: 'first',
+            layout: { type: 'leaf', paneId: 'pane-1' },
+            activePaneId: 'pane-1',
+          },
+          {
+            id: 'dup-tab',
+            name: 'second',
+            layout: { type: 'leaf', paneId: 'pane-2' },
+            activePaneId: 'pane-2',
+          },
+        ],
+        panes: [
+          { id: 'pane-1', cwd: '/Users/tester' },
+          { id: 'pane-2', cwd: '/Users/tester' },
+        ],
+        activeTabId: 'dup-tab',
+        createdAt: now,
+        updatedAt: now,
+      };
+      const { store: seededStore } = buildStore([corrupt], ['tab-2-unique']);
+
+      // When: callers load the workspace list.
+      const workspaces = seededStore.list();
+
+      // Then: the first occurrence keeps the id, the duplicate gets a distinct id, and the ambiguous
+      // activeTabId resolves to the first occurrence.
+      expect(workspaces[0]?.tabs.map((tab) => tab.id)).toEqual(['dup-tab', 'tab-2-unique']);
+      expect(workspaces[0]?.activeTabId).toBe('dup-tab');
     });
   });
 });

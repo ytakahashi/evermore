@@ -61,12 +61,10 @@ export interface WorkspaceStoreState {
    * source workspace (the "at least one tab" invariant mirrors {@link closeWorkspaceTab}). The
    * source's active tab advances by the same rule as a tab close, and both workspaces are persisted.
    *
-   * The moved panes keep their runtime `ptyId` on purpose: it is the re-attach key for the planned
-   * session-handover. Today the shell still restarts — every workspace is mounted under its own
-   * subtree in `MainTerminalArea`, so React unmounts and remounts the tab's terminals across the
-   * move, which disposes the old PTY and creates a new one, overwriting the carried id. Making the
-   * handover real therefore requires suppressing dispose-on-unmount and re-attaching on remount, not
-   * just retaining this field here.
+   * The moved panes keep their runtime `ptyId` on purpose. `MainTerminalArea` mounts every tab in a
+   * single list keyed by `tab.id`, so a moved tab keeps its React identity and its terminals are not
+   * unmounted — the live PTY survives the move. Carrying `ptyId` here keeps the moved pane in sync
+   * with that still-running terminal; dropping it would desync the pane from its live PTY.
    */
   moveTabToWorkspace: (sourceWorkspaceId: string, tabId: string, targetWorkspaceId: string) => void;
   setActivePane: (paneId: string) => void;
@@ -965,8 +963,8 @@ export function createWorkspaceStore(
         const movingPanes = sourceWorkspace.panes
           .filter((pane) => movingPaneIds.has(pane.id))
           .map((pane) => ({
-            // Spread keeps runtime fields (`ptyId` / `initialCommand`); the `ptyId` is retained as
-            // the future session-handover re-attach key. See `moveTabToWorkspace`'s JSDoc.
+            // Spread keeps runtime fields (`ptyId` / `initialCommand`); the `ptyId` must stay so the
+            // moved pane keeps matching its still-running terminal. See `moveTabToWorkspace`'s JSDoc.
             ...pane,
             id: paneIdByOldId.get(pane.id) ?? pane.id,
           }));
