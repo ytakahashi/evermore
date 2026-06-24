@@ -5,7 +5,7 @@ import type { PtyCreateRequest } from '../../../../shared/api-types';
 import { DEFAULT_APP_SETTINGS } from '../../../../shared/settings-defaults';
 import type { AppSettings } from '../../../../shared/types';
 import { useSettingsStore } from '../../stores/settingsStore';
-import { useTerminal } from './useTerminal';
+import { useTerminal, type PtyIdChangeReason } from './useTerminal';
 
 const commandIntegrationMock = vi.hoisted(() => {
   interface HistoryOptions {
@@ -148,7 +148,7 @@ interface TestTerminalProps {
   cwd?: string;
   initialCommand?: string;
   isActive?: boolean;
-  onPtyIdChange?: (ptyId: string | null) => void;
+  onPtyIdChange?: (ptyId: string | null, reason: PtyIdChangeReason) => void;
   paneId?: string;
 }
 
@@ -480,17 +480,17 @@ describe('useTerminal', () => {
 
   it('reports PTY id lifecycle changes', async () => {
     // Given: a terminal pane receives a PTY id callback.
-    const onPtyIdChange = vi.fn<(ptyId: string | null) => void>();
+    const onPtyIdChange = vi.fn<(ptyId: string | null, reason: PtyIdChangeReason) => void>();
     const { unmount } = render(<TestTerminal onPtyIdChange={onPtyIdChange} />);
 
     // When: the PTY is created and then the pane unmounts.
     await waitFor(() => {
-      expect(onPtyIdChange).toHaveBeenCalledWith('pty-1');
+      expect(onPtyIdChange).toHaveBeenCalledWith('pty-1', 'created');
     });
     unmount();
 
-    // Then: the owning pane can clear its runtime id.
-    expect(onPtyIdChange).toHaveBeenCalledWith(null);
+    // Then: the owning pane can clear its runtime id without treating unmount as process exit.
+    expect(onPtyIdChange).toHaveBeenCalledWith(null, 'unmount');
   });
 
   it('writes the initial command once after PTY creation', async () => {
@@ -637,17 +637,17 @@ describe('useTerminal', () => {
 
   it('clears the PTY id when the process exits', async () => {
     // Given: a mounted terminal with an active PTY id.
-    const onPtyIdChange = vi.fn<(ptyId: string | null) => void>();
+    const onPtyIdChange = vi.fn<(ptyId: string | null, reason: PtyIdChangeReason) => void>();
     render(<TestTerminal onPtyIdChange={onPtyIdChange} />);
     await waitFor(() => {
-      expect(onPtyIdChange).toHaveBeenCalledWith('pty-1');
+      expect(onPtyIdChange).toHaveBeenCalledWith('pty-1', 'created');
     });
 
     // When: main reports process exit.
     exitListener?.('pty-1', 0);
 
     // Then: the pane runtime id is cleared.
-    expect(onPtyIdChange).toHaveBeenCalledWith(null);
+    expect(onPtyIdChange).toHaveBeenCalledWith(null, 'exit');
   });
 
   it('writes PTY output to xterm only for the active PTY id', async () => {

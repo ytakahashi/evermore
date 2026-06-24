@@ -41,6 +41,7 @@ describe('TabBar', () => {
       value: {
         workspace: {
           update: workspaceUpdate,
+          setActiveWorkspaceId: vi.fn(() => Promise.resolve()),
         },
       } as unknown as Window['api'],
     });
@@ -224,5 +225,97 @@ describe('TabBar', () => {
     // Then: the rename is discarded and the original name is preserved.
     expect(screen.getByRole('button', { name: 'zsh' })).toBeInTheDocument();
     expect(workspaceUpdate).not.toHaveBeenCalled();
+  });
+
+  it('does not open the right-click menu when no move command is actionable', () => {
+    // Given: the only workspace has a single tab, so every move command would be disabled.
+    render(<TabBar />);
+
+    // When: the lone tab is right-clicked.
+    fireEvent.contextMenu(screen.getByRole('button', { name: 'zsh' }));
+
+    // Then: no dead, all-disabled menu is shown.
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+  });
+
+  it('reorders a tab from its right-click menu', () => {
+    // Given: the workspace has two tabs and the first is right-clicked.
+    useWorkspaceStore.setState({
+      workspaces: [
+        {
+          ...workspace,
+          tabs: [
+            workspace.tabs[0],
+            {
+              id: 'tab-2',
+              name: 'build',
+              layout: { type: 'leaf', paneId: 'pane-2' },
+              activePaneId: 'pane-2',
+            },
+          ],
+          panes: [workspace.panes[0], { id: 'pane-2', cwd: '/Users/tester' }],
+        },
+      ],
+    });
+    render(<TabBar />);
+    fireEvent.contextMenu(screen.getByRole('button', { name: 'zsh' }));
+
+    // When: "Move right" is chosen.
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Move right' }));
+
+    // Then: the first tab moves after the second and the menu closes.
+    expect(useWorkspaceStore.getState().workspaces[0]?.tabs.map((tab) => tab.id)).toEqual([
+      'tab-2',
+      'tab-1',
+    ]);
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+  });
+
+  it('moves a tab to another workspace from its right-click menu', () => {
+    // Given: a two-tab workspace plus a second workspace to receive the tab.
+    useWorkspaceStore.setState({
+      workspaces: [
+        {
+          ...workspace,
+          tabs: [
+            workspace.tabs[0],
+            {
+              id: 'tab-2',
+              name: 'build',
+              layout: { type: 'leaf', paneId: 'pane-2' },
+              activePaneId: 'pane-2',
+            },
+          ],
+          panes: [workspace.panes[0], { id: 'pane-2', cwd: '/Users/tester' }],
+        },
+        {
+          ...workspace,
+          id: 'workspace-2',
+          name: 'Project',
+          tabs: [
+            {
+              id: 'tab-3',
+              name: 'main',
+              layout: { type: 'leaf', paneId: 'pane-3' },
+              activePaneId: 'pane-3',
+            },
+          ],
+          panes: [{ id: 'pane-3', cwd: '/Users/tester' }],
+          activeTabId: 'tab-3',
+        },
+      ],
+    });
+    render(<TabBar />);
+    fireEvent.contextMenu(screen.getByRole('button', { name: 'zsh' }));
+
+    // When: the destination workspace is chosen from the menu.
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Project' }));
+
+    // Then: the tab leaves the active workspace and arrives in the destination.
+    const [source, destination] = useWorkspaceStore.getState().workspaces;
+    expect(source.tabs.map((tab) => tab.id)).toEqual(['tab-2']);
+    expect(destination.tabs.map((tab) => tab.id)).toEqual(['tab-3', 'tab-1']);
+    expect(destination.activeTabId).toBe('tab-1');
+    expect(useWorkspaceStore.getState().activeWorkspaceId).toBe('workspace-2');
   });
 });

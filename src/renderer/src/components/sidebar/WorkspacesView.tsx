@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
+import { useEffect, useRef, useState, type KeyboardEvent, type MouseEvent } from 'react';
 import { ChevronRight, Folder, Hash, Plus, Terminal, X, Zap } from 'lucide-react';
 import { countPaneLeaves, flattenLayout } from '../../../../shared/pane-layout';
 import { getPathBasename, getTruncatedPathLabel } from '../../../../shared/path-label';
@@ -6,6 +6,8 @@ import type { Pane, PaneRuntimeInfo } from '../../../../shared/types';
 import { usePaneInfoStore } from '../../stores/paneInfoStore';
 import { useUiStore } from '../../stores/uiStore';
 import { useWorkspaceStore } from '../../stores/workspaceStore';
+import { ContextMenu } from '../common/ContextMenu';
+import { hasActionableItem, type ContextMenuItem } from '../common/contextMenuItems';
 import { getPaneRunningIndicator } from './pane-running-indicator';
 import { SparklesIcon } from './SparklesIcon';
 
@@ -168,7 +170,17 @@ export function WorkspacesView(): React.JSX.Element {
   const selectWorkspacePane = useWorkspaceStore((state) => state.selectWorkspacePane);
   const selectWorkspaceTab = useWorkspaceStore((state) => state.selectWorkspaceTab);
   const setActiveWorkspace = useWorkspaceStore((state) => state.setActiveWorkspace);
+  const reorderWorkspaceTab = useWorkspaceStore((state) => state.reorderWorkspaceTab);
+  const moveTabToWorkspace = useWorkspaceStore((state) => state.moveTabToWorkspace);
   const closeSettings = useUiStore((state) => state.closeSettings);
+
+  // Holds the right-clicked tab (with its owning workspace) and the click point; null while closed.
+  const [tabMenu, setTabMenu] = useState<{
+    workspaceId: string;
+    tabId: string;
+    x: number;
+    y: number;
+  } | null>(null);
 
   // Inline workspace creation state
   const [isCreating, setIsCreating] = useState(false);
@@ -368,6 +380,74 @@ export function WorkspacesView(): React.JSX.Element {
     });
   };
 
+  // --- Tab context-menu handlers ---
+
+  // Built lazily on open from current store state so reorder/move stay in sync if tabs change while
+  // the menu is open. The sidebar tree is vertical, so reordering reads as "up" / "down".
+  const buildTabMenuItems = (workspaceId: string, tabId: string): ContextMenuItem[] => {
+    const workspace = workspaces.find((currentWorkspace) => currentWorkspace.id === workspaceId);
+    if (!workspace) {
+      return [];
+    }
+
+    const index = workspace.tabs.findIndex((tab) => tab.id === tabId);
+    if (index === -1) {
+      return [];
+    }
+
+    const items: ContextMenuItem[] = [
+      {
+        type: 'action',
+        id: 'move-up',
+        label: 'Move up',
+        disabled: index === 0,
+        onSelect: () => {
+          reorderWorkspaceTab(workspaceId, tabId, index - 1);
+        },
+      },
+      {
+        type: 'action',
+        id: 'move-down',
+        label: 'Move down',
+        disabled: index === workspace.tabs.length - 1,
+        onSelect: () => {
+          reorderWorkspaceTab(workspaceId, tabId, index + 1);
+        },
+      },
+    ];
+
+    const otherWorkspaces = workspaces.filter(
+      (currentWorkspace) => currentWorkspace.id !== workspaceId,
+    );
+    // Moving out the last tab would leave the workspace empty, so the destinations are only offered
+    // when another tab remains behind.
+    if (otherWorkspaces.length > 0 && workspace.tabs.length > 1) {
+      items.push({ type: 'separator' }, { type: 'label', label: 'Move to workspace' });
+      for (const target of otherWorkspaces) {
+        items.push({
+          type: 'action',
+          id: `move-to-${target.id}`,
+          label: target.name,
+          onSelect: () => {
+            moveTabToWorkspace(workspaceId, tabId, target.id);
+          },
+        });
+      }
+    }
+
+    return items;
+  };
+
+  const openTabMenu = (event: MouseEvent, workspaceId: string, tabId: string): void => {
+    event.preventDefault();
+    // Suppress the menu when nothing is actionable (e.g. a lone tab whose move commands are all
+    // disabled) so the user never sees a dead, all-disabled menu.
+    if (!hasActionableItem(buildTabMenuItems(workspaceId, tabId))) {
+      return;
+    }
+    setTabMenu({ workspaceId, tabId, x: event.clientX, y: event.clientY });
+  };
+
   return (
     <div className="mb-4">
       <div className="mb-1 flex items-center justify-between px-2 text-[10px] font-bold uppercase tracking-wider text-subtle">
@@ -503,6 +583,9 @@ export function WorkspacesView(): React.JSX.Element {
                                   selectWorkspaceTab(workspace.id, tab.id);
                                   closeSettings();
                                 }}
+                                onContextMenu={(event) => {
+                                  openTabMenu(event, workspace.id, tab.id);
+                                }}
                                 onDoubleClick={() => {
                                   startRenamingTab(workspace.id, tab.id, tab.name);
                                 }}
@@ -587,6 +670,15 @@ export function WorkspacesView(): React.JSX.Element {
           </div>
         )}
       </div>
+      {tabMenu && (
+        <ContextMenu
+          position={{ x: tabMenu.x, y: tabMenu.y }}
+          items={buildTabMenuItems(tabMenu.workspaceId, tabMenu.tabId)}
+          onClose={() => {
+            setTabMenu(null);
+          }}
+        />
+      )}
     </div>
   );
 }

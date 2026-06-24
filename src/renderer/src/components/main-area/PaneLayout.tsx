@@ -14,6 +14,7 @@ import { useSettingsStore } from '../../stores/settingsStore';
 import { useUiStore } from '../../stores/uiStore';
 import { useWorkspaceStore } from '../../stores/workspaceStore';
 import { TerminalView } from '../terminal/TerminalView';
+import type { PtyIdChangeReason } from '../terminal/useTerminal';
 
 interface PaneLayoutProps {
   isActiveTab: boolean;
@@ -192,17 +193,16 @@ function PaneCell({
         initialCommand={pane.initialCommand}
         isActive={isActive}
         paneId={pane.id}
-        onPtyIdChange={(ptyId) => {
-          // The PTY id is cleared on process exit and on unmount. Drop the matching paneInfo entry
-          // here so the renderer cache does not accumulate entries for retired PTYs over a long
-          // session. Main-side `PaneInfoTracker` already removes its record via `onDispose`, but
-          // does not emit a removal event over IPC.
+        onPtyIdChange={(ptyId: string | null, reason: PtyIdChangeReason) => {
+          // A null PTY id can mean either process exit or React unmount. Both retire the old
+          // runtime id, but only a real exit should trigger close-pane-on-exit; unmounts also occur
+          // during tab/workspace moves and should not mutate the pane tree.
           if (ptyId === null && pane.ptyId) {
             removePaneInfo(pane.ptyId);
-            if (closePaneOnExitEnabled) {
+            if (reason === 'exit' && closePaneOnExitEnabled) {
               // On PTY exit, drop the pane (and the tab if this was the only pane left). The action
-              // is a no-op when invoked again during unmount because the pane is already gone from
-              // store state, so re-entry from the cleanup path in `useTerminal` is safe.
+              // is intentionally skipped for unmount cleanup so moving a tab between workspaces does
+              // not look like the shell exited.
               closePaneOnExit(pane.id);
             }
           }
