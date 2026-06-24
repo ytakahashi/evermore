@@ -1,5 +1,6 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Workspace } from '../../shared/types';
+import type { Logger } from '../logging/logger';
 import { WorkspaceStore } from './workspace-store';
 import type { WorkspaceStorageAdapter } from './types';
 
@@ -316,5 +317,272 @@ describe('WorkspaceStore', () => {
       cwd: '/Users/tester/legacy',
     });
     expect(storage.workspaces).toEqual(workspaces);
+  });
+
+  describe('global pane id uniqueness', () => {
+    function workspaceWithPane(id: string, paneId: string, cwd: string): Workspace {
+      return {
+        id,
+        name: id,
+        rootPath: cwd,
+        tabs: [
+          {
+            id: `${id}-tab`,
+            name: 'zsh',
+            layout: { type: 'leaf', paneId },
+            activePaneId: paneId,
+          },
+        ],
+        panes: [{ id: paneId, cwd }],
+        activeTabId: `${id}-tab`,
+        createdAt: now,
+        updatedAt: now,
+      };
+    }
+
+    function buildStore(
+      workspaces: Workspace[],
+      generatedIds: string[],
+      logger?: Logger,
+    ): {
+      store: WorkspaceStore;
+      storage: MemoryWorkspaceStorageAdapter;
+    } {
+      const seededStorage = new MemoryWorkspaceStorageAdapter(
+        workspaces,
+        workspaces[0]?.id ?? null,
+      );
+      const seededStore = new WorkspaceStore({
+        createId: () => generatedIds.shift() ?? 'fallback-id',
+        getHomeDirectory: () => '/Users/tester',
+        getShellPath: () => '/bin/zsh',
+        logger,
+        now: () => now,
+        storage: seededStorage,
+      });
+      return { store: seededStore, storage: seededStorage };
+    }
+
+    function createTestLogger(): Logger {
+      return {
+        debug: vi.fn(),
+        info: vi.fn(),
+        warn: vi.fn(),
+        error: vi.fn(),
+        child: vi.fn(() => createTestLogger()),
+      };
+    }
+
+    it('remaps a pane id that collides across workspaces and persists the fix', () => {
+      // Given: two persisted workspaces that both reuse the pane id "pane-shared".
+      const { store: seededStore, storage: seededStorage } = buildStore(
+        [
+          workspaceWithPane('workspace-1', 'pane-shared', '/Users/tester/one'),
+          workspaceWithPane('workspace-2', 'pane-shared', '/Users/tester/two'),
+        ],
+        ['pane-unique'],
+      );
+
+      // When: callers load the workspace list.
+      const workspaces = seededStore.list();
+
+      // Then: the first keeps the id and the second is remapped consistently across pane, layout,
+      // and active pane reference.
+      expect(workspaces[0]?.panes[0]?.id).toBe('pane-shared');
+      expect(workspaces[1]?.panes[0]?.id).toBe('pane-unique');
+      expect(workspaces[1]?.tabs[0]?.layout).toEqual({ type: 'leaf', paneId: 'pane-unique' });
+      expect(workspaces[1]?.tabs[0]?.activePaneId).toBe('pane-unique');
+
+      // And: the normalized result is written back so the fix survives the next launch.
+      expect(seededStorage.workspaces).toEqual(workspaces);
+    });
+
+    it('leaves globally unique pane ids untouched and does not write back', () => {
+      // Given: two persisted workspaces whose pane ids are already unique.
+      const createId = (): string => {
+        throw new Error('createId should not be called when no pane id collides.');
+      };
+      const seededStorage = new MemoryWorkspaceStorageAdapter(
+        [
+          workspaceWithPane('workspace-1', 'pane-1', '/Users/tester/one'),
+          workspaceWithPane('workspace-2', 'pane-2', '/Users/tester/two'),
+        ],
+        'workspace-1',
+      );
+      const seededStore = new WorkspaceStore({
+        createId,
+        getHomeDirectory: () => '/Users/tester',
+        getShellPath: () => '/bin/zsh',
+        now: () => now,
+        storage: seededStorage,
+      });
+      let writeCount = 0;
+      const originalSetWorkspaces = seededStorage.setWorkspaces.bind(seededStorage);
+      seededStorage.setWorkspaces = (workspaces): void => {
+        writeCount++;
+        originalSetWorkspaces(workspaces);
+      };
+
+      // When: callers load the workspace list.
+      const workspaces = seededStore.list();
+
+      // Then: nothing is remapped and storage is not rewritten.
+      expect(workspaces[0]?.panes[0]?.id).toBe('pane-1');
+      expect(workspaces[1]?.panes[0]?.id).toBe('pane-2');
+      expect(writeCount).toBe(0);
+    });
+
+    it('keeps a newly created workspace globally unique before persisting and returning it', () => {
+      // Given: the next generated workspace pane id collides with an existing workspace.
+      const seededStorage = new MemoryWorkspaceStorageAdapter(
+        [workspaceWithPane('workspace-existing', 'pane-colliding', '/Users/tester/existing')],
+        'workspace-existing',
+      );
+      const seededStore = new WorkspaceStore({
+        createId: vi
+          .fn()
+          .mockReturnValueOnce('workspace-new')
+          .mockReturnValueOnce('tab-new')
+          .mockReturnValueOnce('pane-colliding')
+          .mockReturnValueOnce('pane-remapped'),
+        getHomeDirectory: () => '/Users/tester',
+        getShellPath: () => '/bin/zsh',
+        now: () => now,
+        storage: seededStorage,
+      });
+
+      // When: a new workspace is created.
+      const created = seededStore.create('Project', '/Users/tester/project');
+
+      // Then: both the returned workspace and persisted workspace use the remapped pane id.
+      expect(created.panes[0]?.id).toBe('pane-remapped');
+      expect(created.tabs[0]?.layout).toEqual({ type: 'leaf', paneId: 'pane-remapped' });
+      expect(created.tabs[0]?.activePaneId).toBe('pane-remapped');
+      expect(seededStorage.workspaces[1]).toEqual(created);
+    });
+
+    it('keeps an updated workspace globally unique before persisting it', () => {
+      // Given: updating the second workspace would make its pane id collide with the first.
+      const first = workspaceWithPane('workspace-1', 'pane-shared', '/Users/tester/one');
+      const second = workspaceWithPane('workspace-2', 'pane-original', '/Users/tester/two');
+      const { store: seededStore, storage: seededStorage } = buildStore(
+        [first, second],
+        ['pane-remapped'],
+      );
+
+      // When: the renderer sends an update whose pane id collides globally.
+      seededStore.update({
+        ...second,
+        tabs: [
+          {
+            ...second.tabs[0]!,
+            layout: { type: 'leaf', paneId: 'pane-shared' },
+            activePaneId: 'pane-shared',
+          },
+        ],
+        panes: [{ id: 'pane-shared', cwd: '/Users/tester/two' }],
+      });
+
+      // Then: storage still satisfies the global uniqueness invariant.
+      const updatedSecond = seededStorage.workspaces[1];
+      expect(updatedSecond?.panes).toEqual([{ id: 'pane-remapped', cwd: '/Users/tester/two' }]);
+      expect(updatedSecond?.tabs[0]?.layout).toEqual({ type: 'leaf', paneId: 'pane-remapped' });
+      expect(updatedSecond?.tabs[0]?.activePaneId).toBe('pane-remapped');
+    });
+
+    it('self-heals a pane id duplicated within a workspace by dropping the orphan duplicate', () => {
+      // Given: a corrupt workspace whose pane list repeats an id the layout references only once.
+      const logger = createTestLogger();
+      const corrupt: Workspace = {
+        ...workspaceWithPane('workspace-1', 'dup', '/Users/tester'),
+        panes: [
+          { id: 'dup', cwd: '/Users/tester/a' },
+          { id: 'dup', cwd: '/Users/tester/b' },
+        ],
+      };
+      const { store: seededStore, storage: seededStorage } = buildStore([corrupt], [], logger);
+
+      // When: callers load the workspace list.
+      const workspaces = seededStore.list();
+
+      // Then: the app recovers in place — the first (layout-referenced) pane is kept, the orphan
+      // duplicate is dropped, and the validator-clean result is persisted.
+      expect(workspaces[0]?.panes).toEqual([{ id: 'dup', cwd: '/Users/tester/a' }]);
+      expect(workspaces[0]?.tabs[0]?.layout).toEqual({ type: 'leaf', paneId: 'dup' });
+      expect(workspaces[0]?.tabs[0]?.activePaneId).toBe('dup');
+      expect(seededStorage.workspaces).toEqual(workspaces);
+      expect(logger.warn).toHaveBeenCalledOnce();
+    });
+
+    it('drops panes that no layout leaf references', () => {
+      // Given: a workspace carrying an orphan pane absent from its layout.
+      const logger = createTestLogger();
+      const corrupt: Workspace = {
+        ...workspaceWithPane('workspace-1', 'kept-pane', '/Users/tester'),
+        panes: [
+          { id: 'kept-pane', cwd: '/Users/tester' },
+          { id: 'orphan-pane', cwd: '/Users/tester/orphan' },
+        ],
+      };
+      const { store: seededStore } = buildStore([corrupt], [], logger);
+
+      // When: callers load the workspace list.
+      const workspaces = seededStore.list();
+
+      // Then: only the referenced pane survives.
+      expect(workspaces[0]?.panes).toEqual([{ id: 'kept-pane', cwd: '/Users/tester' }]);
+      expect(logger.warn).toHaveBeenCalledOnce();
+    });
+
+    it('self-heals duplicated layout leaves by synthesizing a distinct pane', () => {
+      // Given: a corrupt workspace whose split layout points two leaves at the same pane id.
+      const logger = createTestLogger();
+      const corrupt: Workspace = {
+        id: 'workspace-1',
+        name: 'workspace-1',
+        rootPath: '/Users/tester/root',
+        tabs: [
+          {
+            id: 'workspace-1-tab',
+            name: 'zsh',
+            layout: {
+              type: 'split',
+              direction: 'vertical',
+              ratio: 0.5,
+              children: [
+                { type: 'leaf', paneId: 'dup' },
+                { type: 'leaf', paneId: 'dup' },
+              ],
+            },
+            activePaneId: 'dup',
+          },
+        ],
+        panes: [{ id: 'dup', cwd: '/Users/tester/dup' }],
+        activeTabId: 'workspace-1-tab',
+        createdAt: now,
+        updatedAt: now,
+      };
+      const { store: seededStore } = buildStore([corrupt], ['synthesized-pane'], logger);
+
+      // When: callers load the workspace list.
+      const workspaces = seededStore.list();
+
+      // Then: each leaf resolves to its own pane; the second leaf gets a distinct pane cloned from
+      // the referenced one (same cwd), leaving the result unique and fully referenced.
+      expect(workspaces[0]?.tabs[0]?.layout).toEqual({
+        type: 'split',
+        direction: 'vertical',
+        ratio: 0.5,
+        children: [
+          { type: 'leaf', paneId: 'dup' },
+          { type: 'leaf', paneId: 'synthesized-pane' },
+        ],
+      });
+      expect(workspaces[0]?.panes).toEqual([
+        { id: 'dup', cwd: '/Users/tester/dup' },
+        { id: 'synthesized-pane', cwd: '/Users/tester/dup' },
+      ]);
+      expect(logger.warn).toHaveBeenCalledOnce();
+    });
   });
 });

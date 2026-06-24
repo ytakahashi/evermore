@@ -184,7 +184,7 @@ export function registerIpcHandlers(options: RegisterIpcHandlersOptions): Regist
     getWindow: options.getWindow,
     paneInfoTracker,
   });
-  const disposeWorkspaceHandlers = registerWorkspaceHandlers();
+  const disposeWorkspaceHandlers = registerWorkspaceHandlers({ logger: logger.child('workspace') });
   const disposeSshHandlers = registerSshHandlers({ sshConfigManager, sshHostResolver });
   applyRuntimeSettings(settingsStore.get());
   const disposeSettingsHandlers = registerSettingsHandlers({ settingsStore, applyRuntimeSettings });

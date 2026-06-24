@@ -1,5 +1,6 @@
 import { ipcMain } from 'electron';
 import { IPC } from '../../../shared/ipc-channels';
+import { createSilentLogger, type Logger } from '../../logging/logger';
 import { readWorkspace } from '../../workspace/validate-workspace';
 import { WorkspaceStore } from '../../workspace/workspace-store';
 import { assertIpcRequestAllowed } from '../authorization';
@@ -14,6 +15,7 @@ import {
 } from '../validation';
 
 interface RegisterWorkspaceHandlersOptions {
+  logger?: Logger;
   workspaceStore?: WorkspaceStore;
 }
 
@@ -46,7 +48,8 @@ function readActiveWorkspaceIdPayload(payload: unknown): string | null {
 export function registerWorkspaceHandlers(
   options: RegisterWorkspaceHandlersOptions = {},
 ): () => void {
-  const workspaceStore = options.workspaceStore ?? new WorkspaceStore();
+  const logger = options.logger ?? createSilentLogger();
+  const workspaceStore = options.workspaceStore ?? new WorkspaceStore({ logger });
 
   ipcMain.handle(IPC.WS_LIST, () => ({
     workspaces: workspaceStore.list(),
