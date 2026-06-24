@@ -47,6 +47,28 @@ export interface WorkspaceStoreState {
   selectTab: (tabId: string) => void;
   closeTab: (tabId: string) => void;
   closeWorkspaceTab: (workspaceId: string, tabId: string) => void;
+  /**
+   * Reorders a tab within its workspace by moving it to `toIndex` (clamped to the valid range).
+   * No-op when the workspace or tab is missing or the tab is already at the target index. The
+   * primitive is index based rather than direction based so it backs both the menu (which computes
+   * the previous / next index) and any future drag-and-drop reordering without a second action.
+   */
+  reorderWorkspaceTab: (workspaceId: string, tabId: string, toIndex: number) => void;
+  /**
+   * Moves a tab and the panes it owns from `sourceWorkspaceId` to `targetWorkspaceId`, appending it
+   * to the target's tab list and making it the target's active tab. No-op when either workspace or
+   * the tab is missing, when source equals target, or when the tab is the only one left in the
+   * source workspace (the "at least one tab" invariant mirrors {@link closeWorkspaceTab}). The
+   * source's active tab advances by the same rule as a tab close, and both workspaces are persisted.
+   *
+   * The moved panes keep their runtime `ptyId` on purpose: it is the re-attach key for the planned
+   * session-handover. Today the shell still restarts — every workspace is mounted under its own
+   * subtree in `MainTerminalArea`, so React unmounts and remounts the tab's terminals across the
+   * move, which disposes the old PTY and creates a new one, overwriting the carried id. Making the
+   * handover real therefore requires suppressing dispose-on-unmount and re-attaching on remount, not
+   * just retaining this field here.
+   */
+  moveTabToWorkspace: (sourceWorkspaceId: string, tabId: string, targetWorkspaceId: string) => void;
   setActivePane: (paneId: string) => void;
   setPanePtyId: (paneId: string, ptyId: string | null) => void;
   splitPane: (paneId: string, direction: SplitDirection) => void;
@@ -148,6 +170,21 @@ function collectPaneIds(layout: PaneLayout): string[] {
   return [...collectPaneIds(layout.children[0]), ...collectPaneIds(layout.children[1])];
 }
 
+function stripRuntimePaneFieldsForWorkspaceUpdate(pane: Pane): Pane {
+  const { ptyId: _ptyId, initialCommand: _initialCommand, ...persistedPane } = pane;
+  return persistedPane;
+}
+
+function toWorkspaceUpdatePayload(workspace: Workspace): Workspace {
+  // `workspace:update` is validated before main-process persistence gets a chance to sanitize it.
+  // Keep renderer runtime fields in Zustand, but strip them from the IPC payload so the request
+  // matches the durable workspace contract.
+  return {
+    ...workspace,
+    panes: workspace.panes.map(stripRuntimePaneFieldsForWorkspaceUpdate),
+  };
+}
+
 function clampSplitRatio(ratio: number): number {
   return Math.min(MAX_SPLIT_RATIO, Math.max(MIN_SPLIT_RATIO, ratio));
 }
@@ -173,6 +210,23 @@ function replacePaneLayout(
     children: [
       replacePaneLayout(layout.children[0], paneId, replacement),
       replacePaneLayout(layout.children[1], paneId, replacement),
+    ],
+  };
+}
+
+function remapPaneLayoutIds(layout: PaneLayout, paneIdByOldId: Map<string, string>): PaneLayout {
+  if (layout.type === 'leaf') {
+    return {
+      ...layout,
+      paneId: paneIdByOldId.get(layout.paneId) ?? layout.paneId,
+    };
+  }
+
+  return {
+    ...layout,
+    children: [
+      remapPaneLayoutIds(layout.children[0], paneIdByOldId),
+      remapPaneLayoutIds(layout.children[1], paneIdByOldId),
     ],
   };
 }
@@ -465,7 +519,7 @@ export function createWorkspaceStore(
         Promise.all(
           currentWorkspaces
             .filter((workspace) => workspaceIdsToPersist.has(workspace.id))
-            .map((workspace) => getWorkspaceApi().update(workspace)),
+            .map((workspace) => getWorkspaceApi().update(toWorkspaceUpdatePayload(workspace))),
         ).catch((error: unknown) => {
           set({ error: getErrorMessage(error) });
         });
@@ -484,6 +538,23 @@ export function createWorkspaceStore(
       }));
 
       return updatedWorkspace;
+    };
+
+    // Updates several existing workspaces in a single `set` so a cross-workspace mutation (moving a
+    // tab) commits both sides atomically and React renders one consistent snapshot. Unlike
+    // `updateWorkspaceState` this never appends: callers pass workspaces that already exist, and any
+    // id not currently in the store is ignored. Persisting the touched ids is left to the caller so
+    // both can share the existing debounced flush.
+    const updateWorkspacesState = (updates: Workspace[], activeWorkspaceId?: string): void => {
+      const timestamp = now();
+      const stampedById = new Map(
+        updates.map((workspace) => [workspace.id, { ...workspace, updatedAt: timestamp }]),
+      );
+
+      set((state) => ({
+        activeWorkspaceId: activeWorkspaceId ?? state.activeWorkspaceId,
+        workspaces: state.workspaces.map((workspace) => stampedById.get(workspace.id) ?? workspace),
+      }));
     };
 
     // Shared cwd-update body for both pane-id and pty-id keyed actions. Keeping the early-return
@@ -800,6 +871,135 @@ export function createWorkspaceStore(
         };
 
         get().updateWorkspace(updatedWorkspace);
+      },
+      reorderWorkspaceTab: (workspaceId: string, tabId: string, toIndex: number): void => {
+        const workspace = get().workspaces.find(
+          (currentWorkspace) => currentWorkspace.id === workspaceId,
+        );
+        if (!workspace) {
+          return;
+        }
+
+        const fromIndex = workspace.tabs.findIndex((tab) => tab.id === tabId);
+        if (fromIndex === -1) {
+          return;
+        }
+
+        // Clamp so an out-of-range target (e.g. "move left" on the first tab) is a no-op instead of
+        // throwing the tab off the ends of the list.
+        const clampedIndex = Math.min(Math.max(toIndex, 0), workspace.tabs.length - 1);
+        if (clampedIndex === fromIndex) {
+          return;
+        }
+
+        const nextTabs = [...workspace.tabs];
+        const [movedTab] = nextTabs.splice(fromIndex, 1);
+        nextTabs.splice(clampedIndex, 0, movedTab);
+
+        get().updateWorkspace({ ...workspace, tabs: nextTabs });
+      },
+      moveTabToWorkspace: (
+        sourceWorkspaceId: string,
+        tabId: string,
+        targetWorkspaceId: string,
+      ): void => {
+        if (sourceWorkspaceId === targetWorkspaceId) {
+          return;
+        }
+
+        const state = get();
+        const sourceWorkspace = state.workspaces.find(
+          (currentWorkspace) => currentWorkspace.id === sourceWorkspaceId,
+        );
+        const targetWorkspace = state.workspaces.find(
+          (currentWorkspace) => currentWorkspace.id === targetWorkspaceId,
+        );
+        if (!sourceWorkspace || !targetWorkspace) {
+          return;
+        }
+
+        // A workspace must never become empty; refuse to move out its last remaining tab.
+        if (sourceWorkspace.tabs.length <= 1) {
+          return;
+        }
+
+        const movingTab = sourceWorkspace.tabs.find((tab) => tab.id === tabId);
+        if (!movingTab) {
+          return;
+        }
+
+        const shouldFollowMovedTab =
+          state.activeWorkspaceId === sourceWorkspace.id && sourceWorkspace.activeTabId === tabId;
+
+        const targetTabIds = new Set(targetWorkspace.tabs.map((tab) => tab.id));
+        const targetPaneIds = new Set(targetWorkspace.panes.map((pane) => pane.id));
+
+        // A tab owns every pane its layout references; the panes travel with the tab so the target
+        // workspace can resolve the moved layout's `paneId`s. Pane and tab ids are only scoped by
+        // convention, so crossing a workspace boundary must resolve collisions before both sets are
+        // merged into one target workspace. Tab and pane ids retry the same way (keep drawing a
+        // fresh id until it is unique) rather than assuming a single replacement never collides.
+        let movedTabId = movingTab.id;
+        while (targetTabIds.has(movedTabId)) {
+          movedTabId = createStoreId();
+        }
+
+        const movingPaneIds = new Set(collectPaneIds(movingTab.layout));
+        const paneIdByOldId = new Map<string, string>();
+        for (const paneId of movingPaneIds) {
+          let nextPaneId = paneId;
+          while (targetPaneIds.has(nextPaneId)) {
+            nextPaneId = createStoreId();
+          }
+          targetPaneIds.add(nextPaneId);
+          paneIdByOldId.set(paneId, nextPaneId);
+        }
+        const movedTab: Tab = {
+          ...movingTab,
+          id: movedTabId,
+          layout: remapPaneLayoutIds(movingTab.layout, paneIdByOldId),
+          activePaneId: movingTab.activePaneId
+            ? (paneIdByOldId.get(movingTab.activePaneId) ?? movingTab.activePaneId)
+            : movingTab.activePaneId,
+        };
+        const movingPanes = sourceWorkspace.panes
+          .filter((pane) => movingPaneIds.has(pane.id))
+          .map((pane) => ({
+            // Spread keeps runtime fields (`ptyId` / `initialCommand`); the `ptyId` is retained as
+            // the future session-handover re-attach key. See `moveTabToWorkspace`'s JSDoc.
+            ...pane,
+            id: paneIdByOldId.get(pane.id) ?? pane.id,
+          }));
+
+        const updatedSource: Workspace = {
+          ...sourceWorkspace,
+          tabs: sourceWorkspace.tabs.filter((tab) => tab.id !== tabId),
+          panes: sourceWorkspace.panes.filter((pane) => !movingPaneIds.has(pane.id)),
+          activeTabId:
+            sourceWorkspace.activeTabId === tabId
+              ? selectNextTabIdAfterClose(sourceWorkspace, tabId)
+              : sourceWorkspace.activeTabId,
+        };
+
+        const updatedTarget: Workspace = {
+          ...targetWorkspace,
+          tabs: [...targetWorkspace.tabs, movedTab],
+          panes: [...targetWorkspace.panes, ...movingPanes],
+          // A moved tab always becomes active in its new home, regardless of whether the move
+          // follows focus there. This keeps the rule simple and matches direct-manipulation (future
+          // drag-and-drop) intuition: the tab you just placed is the one shown when you arrive.
+          activeTabId: movedTab.id,
+        };
+
+        updateWorkspacesState(
+          [updatedSource, updatedTarget],
+          shouldFollowMovedTab ? updatedTarget.id : undefined,
+        );
+        if (shouldFollowMovedTab) {
+          void getWorkspaceApi().setActiveWorkspaceId(updatedTarget.id);
+        }
+        persistWorkspaceDebounced(updatedSource.id);
+        persistWorkspaceDebounced(updatedTarget.id);
       },
       setActivePane: (paneId: string): void => {
         const workspace = selectActiveWorkspace(get());

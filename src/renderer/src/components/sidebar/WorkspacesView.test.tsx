@@ -860,4 +860,51 @@ describe('WorkspacesView', () => {
     // Then: the delete button is disabled to prevent removing the last workspace.
     expect(deleteButton).toBeDisabled();
   });
+
+  it('does not open the right-click menu for a lone tab with no actionable command', () => {
+    // Given: the sidebar lists a workspace ("Default") whose only tab is right-clicked, so move
+    // up/down and move-to-workspace are all unavailable.
+    render(<WorkspacesView />);
+
+    // When: the lone tab is right-clicked.
+    fireEvent.contextMenu(screen.getByRole('button', { name: 'zsh (1 pane)' }));
+
+    // Then: no dead, all-disabled menu is shown.
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+  });
+
+  it('reorders a tab down from its right-click menu', () => {
+    // Given: the sidebar lists a workspace whose first tab is right-clicked.
+    render(<WorkspacesView />);
+    fireEvent.contextMenu(screen.getByRole('button', { name: 'server (2 panes)' }));
+
+    // When: "Move down" is chosen.
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Move down' }));
+
+    // Then: the first tab moves after the second and the menu closes.
+    expect(useWorkspaceStore.getState().workspaces[1]?.tabs.map((tab) => tab.id)).toEqual([
+      'workspace-2-tab-2',
+      'workspace-2-tab-1',
+    ]);
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+  });
+
+  it('moves a tab to another workspace from its right-click menu', () => {
+    // Given: a workspace with two tabs, right-clicking the second tab.
+    render(<WorkspacesView />);
+    fireEvent.contextMenu(screen.getByRole('button', { name: 'logs (1 pane)' }));
+
+    // When: the destination workspace is chosen from the menu.
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Default' }));
+
+    // Then: the tab and its pane move from workspace-2 to workspace-1.
+    const [destination, source] = useWorkspaceStore.getState().workspaces;
+    expect(source.tabs.map((tab) => tab.id)).toEqual(['workspace-2-tab-1']);
+    expect(destination.tabs.map((tab) => tab.id)).toEqual([
+      'workspace-1-tab-1',
+      'workspace-2-tab-2',
+    ]);
+    expect(destination.panes.some((pane) => pane.id === 'workspace-2-pane-3')).toBe(true);
+    expect(useWorkspaceStore.getState().activeWorkspaceId).toBe('workspace-1');
+  });
 });

@@ -15,11 +15,13 @@ const CTRL_C = '\x03';
 const CTRL_U = '\x15';
 const ENTER = '\r';
 
+export type PtyIdChangeReason = 'created' | 'exit' | 'unmount';
+
 interface UseTerminalOptions {
   cwd: string;
   initialCommand?: string;
   isActive?: boolean;
-  onPtyIdChange?: (ptyId: string | null) => void;
+  onPtyIdChange?: (ptyId: string | null, reason: PtyIdChangeReason) => void;
   paneId?: string;
 }
 
@@ -246,7 +248,7 @@ export function useTerminal(options: UseTerminalOptions): UseTerminalResult {
         terminal.writeln('');
         terminal.writeln(`[process exited with code ${code}]`);
         ptyIdRef.current = null;
-        onPtyIdChangeRef.current?.(null);
+        onPtyIdChangeRef.current?.(null, 'exit');
       }
     });
     const inputDisposable = terminal.onData((data) => {
@@ -284,7 +286,7 @@ export function useTerminal(options: UseTerminalOptions): UseTerminalResult {
         }
 
         ptyIdRef.current = id;
-        onPtyIdChangeRef.current?.(id);
+        onPtyIdChangeRef.current?.(id, 'created');
         fitAndResize();
         focusIfActive();
 
@@ -303,7 +305,7 @@ export function useTerminal(options: UseTerminalOptions): UseTerminalResult {
       const ptyId = ptyIdRef.current;
       ptyIdRef.current = null;
       if (ptyId) {
-        onPtyIdChangeRef.current?.(null);
+        onPtyIdChangeRef.current?.(null, 'unmount');
         void ptyApi.dispose(ptyId);
       }
       inputDisposable.dispose();

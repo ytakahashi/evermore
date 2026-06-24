@@ -7,6 +7,7 @@ import { useSettingsStore } from '../../stores/settingsStore';
 import { useUiStore } from '../../stores/uiStore';
 import { useWorkspaceStore } from '../../stores/workspaceStore';
 import { PaneLayout } from './PaneLayout';
+import type { PtyIdChangeReason } from '../terminal/useTerminal';
 
 vi.mock('../terminal/TerminalView', () => ({
   TerminalView: ({
@@ -16,12 +17,23 @@ vi.mock('../terminal/TerminalView', () => ({
   }: {
     cwd?: string;
     isActive?: boolean;
-    onPtyIdChange?: (ptyId: string | null) => void;
+    onPtyIdChange?: (ptyId: string | null, reason: PtyIdChangeReason) => void;
   }) => (
     <div data-active={isActive ? 'true' : 'false'} data-testid="terminal-view">
       {cwd}
       {/* Test-only hook to simulate the PTY id lifecycle without spinning up a real terminal. */}
-      <button data-testid="terminal-clear-pty" type="button" onClick={() => onPtyIdChange?.(null)}>
+      <button
+        data-testid="terminal-exit-pty"
+        type="button"
+        onClick={() => onPtyIdChange?.(null, 'exit')}
+      >
+        exit pty
+      </button>
+      <button
+        data-testid="terminal-unmount-pty"
+        type="button"
+        onClick={() => onPtyIdChange?.(null, 'unmount')}
+      >
         clear pty
       </button>
     </div>
@@ -263,7 +275,7 @@ describe('PaneLayout', () => {
     );
 
     // When: TerminalView reports the PTY id has been cleared.
-    fireEvent.click(screen.getByTestId('terminal-clear-pty'));
+    fireEvent.click(screen.getByTestId('terminal-exit-pty'));
 
     // Then: the renderer-side paneInfo cache no longer holds the dead PTY entry.
     expect(usePaneInfoStore.getState().infosByPtyId).toEqual({});
@@ -316,7 +328,7 @@ describe('PaneLayout', () => {
     );
 
     // When: the first pane's PTY exit is simulated by clearing its PTY id.
-    const clearButtons = screen.getAllByTestId('terminal-clear-pty');
+    const clearButtons = screen.getAllByTestId('terminal-exit-pty');
     const firstClearButton = clearButtons[0];
     if (!firstClearButton) {
       throw new Error('Expected clear button for pane-1.');
@@ -327,6 +339,66 @@ describe('PaneLayout', () => {
     const updatedWorkspace = useWorkspaceStore.getState().workspaces[0];
     expect(updatedWorkspace?.panes.map((pane) => pane.id)).toEqual(['pane-2']);
     expect(updatedWorkspace?.tabs[0]?.layout).toEqual({ type: 'leaf', paneId: 'pane-2' });
+  });
+
+  it('does not close the pane when its PTY id is cleared because the terminal unmounted', () => {
+    // Given: a tab with two panes and close-pane-on-exit enabled.
+    const splitWorkspace: Workspace = {
+      ...workspace,
+      tabs: [
+        {
+          id: 'tab-1',
+          name: 'zsh',
+          layout: {
+            type: 'split',
+            direction: 'vertical',
+            ratio: 0.5,
+            children: [
+              { type: 'leaf', paneId: 'pane-1' },
+              { type: 'leaf', paneId: 'pane-2' },
+            ],
+          },
+          activePaneId: 'pane-1',
+        },
+      ],
+      panes: [
+        { id: 'pane-1', cwd: '/Users/tester/one', ptyId: 'pty-1' },
+        { id: 'pane-2', cwd: '/Users/tester/two', ptyId: 'pty-2' },
+      ],
+    };
+    useWorkspaceStore.setState({
+      workspaces: [splitWorkspace],
+      activeWorkspaceId: splitWorkspace.id,
+      isLoading: false,
+      error: null,
+    });
+    useSettingsStore.setState({ settings: DEFAULT_APP_SETTINGS });
+    const currentTab = splitWorkspace.tabs[0];
+    if (!currentTab) {
+      throw new Error('Expected test tab.');
+    }
+    render(
+      <PaneLayout
+        isActiveTab
+        layout={currentTab.layout}
+        panes={splitWorkspace.panes}
+        tab={currentTab}
+      />,
+    );
+
+    // When: the first pane reports PTY cleanup from React unmount rather than process exit.
+    const clearButtons = screen.getAllByTestId('terminal-unmount-pty');
+    const firstClearButton = clearButtons[0];
+    if (!firstClearButton) {
+      throw new Error('Expected unmount button for pane-1.');
+    }
+    fireEvent.click(firstClearButton);
+
+    // Then: the pane remains in the workspace and only its runtime PTY id is cleared.
+    const updatedWorkspace = useWorkspaceStore.getState().workspaces[0];
+    expect(updatedWorkspace?.panes.map((pane) => pane.id)).toEqual(['pane-1', 'pane-2']);
+    expect(updatedWorkspace?.tabs[0]?.layout).toEqual(splitWorkspace.tabs[0]?.layout);
+    expect(updatedWorkspace?.panes[0]?.ptyId).toBeUndefined();
   });
 
   it('keeps the pane mounted when close-pane-on-exit is turned off', () => {
@@ -380,7 +452,7 @@ describe('PaneLayout', () => {
     );
 
     // When: the first pane's PTY exit is simulated.
-    const clearButtons = screen.getAllByTestId('terminal-clear-pty');
+    const clearButtons = screen.getAllByTestId('terminal-exit-pty');
     const firstClearButton = clearButtons[0];
     if (!firstClearButton) {
       throw new Error('Expected clear button for pane-1.');

@@ -203,15 +203,17 @@ describe('workspaceStore', () => {
     // When: the bridge reports a new cwd keyed by ptyId.
     useStore.getState().updatePaneCwdByPtyId('pty-1', '/Users/tester/project');
 
-    // Then: the pane's cwd updates immediately and persists after the cwd debounce timer.
+    // Then: the pane's cwd and runtime pty id update immediately.
     expect(selectActivePane(useStore.getState())?.cwd).toBe('/Users/tester/project');
+    expect(selectActivePane(useStore.getState())?.ptyId).toBe('pty-1');
+
+    // And: persistence receives only the durable pane fields.
     await vi.advanceTimersByTimeAsync(100);
     expect(workspaceApi.update).toHaveBeenCalledWith(
       expect.objectContaining({
         panes: [
           {
             id: 'workspace-1-pane-1',
-            ptyId: 'pty-1',
             cwd: '/Users/tester/project',
           },
         ],
@@ -2051,6 +2053,289 @@ describe('workspaceStore', () => {
 
       // Then: focus returns to the top pane.
       expect(selectActiveTab(useStore.getState())?.activePaneId).toBe('workspace-1-pane-1');
+    });
+  });
+
+  describe('tab reordering and cross-workspace moves', () => {
+    // A workspace with one leaf-pane tab per name, so reorder / move can be asserted by tab id.
+    function createMultiTabWorkspace(id: string, tabNames: string[]): Workspace {
+      const tabs = tabNames.map((name) => ({
+        id: `${id}-${name}`,
+        name,
+        layout: { type: 'leaf' as const, paneId: `${id}-${name}-pane` },
+        activePaneId: `${id}-${name}-pane`,
+      }));
+
+      return {
+        id,
+        name: id,
+        rootPath: '/Users/tester',
+        tabs,
+        panes: tabNames.map((name) => ({ id: `${id}-${name}-pane`, cwd: '/Users/tester' })),
+        activeTabId: tabs[0]?.id ?? null,
+        createdAt: 1,
+        updatedAt: 1,
+      };
+    }
+
+    it('reorders a tab within its workspace and persists the new order', async () => {
+      // Given: a workspace with three tabs in a-b-c order.
+      vi.useFakeTimers();
+      const source = createMultiTabWorkspace('workspace-1', ['a', 'b', 'c']);
+      workspaceApi.list = vi.fn(() =>
+        Promise.resolve({ workspaces: [source], activeWorkspaceId: 'workspace-1' }),
+      );
+      const useStore = createWorkspaceStore({ workspaceApi, debounceMs: 50, now: () => now });
+      await useStore.getState().loadWorkspaces();
+
+      // When: the first tab is moved to the last index.
+      useStore.getState().reorderWorkspaceTab('workspace-1', 'workspace-1-a', 2);
+
+      // Then: the in-memory order becomes b-c-a and the workspace is persisted once.
+      expect(useStore.getState().workspaces[0]?.tabs.map((tab) => tab.id)).toEqual([
+        'workspace-1-b',
+        'workspace-1-c',
+        'workspace-1-a',
+      ]);
+      await vi.advanceTimersByTimeAsync(50);
+      expect(workspaceApi.update).toHaveBeenCalledOnce();
+    });
+
+    it('treats an out-of-range reorder target as a no-op', async () => {
+      // Given: a workspace with the first tab already at index 0.
+      vi.useFakeTimers();
+      const source = createMultiTabWorkspace('workspace-1', ['a', 'b', 'c']);
+      workspaceApi.list = vi.fn(() =>
+        Promise.resolve({ workspaces: [source], activeWorkspaceId: 'workspace-1' }),
+      );
+      const useStore = createWorkspaceStore({ workspaceApi, debounceMs: 50, now: () => now });
+      await useStore.getState().loadWorkspaces();
+
+      // When: the first tab is asked to move "left" past the start (clamped to its own index).
+      useStore.getState().reorderWorkspaceTab('workspace-1', 'workspace-1-a', -1);
+
+      // Then: order is unchanged and nothing is persisted.
+      expect(useStore.getState().workspaces[0]?.tabs.map((tab) => tab.id)).toEqual([
+        'workspace-1-a',
+        'workspace-1-b',
+        'workspace-1-c',
+      ]);
+      await vi.advanceTimersByTimeAsync(50);
+      expect(workspaceApi.update).not.toHaveBeenCalled();
+    });
+
+    it('moves a tab and its panes to another workspace and persists both', async () => {
+      // Given: a two-tab source workspace (first tab active) and an empty-ish target workspace.
+      vi.useFakeTimers();
+      const source = {
+        ...createMultiTabWorkspace('workspace-1', ['a', 'b']),
+        panes: [
+          {
+            id: 'workspace-1-a-pane',
+            cwd: '/Users/tester',
+            ptyId: 'pty-1',
+            initialCommand: "ssh 'dev'",
+          },
+          { id: 'workspace-1-b-pane', cwd: '/Users/tester' },
+        ],
+      };
+      const target = createMultiTabWorkspace('workspace-2', ['x']);
+      workspaceApi.list = vi.fn(() =>
+        Promise.resolve({ workspaces: [source, target], activeWorkspaceId: 'workspace-1' }),
+      );
+      const useStore = createWorkspaceStore({ workspaceApi, debounceMs: 50, now: () => now });
+      await useStore.getState().loadWorkspaces();
+
+      // When: the active source tab is moved to the target workspace.
+      useStore.getState().moveTabToWorkspace('workspace-1', 'workspace-1-a', 'workspace-2');
+      const [updatedSource, updatedTarget] = useStore.getState().workspaces;
+
+      // Then: the tab and its pane leave the source, whose active tab advances.
+      expect(updatedSource.tabs.map((tab) => tab.id)).toEqual(['workspace-1-b']);
+      expect(updatedSource.panes.map((pane) => pane.id)).toEqual(['workspace-1-b-pane']);
+      expect(updatedSource.activeTabId).toBe('workspace-1-b');
+
+      // And: the tab and its pane arrive in the target and become active there.
+      expect(updatedTarget.tabs.map((tab) => tab.id)).toEqual(['workspace-2-x', 'workspace-1-a']);
+      expect(updatedTarget.panes.map((pane) => pane.id)).toEqual([
+        'workspace-2-x-pane',
+        'workspace-1-a-pane',
+      ]);
+      expect(updatedTarget.panes[1]).toEqual({
+        id: 'workspace-1-a-pane',
+        cwd: '/Users/tester',
+        ptyId: 'pty-1',
+        initialCommand: "ssh 'dev'",
+      });
+      expect(updatedTarget.activeTabId).toBe('workspace-1-a');
+
+      // And: because the moved tab was focused, the active workspace follows it and both
+      // workspaces are persisted.
+      expect(useStore.getState().activeWorkspaceId).toBe('workspace-2');
+      expect(workspaceApi.setActiveWorkspaceId).toHaveBeenCalledWith('workspace-2');
+      await vi.advanceTimersByTimeAsync(50);
+      expect(workspaceApi.update).toHaveBeenCalledTimes(2);
+      expect(workspaceApi.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: 'workspace-2',
+          panes: [
+            { id: 'workspace-2-x-pane', cwd: '/Users/tester' },
+            { id: 'workspace-1-a-pane', cwd: '/Users/tester' },
+          ],
+        }),
+      );
+    });
+
+    it('keeps the current workspace focused when moving an inactive tab', async () => {
+      // Given: a two-tab active workspace whose first tab is focused.
+      vi.useFakeTimers();
+      const source = createMultiTabWorkspace('workspace-1', ['a', 'b']);
+      const target = createMultiTabWorkspace('workspace-2', ['x']);
+      workspaceApi.list = vi.fn(() =>
+        Promise.resolve({ workspaces: [source, target], activeWorkspaceId: 'workspace-1' }),
+      );
+      const useStore = createWorkspaceStore({ workspaceApi, debounceMs: 50, now: () => now });
+      await useStore.getState().loadWorkspaces();
+
+      // When: the inactive second tab is moved to another workspace.
+      useStore.getState().moveTabToWorkspace('workspace-1', 'workspace-1-b', 'workspace-2');
+
+      // Then: the active workspace and source active tab are not changed.
+      const [updatedSource, updatedTarget] = useStore.getState().workspaces;
+      expect(useStore.getState().activeWorkspaceId).toBe('workspace-1');
+      expect(updatedSource.activeTabId).toBe('workspace-1-a');
+      expect(updatedTarget.activeTabId).toBe('workspace-1-b');
+      expect(workspaceApi.setActiveWorkspaceId).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(50);
+      expect(workspaceApi.update).toHaveBeenCalledTimes(2);
+    });
+
+    it('remaps moved tab and pane ids that collide with the target workspace', async () => {
+      // Given: two workspaces independently contain the same tab and pane ids.
+      vi.useFakeTimers();
+      const source: Workspace = {
+        id: 'workspace-1',
+        name: 'workspace-1',
+        rootPath: '/Users/tester',
+        tabs: [
+          {
+            id: 'tab-shared',
+            name: 'source',
+            layout: { type: 'leaf', paneId: 'pane-shared' },
+            activePaneId: 'pane-shared',
+          },
+          {
+            id: 'tab-source-b',
+            name: 'fallback',
+            layout: { type: 'leaf', paneId: 'pane-source-b' },
+            activePaneId: 'pane-source-b',
+          },
+        ],
+        panes: [
+          { id: 'pane-shared', cwd: '/Users/tester/source' },
+          { id: 'pane-source-b', cwd: '/Users/tester/source' },
+        ],
+        activeTabId: 'tab-shared',
+        createdAt: 1,
+        updatedAt: 1,
+      };
+      const target: Workspace = {
+        id: 'workspace-2',
+        name: 'workspace-2',
+        rootPath: '/Users/tester',
+        tabs: [
+          {
+            id: 'tab-shared',
+            name: 'target',
+            layout: { type: 'leaf', paneId: 'pane-shared' },
+            activePaneId: 'pane-shared',
+          },
+        ],
+        panes: [{ id: 'pane-shared', cwd: '/Users/tester/target' }],
+        activeTabId: 'tab-shared',
+        createdAt: 1,
+        updatedAt: 1,
+      };
+      workspaceApi.list = vi.fn(() =>
+        Promise.resolve({ workspaces: [source, target], activeWorkspaceId: 'workspace-1' }),
+      );
+      const generatedIds = ['tab-new', 'pane-new'];
+      const useStore = createWorkspaceStore({
+        createId: () => generatedIds.shift() ?? 'fallback-id',
+        workspaceApi,
+        debounceMs: 50,
+        now: () => now,
+      });
+      await useStore.getState().loadWorkspaces();
+
+      // When: the source tab is moved into the target workspace.
+      useStore.getState().moveTabToWorkspace('workspace-1', 'tab-shared', 'workspace-2');
+
+      // Then: the moved tab and pane are remapped so the target workspace has unique ids.
+      const targetWorkspace = useStore.getState().workspaces[1];
+      expect(targetWorkspace?.tabs.map((tab) => tab.id)).toEqual(['tab-shared', 'tab-new']);
+      expect(targetWorkspace?.panes.map((pane) => pane.id)).toEqual(['pane-shared', 'pane-new']);
+      expect(targetWorkspace?.tabs[1]?.layout).toEqual({ type: 'leaf', paneId: 'pane-new' });
+      expect(targetWorkspace?.tabs[1]?.activePaneId).toBe('pane-new');
+      expect(targetWorkspace?.activeTabId).toBe('tab-new');
+
+      // And: persistence receives a structurally valid target workspace.
+      await vi.advanceTimersByTimeAsync(50);
+      expect(workspaceApi.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: 'workspace-2',
+          activeTabId: 'tab-new',
+          tabs: [
+            expect.objectContaining({ id: 'tab-shared' }),
+            expect.objectContaining({
+              id: 'tab-new',
+              layout: { type: 'leaf', paneId: 'pane-new' },
+              activePaneId: 'pane-new',
+            }),
+          ],
+          panes: [
+            { id: 'pane-shared', cwd: '/Users/tester/target' },
+            { id: 'pane-new', cwd: '/Users/tester/source' },
+          ],
+        }),
+      );
+    });
+
+    it('refuses to move the only remaining tab out of a workspace', async () => {
+      // Given: the source workspace has a single tab.
+      const source = createMultiTabWorkspace('workspace-1', ['a']);
+      const target = createMultiTabWorkspace('workspace-2', ['x']);
+      workspaceApi.list = vi.fn(() =>
+        Promise.resolve({ workspaces: [source, target], activeWorkspaceId: 'workspace-1' }),
+      );
+      const useStore = createWorkspaceStore({ workspaceApi });
+      await useStore.getState().loadWorkspaces();
+
+      // When: the last tab is moved out.
+      useStore.getState().moveTabToWorkspace('workspace-1', 'workspace-1-a', 'workspace-2');
+
+      // Then: both workspaces keep their tabs unchanged.
+      expect(useStore.getState().workspaces[0]?.tabs).toHaveLength(1);
+      expect(useStore.getState().workspaces[1]?.tabs).toHaveLength(1);
+    });
+
+    it('is a no-op when source and target workspaces are the same', async () => {
+      // Given: a two-tab workspace.
+      const source = createMultiTabWorkspace('workspace-1', ['a', 'b']);
+      workspaceApi.list = vi.fn(() =>
+        Promise.resolve({ workspaces: [source], activeWorkspaceId: 'workspace-1' }),
+      );
+      const useStore = createWorkspaceStore({ workspaceApi });
+      await useStore.getState().loadWorkspaces();
+
+      // When: a tab is "moved" to its own workspace.
+      useStore.getState().moveTabToWorkspace('workspace-1', 'workspace-1-a', 'workspace-1');
+
+      // Then: the tab list is untouched.
+      expect(useStore.getState().workspaces[0]?.tabs.map((tab) => tab.id)).toEqual([
+        'workspace-1-a',
+        'workspace-1-b',
+      ]);
     });
   });
 });

@@ -1,12 +1,12 @@
 import '@xterm/xterm/css/xterm.css';
 
-import { useTerminal } from './useTerminal';
+import { useTerminal, type PtyIdChangeReason } from './useTerminal';
 
 interface TerminalViewProps {
   cwd?: string;
   initialCommand?: string;
   isActive?: boolean;
-  onPtyIdChange?: (ptyId: string | null) => void;
+  onPtyIdChange?: (ptyId: string | null, reason: PtyIdChangeReason) => void;
   paneId?: string;
 }
 
