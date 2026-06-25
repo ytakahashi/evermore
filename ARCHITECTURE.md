@@ -252,9 +252,21 @@ The renderer is a single React 19 app rendered into `#root` by `main.tsx` with `
   so React identity stays stable across splits and closes; if the renderer used a recursive tree,
   splits would unmount + remount the xterm + PTY pair. See the comment in
   `components/main-area/PaneLayout.tsx`.
-- **All workspaces stay mounted with `display:none` for the non-active ones.** This keeps each
-  workspace's PTYs alive across workspace switches. The cost is eager PTY creation for every loaded
-  workspace; this is documented as temporary in `MainTerminalArea.tsx`.
+- **`MainTerminalArea` mounts every tab in one flat list keyed by `tab.id`.** The same
+  identity-stability reasoning as `PaneLayout` is extended up to the tab level: because a tab keeps
+  a stable position in the React tree regardless of which workspace owns it, reordering a tab or
+  moving it to another workspace preserves its subtree — and therefore its live PTYs/terminals —
+  instead of unmounting and recreating them. This relies on the durable-model invariant below.
+- **Pane and tab ids are globally unique across workspaces.** The main-process `WorkspaceStore`
+  enforces this on every read/write and self-heals inconsistent persisted data (see
+  `workspace/workspace-store.ts`). The renderer keys live terminals by `pane.id` and the tab list by
+  `tab.id` across all workspaces, so a duplicate id would bind one pane/tab to another workspace's
+  terminal or collide as a React key.
+- **All workspaces stay mounted; non-active ones use `display:none`.** This keeps each workspace's
+  PTYs alive across workspace switches (the active workspace's inactive tabs use `opacity-0` so a
+  tab switch reveals an already-sized terminal). The cost is eager PTY creation for every loaded
+  workspace, and `display:none` can let a hidden xterm drift to the fallback PTY size; both are
+  accepted because keeping PTYs alive is the higher priority.
 - **The renderer must not block on IPC errors.** Connection / tunnel stores preserve the last
   successful snapshot on failure so the sidebar keeps showing usable controls.
 - **Workspace persistence is debounced** in the renderer (`workspaceStore`) and flushed via

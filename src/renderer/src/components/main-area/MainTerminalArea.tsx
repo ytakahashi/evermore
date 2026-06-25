@@ -83,45 +83,41 @@ export function MainTerminalArea(): React.JSX.Element {
   } else if (workspaces.length > 0) {
     content = (
       <div className="relative h-full min-h-0 w-full">
-        {workspaces.map((workspace) => {
+        {/* Every tab of every workspace is mounted in one flat list keyed by `tab.id`. Keeping a tab
+            at a stable position in the React tree (independent of which workspace owns it) means
+            React preserves its subtree — and therefore its live PTYs/terminals — when the tab is
+            reordered or moved to another workspace. `tab.id` is guaranteed globally unique by the
+            main-process `WorkspaceStore`, so these sibling keys never collide.
+
+            Non-active workspaces are hidden with `display: none` so their terminals are not painted
+            while their PTYs stay alive; the active workspace's inactive tabs use `opacity-0` so a
+            tab switch reveals an already-sized terminal. `display: none` can let a hidden xterm
+            report zero size and drift to the fallback PTY size — accepted, as before, because
+            keeping PTYs alive is the higher priority. */}
+        {workspaces.flatMap((workspace) => {
           const isActiveWorkspace = workspace.id === activeWorkspaceId;
 
-          return (
-            // Current implementation keeps non-active workspaces mounted so their PTY processes survive workspace
-            // switches. This eagerly creates PTYs for every loaded workspace; a later pane-runtime
-            // layer should lazy-mount only visited workspaces and then keep those mounted.
-            //
-            // `display: none` can make hidden xterm containers report zero dimensions and trigger a
-            // resize to the fallback PTY size. That wrapping drift is accepted for now because
-            // preserving running PTYs is the higher-priority workspace behavior.
-            <div
-              key={workspace.id}
-              aria-hidden={!isActiveWorkspace}
-              className="absolute inset-0 min-h-0 w-full"
-              style={{ display: isActiveWorkspace ? undefined : 'none' }}
-            >
-              {workspace.tabs.map((tab) => {
-                const isActive = tab.id === workspace.activeTabId;
+          return workspace.tabs.map((tab) => {
+            const isActive = isActiveWorkspace && tab.id === workspace.activeTabId;
 
-                return (
-                  <div
-                    key={tab.id}
-                    aria-hidden={!isActive}
-                    className={`absolute inset-0 min-h-0 w-full ${
-                      isActive ? 'z-10 opacity-100' : 'pointer-events-none z-0 opacity-0'
-                    }`}
-                  >
-                    <PaneLayout
-                      isActiveTab={isActiveWorkspace && isActive}
-                      layout={tab.layout}
-                      panes={workspace.panes}
-                      tab={tab}
-                    />
-                  </div>
-                );
-              })}
-            </div>
-          );
+            return (
+              <div
+                key={tab.id}
+                aria-hidden={!isActive}
+                className={`absolute inset-0 min-h-0 w-full ${
+                  isActive ? 'z-10 opacity-100' : 'pointer-events-none z-0 opacity-0'
+                }`}
+                style={{ display: isActiveWorkspace ? undefined : 'none' }}
+              >
+                <PaneLayout
+                  isActiveTab={isActive}
+                  layout={tab.layout}
+                  panes={workspace.panes}
+                  tab={tab}
+                />
+              </div>
+            );
+          });
         })}
       </div>
     );

@@ -1,4 +1,5 @@
 import type { Workspace } from '../../shared/types';
+import type { Logger } from '../logging/logger';
 
 export interface WorkspaceStorageAdapter {
   getWorkspaces: () => Workspace[];
@@ -11,6 +12,7 @@ export interface WorkspaceStoreOptions {
   createId?: () => string;
   getHomeDirectory?: () => string;
   getShellPath?: () => string;
+  logger?: Logger;
   now?: () => number;
   storage?: WorkspaceStorageAdapter;
 }
