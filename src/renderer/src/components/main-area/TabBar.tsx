@@ -1,8 +1,17 @@
-import { useEffect, useRef, useState, type KeyboardEvent, type MouseEvent } from 'react';
+import {
+  useEffect,
+  useRef,
+  useState,
+  type DragEvent,
+  type KeyboardEvent,
+  type MouseEvent,
+} from 'react';
 import { Plus, X } from 'lucide-react';
+import { useTabDragStore } from '../../stores/tabDragStore';
 import { selectActiveWorkspace, useWorkspaceStore } from '../../stores/workspaceStore';
 import { ContextMenu } from '../common/ContextMenu';
 import { hasActionableItem, type ContextMenuItem } from '../common/contextMenuItems';
+import { resolveDropEdge, toReorderIndex, TAB_DND_MIME, type DropEdge } from '../common/tabDnd';
 
 export function TabBar(): React.JSX.Element {
   const activeWorkspace = useWorkspaceStore(selectActiveWorkspace);
@@ -13,10 +22,15 @@ export function TabBar(): React.JSX.Element {
   const selectTab = useWorkspaceStore((state) => state.selectTab);
   const reorderWorkspaceTab = useWorkspaceStore((state) => state.reorderWorkspaceTab);
   const moveTabToWorkspace = useWorkspaceStore((state) => state.moveTabToWorkspace);
+  const beginTabDrag = useTabDragStore((state) => state.begin);
+  const endTabDrag = useTabDragStore((state) => state.end);
   const [editingTabId, setEditingTabId] = useState<string | null>(null);
   const [draftTitle, setDraftTitle] = useState('');
   // Holds the right-clicked tab id and the click point; null while the menu is closed.
   const [menu, setMenu] = useState<{ tabId: string; x: number; y: number } | null>(null);
+  // The tab currently hovered by a drag and which side the drop would land on; null while idle.
+  // Drives the vertical insertion indicator without re-laying out the tabs.
+  const [dropEdge, setDropEdge] = useState<{ tabId: string; edge: DropEdge } | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const cancelledRef = useRef(false);
   const tabs = activeWorkspace?.tabs ?? [];
@@ -129,6 +143,74 @@ export function TabBar(): React.JSX.Element {
     }
   };
 
+  // --- Drag-and-drop reordering ---
+  // The TabBar only renders the active workspace's tabs, so dragging here is always an in-workspace
+  // reorder. Cross-workspace moves live in the sidebar tree, where other workspaces are visible.
+
+  const handleTabDragStart = (event: DragEvent<HTMLDivElement>, tabId: string): void => {
+    if (!activeWorkspace) {
+      return;
+    }
+    // The marker MIME lets dragover/drop recognise our tab drag; the real source ids live in the
+    // drag store because dataTransfer payloads are unreadable during dragover.
+    event.dataTransfer.setData(TAB_DND_MIME, tabId);
+    event.dataTransfer.effectAllowed = 'move';
+    beginTabDrag({ sourceWorkspaceId: activeWorkspace.id, tabId });
+  };
+
+  const isOwnTabDrag = (event: DragEvent<HTMLDivElement>): boolean => {
+    const dragging = useTabDragStore.getState().dragging;
+    return (
+      dragging !== null &&
+      activeWorkspace != null &&
+      dragging.sourceWorkspaceId === activeWorkspace.id &&
+      event.dataTransfer.types.includes(TAB_DND_MIME)
+    );
+  };
+
+  const handleTabDragOver = (event: DragEvent<HTMLDivElement>, tabId: string): void => {
+    if (!isOwnTabDrag(event)) {
+      return;
+    }
+    // preventDefault marks this element as a valid drop target so the drop event fires.
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'move';
+    const edge = resolveDropEdge(
+      'horizontal',
+      { x: event.clientX, y: event.clientY },
+      event.currentTarget.getBoundingClientRect(),
+    );
+    setDropEdge({ tabId, edge });
+  };
+
+  const handleTabDrop = (event: DragEvent<HTMLDivElement>, tabId: string): void => {
+    if (!isOwnTabDrag(event) || !activeWorkspace) {
+      return;
+    }
+    event.preventDefault();
+    const dragging = useTabDragStore.getState().dragging;
+    const fromIndex = tabs.findIndex((tab) => tab.id === dragging?.tabId);
+    const displayIndex = tabs.findIndex((tab) => tab.id === tabId);
+    if (dragging && fromIndex !== -1 && displayIndex !== -1) {
+      const edge = resolveDropEdge(
+        'horizontal',
+        { x: event.clientX, y: event.clientY },
+        event.currentTarget.getBoundingClientRect(),
+      );
+      reorderWorkspaceTab(
+        activeWorkspace.id,
+        dragging.tabId,
+        toReorderIndex(fromIndex, displayIndex, edge),
+      );
+    }
+    setDropEdge(null);
+  };
+
+  const handleTabDragEnd = (): void => {
+    endTabDrag();
+    setDropEdge(null);
+  };
+
   return (
     <div className="flex h-9 items-center overflow-hidden border-b border-border bg-panel px-2">
       <div className="flex h-full min-w-0 flex-1 items-center overflow-x-auto">
@@ -139,15 +221,35 @@ export function TabBar(): React.JSX.Element {
           return (
             <div
               key={tab.id}
-              className={`flex h-full min-w-36 max-w-52 items-center border-r border-border text-xs ${
+              className={`relative flex h-full min-w-36 max-w-52 items-center border-r border-border text-xs ${
                 isActive
                   ? 'bg-tab-active text-foreground'
                   : 'bg-panel text-muted hover:bg-raised/50'
               }`}
+              // Editing a tab name swaps in a text input; dragging then would hijack text selection.
+              draggable={!isEditing}
               onContextMenu={(event) => {
                 openTabMenu(event, tab.id);
               }}
+              onDragStart={(event) => {
+                handleTabDragStart(event, tab.id);
+              }}
+              onDragEnd={handleTabDragEnd}
+              onDragOver={(event) => {
+                handleTabDragOver(event, tab.id);
+              }}
+              onDrop={(event) => {
+                handleTabDrop(event, tab.id);
+              }}
             >
+              {dropEdge?.tabId === tab.id && (
+                <span
+                  aria-hidden="true"
+                  className={`pointer-events-none absolute inset-y-0 z-10 w-0.5 bg-brand ${
+                    dropEdge.edge === 'before' ? 'left-0' : 'right-0'
+                  }`}
+                />
+              )}
               {isEditing ? (
                 <input
                   ref={inputRef}

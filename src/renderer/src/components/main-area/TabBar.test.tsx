@@ -1,8 +1,32 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Workspace } from '../../../../shared/types';
+import { useTabDragStore } from '../../stores/tabDragStore';
 import { useWorkspaceStore } from '../../stores/workspaceStore';
+import { TAB_DND_MIME } from '../common/tabDnd';
 import { TabBar } from './TabBar';
+
+/**
+ * Minimal DataTransfer stand-in. jsdom does not implement DataTransfer, so the tab drag handlers —
+ * which only call setData and read `types` — are exercised against this shared instance passed
+ * through dragstart and drop (mirroring how a real drag reuses one DataTransfer).
+ */
+function createDataTransfer(): DataTransfer {
+  const data = new Map<string, string>();
+  return {
+    setData(type: string, value: string): void {
+      data.set(type, value);
+    },
+    getData(type: string): string {
+      return data.get(type) ?? '';
+    },
+    get types(): string[] {
+      return Array.from(data.keys());
+    },
+    dropEffect: 'none',
+    effectAllowed: 'all',
+  } as unknown as DataTransfer;
+}
 
 const workspace: Workspace = {
   id: 'workspace-1',
@@ -60,9 +84,24 @@ describe('TabBar', () => {
       isLoading: false,
       error: null,
     });
+    useTabDragStore.getState().end();
     Reflect.deleteProperty(window, 'api');
     vi.useRealTimers();
   });
+
+  const twoTabWorkspace: Workspace = {
+    ...workspace,
+    tabs: [
+      workspace.tabs[0],
+      {
+        id: 'tab-2',
+        name: 'build',
+        layout: { type: 'leaf', paneId: 'pane-2' },
+        activePaneId: 'pane-2',
+      },
+    ],
+    panes: [workspace.panes[0], { id: 'pane-2', cwd: '/Users/tester' }],
+  };
 
   it('renders the active tab and disables closing the final tab', () => {
     // Given: the current workspace has one tab.
@@ -317,5 +356,44 @@ describe('TabBar', () => {
     expect(destination.tabs.map((tab) => tab.id)).toEqual(['tab-3', 'tab-1']);
     expect(destination.activeTabId).toBe('tab-1');
     expect(useWorkspaceStore.getState().activeWorkspaceId).toBe('workspace-2');
+  });
+
+  it('reorders a tab by dragging it onto the trailing half of another tab', () => {
+    // Given: a two-tab workspace rendered in the tab bar.
+    useWorkspaceStore.setState({ workspaces: [twoTabWorkspace] });
+    render(<TabBar />);
+    const dataTransfer = createDataTransfer();
+
+    // When: the first tab is dragged and dropped on the trailing half of the second tab.
+    // (jsdom rects are zero-sized, so a positive clientX lands past the midpoint => "after".)
+    fireEvent.dragStart(screen.getByRole('button', { name: 'zsh' }), { dataTransfer });
+    fireEvent.drop(screen.getByRole('button', { name: 'build' }), {
+      dataTransfer,
+      clientX: 10,
+      clientY: 0,
+    });
+
+    // Then: the dragged tab moves after the drop target.
+    expect(useWorkspaceStore.getState().workspaces[0]?.tabs.map((tab) => tab.id)).toEqual([
+      'tab-2',
+      'tab-1',
+    ]);
+  });
+
+  it('records the drag source in the drag store on dragstart', () => {
+    // Given: a two-tab workspace rendered in the tab bar.
+    useWorkspaceStore.setState({ workspaces: [twoTabWorkspace] });
+    render(<TabBar />);
+    const dataTransfer = createDataTransfer();
+
+    // When: a tab drag starts.
+    fireEvent.dragStart(screen.getByRole('button', { name: 'build' }), { dataTransfer });
+
+    // Then: the marker MIME and source ids are available for the hover/drop handlers.
+    expect(dataTransfer.types).toContain(TAB_DND_MIME);
+    expect(useTabDragStore.getState().dragging).toEqual({
+      sourceWorkspaceId: 'workspace-1',
+      tabId: 'tab-2',
+    });
   });
 });
