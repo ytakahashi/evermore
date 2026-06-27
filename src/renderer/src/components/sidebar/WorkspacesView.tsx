@@ -1,13 +1,22 @@
-import { useEffect, useRef, useState, type KeyboardEvent, type MouseEvent } from 'react';
+import {
+  useEffect,
+  useRef,
+  useState,
+  type DragEvent,
+  type KeyboardEvent,
+  type MouseEvent,
+} from 'react';
 import { ChevronRight, Folder, Hash, Plus, Terminal, X, Zap } from 'lucide-react';
 import { countPaneLeaves, flattenLayout } from '../../../../shared/pane-layout';
 import { getPathBasename, getTruncatedPathLabel } from '../../../../shared/path-label';
 import type { Pane, PaneRuntimeInfo } from '../../../../shared/types';
 import { usePaneInfoStore } from '../../stores/paneInfoStore';
+import { useTabDragStore } from '../../stores/tabDragStore';
 import { useUiStore } from '../../stores/uiStore';
 import { useWorkspaceStore } from '../../stores/workspaceStore';
 import { ContextMenu } from '../common/ContextMenu';
 import { hasActionableItem, type ContextMenuItem } from '../common/contextMenuItems';
+import { resolveDropEdge, toReorderIndex, TAB_DND_MIME, type DropEdge } from '../common/tabDnd';
 import { getPaneRunningIndicator } from './pane-running-indicator';
 import { SparklesIcon } from './SparklesIcon';
 
@@ -172,6 +181,8 @@ export function WorkspacesView(): React.JSX.Element {
   const setActiveWorkspace = useWorkspaceStore((state) => state.setActiveWorkspace);
   const reorderWorkspaceTab = useWorkspaceStore((state) => state.reorderWorkspaceTab);
   const moveTabToWorkspace = useWorkspaceStore((state) => state.moveTabToWorkspace);
+  const beginTabDrag = useTabDragStore((state) => state.begin);
+  const endTabDrag = useTabDragStore((state) => state.end);
   const closeSettings = useUiStore((state) => state.closeSettings);
 
   // Holds the right-clicked tab (with its owning workspace) and the click point; null while closed.
@@ -181,6 +192,15 @@ export function WorkspacesView(): React.JSX.Element {
     x: number;
     y: number;
   } | null>(null);
+
+  // Tracks where an in-flight tab drag would land, driving the drop indicators. A same-workspace
+  // drag shows an insertion line on the hovered tab (`kind: 'tab'`); a cross-workspace drag
+  // highlights the destination workspace (`kind: 'workspace'`), since Stage 1 always appends.
+  const [dropTarget, setDropTarget] = useState<
+    | { kind: 'tab'; workspaceId: string; tabId: string; edge: DropEdge }
+    | { kind: 'workspace'; workspaceId: string }
+    | null
+  >(null);
 
   // Inline workspace creation state
   const [isCreating, setIsCreating] = useState(false);
@@ -448,6 +468,121 @@ export function WorkspacesView(): React.JSX.Element {
     setTabMenu({ workspaceId, tabId, x: event.clientX, y: event.clientY });
   };
 
+  // --- Tab drag-and-drop handlers ---
+  // The vertical sidebar tree supports both reordering a tab within its workspace and moving it to a
+  // different workspace. Cross-workspace drops reuse `moveTabToWorkspace`, which appends to the
+  // destination (positional cross-workspace insert is a planned follow-up).
+
+  const expandWorkspace = (workspaceId: string): void => {
+    setCollapsedWorkspaceIds((current) => {
+      if (!current.has(workspaceId)) {
+        return current;
+      }
+      const next = new Set(current);
+      next.delete(workspaceId);
+      return next;
+    });
+  };
+
+  const isTabDrag = (event: DragEvent): boolean =>
+    useTabDragStore.getState().dragging !== null && event.dataTransfer.types.includes(TAB_DND_MIME);
+
+  const handleTabDragStart = (
+    event: DragEvent<HTMLButtonElement>,
+    workspaceId: string,
+    tabId: string,
+  ): void => {
+    // The marker MIME identifies our tab drag during dragover (when payloads are unreadable); the
+    // real source ids are held in the drag store.
+    event.dataTransfer.setData(TAB_DND_MIME, tabId);
+    event.dataTransfer.effectAllowed = 'move';
+    beginTabDrag({ sourceWorkspaceId: workspaceId, tabId });
+  };
+
+  const handleTabDragEnd = (): void => {
+    endTabDrag();
+    setDropTarget(null);
+  };
+
+  const handleTabDragOver = (
+    event: DragEvent<HTMLButtonElement>,
+    workspaceId: string,
+    tabId: string,
+  ): void => {
+    const dragging = useTabDragStore.getState().dragging;
+    if (!dragging || !isTabDrag(event)) {
+      return;
+    }
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'move';
+    if (dragging.sourceWorkspaceId === workspaceId) {
+      const edge = resolveDropEdge(
+        'vertical',
+        { x: event.clientX, y: event.clientY },
+        event.currentTarget.getBoundingClientRect(),
+      );
+      setDropTarget({ kind: 'tab', workspaceId, tabId, edge });
+    } else {
+      setDropTarget({ kind: 'workspace', workspaceId });
+    }
+  };
+
+  const handleTabDrop = (
+    event: DragEvent<HTMLButtonElement>,
+    workspaceId: string,
+    tabId: string,
+  ): void => {
+    const dragging = useTabDragStore.getState().dragging;
+    if (!dragging || !isTabDrag(event)) {
+      return;
+    }
+    event.preventDefault();
+    if (dragging.sourceWorkspaceId === workspaceId) {
+      const workspace = workspaces.find((current) => current.id === workspaceId);
+      const fromIndex = workspace?.tabs.findIndex((tab) => tab.id === dragging.tabId) ?? -1;
+      const displayIndex = workspace?.tabs.findIndex((tab) => tab.id === tabId) ?? -1;
+      if (fromIndex !== -1 && displayIndex !== -1) {
+        const edge = resolveDropEdge(
+          'vertical',
+          { x: event.clientX, y: event.clientY },
+          event.currentTarget.getBoundingClientRect(),
+        );
+        reorderWorkspaceTab(
+          workspaceId,
+          dragging.tabId,
+          toReorderIndex(fromIndex, displayIndex, edge),
+        );
+      }
+    } else {
+      moveTabToWorkspace(dragging.sourceWorkspaceId, dragging.tabId, workspaceId);
+      expandWorkspace(workspaceId);
+    }
+    setDropTarget(null);
+  };
+
+  // Dropping onto a workspace header (its name row) moves a tab in from another workspace. Same as
+  // dropping on one of that workspace's tabs, but reachable even when the workspace is collapsed.
+  const handleWorkspaceDragOver = (event: DragEvent<HTMLDivElement>, workspaceId: string): void => {
+    const dragging = useTabDragStore.getState().dragging;
+    if (!dragging || !isTabDrag(event) || dragging.sourceWorkspaceId === workspaceId) {
+      return;
+    }
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'move';
+    setDropTarget({ kind: 'workspace', workspaceId });
+  };
+
+  const handleWorkspaceDrop = (event: DragEvent<HTMLDivElement>, workspaceId: string): void => {
+    const dragging = useTabDragStore.getState().dragging;
+    if (!dragging || !isTabDrag(event) || dragging.sourceWorkspaceId === workspaceId) {
+      return;
+    }
+    event.preventDefault();
+    moveTabToWorkspace(dragging.sourceWorkspaceId, dragging.tabId, workspaceId);
+    expandWorkspace(workspaceId);
+    setDropTarget(null);
+  };
+
   return (
     <div className="mb-4">
       <div className="mb-1 flex items-center justify-between px-2 text-[10px] font-bold uppercase tracking-wider text-subtle">
@@ -469,7 +604,19 @@ export function WorkspacesView(): React.JSX.Element {
 
           return (
             <div key={workspace.id} className="space-y-0.5">
-              <div className="group flex w-full items-center gap-1">
+              <div
+                className={`group flex w-full items-center gap-1 rounded-md ${
+                  dropTarget?.kind === 'workspace' && dropTarget.workspaceId === workspace.id
+                    ? 'ring-1 ring-brand'
+                    : ''
+                }`}
+                onDragOver={(event) => {
+                  handleWorkspaceDragOver(event, workspace.id);
+                }}
+                onDrop={(event) => {
+                  handleWorkspaceDrop(event, workspace.id);
+                }}
+              >
                 {isEditing ? (
                   <input
                     ref={renameInputRef}
@@ -556,7 +703,17 @@ export function WorkspacesView(): React.JSX.Element {
 
                     return (
                       <div key={tab.id} className="space-y-0.5">
-                        <div className="pl-6">
+                        <div className="relative pl-6">
+                          {dropTarget?.kind === 'tab' &&
+                            dropTarget.workspaceId === workspace.id &&
+                            dropTarget.tabId === tab.id && (
+                              <span
+                                aria-hidden="true"
+                                className={`pointer-events-none absolute inset-x-6 z-10 h-0.5 bg-brand ${
+                                  dropTarget.edge === 'before' ? 'top-0' : 'bottom-0'
+                                }`}
+                              />
+                            )}
                           <div className="group flex w-full items-center gap-1">
                             {isEditingTab ? (
                               <input
@@ -579,6 +736,7 @@ export function WorkspacesView(): React.JSX.Element {
                                     : 'text-muted hover:bg-raised/50'
                                 }`}
                                 type="button"
+                                draggable
                                 onClick={() => {
                                   selectWorkspaceTab(workspace.id, tab.id);
                                   closeSettings();
@@ -588,6 +746,16 @@ export function WorkspacesView(): React.JSX.Element {
                                 }}
                                 onDoubleClick={() => {
                                   startRenamingTab(workspace.id, tab.id, tab.name);
+                                }}
+                                onDragStart={(event) => {
+                                  handleTabDragStart(event, workspace.id, tab.id);
+                                }}
+                                onDragEnd={handleTabDragEnd}
+                                onDragOver={(event) => {
+                                  handleTabDragOver(event, workspace.id, tab.id);
+                                }}
+                                onDrop={(event) => {
+                                  handleTabDrop(event, workspace.id, tab.id);
                                 }}
                               >
                                 <Hash

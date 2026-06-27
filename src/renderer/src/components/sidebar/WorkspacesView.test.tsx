@@ -2,8 +2,31 @@ import { act, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Workspace } from '../../../../shared/types';
 import { usePaneInfoStore } from '../../stores/paneInfoStore';
+import { useTabDragStore } from '../../stores/tabDragStore';
 import { useWorkspaceStore } from '../../stores/workspaceStore';
 import { WorkspacesView } from './WorkspacesView';
+
+/**
+ * Minimal DataTransfer stand-in. jsdom does not implement DataTransfer, so the tab drag handlers —
+ * which only call setData and read `types` — are exercised against this shared instance passed
+ * through dragstart and drop (mirroring how a real drag reuses one DataTransfer).
+ */
+function createDataTransfer(): DataTransfer {
+  const data = new Map<string, string>();
+  return {
+    setData(type: string, value: string): void {
+      data.set(type, value);
+    },
+    getData(type: string): string {
+      return data.get(type) ?? '';
+    },
+    get types(): string[] {
+      return Array.from(data.keys());
+    },
+    dropEffect: 'none',
+    effectAllowed: 'all',
+  } as unknown as DataTransfer;
+}
 
 const workspace1: Workspace = {
   id: 'workspace-1',
@@ -150,6 +173,7 @@ describe('WorkspacesView', () => {
       error: null,
     });
     usePaneInfoStore.setState({ infosByPtyId: {}, isLoading: false, error: null });
+    useTabDragStore.getState().end();
     Reflect.deleteProperty(window, 'api');
     vi.useRealTimers();
   });
@@ -906,5 +930,86 @@ describe('WorkspacesView', () => {
     ]);
     expect(destination.panes.some((pane) => pane.id === 'workspace-2-pane-3')).toBe(true);
     expect(useWorkspaceStore.getState().activeWorkspaceId).toBe('workspace-1');
+  });
+
+  it('reorders a tab within its workspace by dragging it onto another tab', () => {
+    // Given: workspace-2 has two tabs (server, logs) shown in the sidebar.
+    render(<WorkspacesView />);
+    const dataTransfer = createDataTransfer();
+
+    // When: "server" is dragged onto the trailing half of "logs".
+    // (jsdom rects are zero-sized, so a positive clientY lands past the midpoint => "after".)
+    fireEvent.dragStart(screen.getByRole('button', { name: 'server (2 panes)' }), { dataTransfer });
+    fireEvent.drop(screen.getByRole('button', { name: 'logs (1 pane)' }), {
+      dataTransfer,
+      clientX: 0,
+      clientY: 10,
+    });
+
+    // Then: the dragged tab is reordered after the drop target within the same workspace.
+    expect(useWorkspaceStore.getState().workspaces[1]?.tabs.map((tab) => tab.id)).toEqual([
+      'workspace-2-tab-2',
+      'workspace-2-tab-1',
+    ]);
+  });
+
+  it('moves a tab to another workspace by dropping it on one of that workspace tabs', () => {
+    // Given: the sidebar shows workspace-1 (one tab) and workspace-2 (two tabs).
+    render(<WorkspacesView />);
+    const dataTransfer = createDataTransfer();
+
+    // When: "logs" from workspace-2 is dragged onto a tab of workspace-1.
+    fireEvent.dragStart(screen.getByRole('button', { name: 'logs (1 pane)' }), { dataTransfer });
+    fireEvent.drop(screen.getByRole('button', { name: 'zsh (1 pane)' }), {
+      dataTransfer,
+      clientX: 0,
+      clientY: 0,
+    });
+
+    // Then: the tab and its pane move to workspace-1, which becomes active.
+    const [destination, source] = useWorkspaceStore.getState().workspaces;
+    expect(source.tabs.map((tab) => tab.id)).toEqual(['workspace-2-tab-1']);
+    expect(destination.tabs.map((tab) => tab.id)).toEqual([
+      'workspace-1-tab-1',
+      'workspace-2-tab-2',
+    ]);
+    expect(destination.panes.some((pane) => pane.id === 'workspace-2-pane-3')).toBe(true);
+    expect(useWorkspaceStore.getState().activeWorkspaceId).toBe('workspace-1');
+  });
+
+  it('moves a tab to another workspace by dropping it on the workspace header', () => {
+    // Given: the sidebar shows both workspaces.
+    render(<WorkspacesView />);
+    const dataTransfer = createDataTransfer();
+
+    // When: "logs" is dragged onto the "Default" workspace header row.
+    fireEvent.dragStart(screen.getByRole('button', { name: 'logs (1 pane)' }), { dataTransfer });
+    fireEvent.drop(screen.getByRole('button', { name: 'Default' }), { dataTransfer });
+
+    // Then: the tab is appended to the destination workspace.
+    const [destination, source] = useWorkspaceStore.getState().workspaces;
+    expect(source.tabs.map((tab) => tab.id)).toEqual(['workspace-2-tab-1']);
+    expect(destination.tabs.map((tab) => tab.id)).toEqual([
+      'workspace-1-tab-1',
+      'workspace-2-tab-2',
+    ]);
+  });
+
+  it('does not move the last remaining tab out of its workspace', () => {
+    // Given: workspace-1 has a single tab, so moving it out would leave it empty.
+    render(<WorkspacesView />);
+    const dataTransfer = createDataTransfer();
+
+    // When: that lone tab is dragged onto the "Project" workspace header.
+    fireEvent.dragStart(screen.getByRole('button', { name: 'zsh (1 pane)' }), { dataTransfer });
+    fireEvent.drop(screen.getByRole('button', { name: 'Project' }), { dataTransfer });
+
+    // Then: the move is refused and both workspaces keep their tabs.
+    const [source, destination] = useWorkspaceStore.getState().workspaces;
+    expect(source.tabs.map((tab) => tab.id)).toEqual(['workspace-1-tab-1']);
+    expect(destination.tabs.map((tab) => tab.id)).toEqual([
+      'workspace-2-tab-1',
+      'workspace-2-tab-2',
+    ]);
   });
 });
