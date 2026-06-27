@@ -930,6 +930,7 @@ describe('WorkspacesView', () => {
     ]);
     expect(destination.panes.some((pane) => pane.id === 'workspace-2-pane-3')).toBe(true);
     expect(useWorkspaceStore.getState().activeWorkspaceId).toBe('workspace-1');
+    expect(useTabDragStore.getState().dragging).toBeNull();
   });
 
   it('reorders a tab within its workspace by dragging it onto another tab', () => {
@@ -1069,6 +1070,7 @@ describe('WorkspacesView', () => {
       'workspace-1-tab-1',
       'workspace-2-tab-2',
     ]);
+    expect(useTabDragStore.getState().dragging).toBeNull();
   });
 
   it('does not move the last remaining tab out of its workspace', () => {
@@ -1090,5 +1092,6 @@ describe('WorkspacesView', () => {
       'workspace-2-tab-1',
       'workspace-2-tab-2',
     ]);
+    expect(useTabDragStore.getState().dragging).toBeNull();
   });
 });

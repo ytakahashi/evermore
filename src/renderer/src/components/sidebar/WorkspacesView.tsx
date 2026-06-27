@@ -496,6 +496,13 @@ export function WorkspacesView(): React.JSX.Element {
     setDropTarget(null);
   };
 
+  const finishTabDrag = (): void => {
+    // Cross-workspace drops move the source tab out from under the dragged button; clear here so
+    // the transient drag source never depends on React observing a later dragend from that node.
+    endTabDrag();
+    clearDropTarget();
+  };
+
   const clearDropTargetWhenLeaving = (event: DragEvent<HTMLElement>): void => {
     if (event.relatedTarget instanceof Node && event.currentTarget.contains(event.relatedTarget)) {
       return;
@@ -523,8 +530,7 @@ export function WorkspacesView(): React.JSX.Element {
   };
 
   const handleTabDragEnd = (): void => {
-    endTabDrag();
-    setDropTarget(null);
+    finishTabDrag();
   };
 
   const handleTabDragOver = (
@@ -571,7 +577,7 @@ export function WorkspacesView(): React.JSX.Element {
       dragging.sourceWorkspaceId !== workspaceId &&
       !canMoveDraggedTabOut(dragging.sourceWorkspaceId)
     ) {
-      clearDropTarget();
+      finishTabDrag();
       return;
     }
     event.preventDefault();
@@ -596,7 +602,7 @@ export function WorkspacesView(): React.JSX.Element {
       moveTabToWorkspace(dragging.sourceWorkspaceId, dragging.tabId, workspaceId);
       expandWorkspace(workspaceId);
     }
-    setDropTarget(null);
+    finishTabDrag();
   };
 
   const handleWorkspaceBottomDragOver = (
@@ -653,7 +659,7 @@ export function WorkspacesView(): React.JSX.Element {
       dragging.sourceWorkspaceId !== workspaceId &&
       !canMoveDraggedTabOut(dragging.sourceWorkspaceId)
     ) {
-      clearDropTarget();
+      finishTabDrag();
       return;
     }
 
@@ -666,7 +672,7 @@ export function WorkspacesView(): React.JSX.Element {
       moveTabToWorkspace(dragging.sourceWorkspaceId, dragging.tabId, workspaceId);
       expandWorkspace(workspaceId);
     }
-    clearDropTarget();
+    finishTabDrag();
   };
 
   // Dropping onto a workspace header (its name row) moves a tab in from another workspace. Same as
@@ -692,14 +698,14 @@ export function WorkspacesView(): React.JSX.Element {
       return;
     }
     if (!canMoveDraggedTabOut(dragging.sourceWorkspaceId)) {
-      clearDropTarget();
+      finishTabDrag();
       return;
     }
     event.preventDefault();
     event.stopPropagation();
     moveTabToWorkspace(dragging.sourceWorkspaceId, dragging.tabId, workspaceId);
     expandWorkspace(workspaceId);
-    setDropTarget(null);
+    finishTabDrag();
   };
 
   return (
