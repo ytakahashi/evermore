@@ -940,6 +940,13 @@ describe('WorkspacesView', () => {
     // When: "server" is dragged onto the trailing half of "logs".
     // (jsdom rects are zero-sized, so a positive clientY lands past the midpoint => "after".)
     fireEvent.dragStart(screen.getByRole('button', { name: 'server (2 panes)' }), { dataTransfer });
+    expect(
+      fireEvent.dragOver(screen.getByRole('button', { name: 'logs (1 pane)' }), {
+        dataTransfer,
+        clientX: 0,
+        clientY: 10,
+      }),
+    ).toBe(false);
     fireEvent.drop(screen.getByRole('button', { name: 'logs (1 pane)' }), {
       dataTransfer,
       clientX: 0,
@@ -953,6 +960,65 @@ describe('WorkspacesView', () => {
     ]);
   });
 
+  it('reorders a tab when dropping over the target tab pane area', () => {
+    // Given: the target tab is expanded and shows its pane row below the tab row.
+    render(<WorkspacesView />);
+    const dataTransfer = createDataTransfer();
+    const logsPane = screen.getByRole('button', { name: /logs \.\.\.\/project\/logs/ });
+
+    // When: "server" is dragged over the pane area belonging to "logs".
+    fireEvent.dragStart(screen.getByRole('button', { name: 'server (2 panes)' }), { dataTransfer });
+    expect(
+      fireEvent.dragOver(logsPane, {
+        dataTransfer,
+        clientX: 0,
+        clientY: 10,
+      }),
+    ).toBe(false);
+    fireEvent.drop(logsPane, {
+      dataTransfer,
+      clientX: 0,
+      clientY: 10,
+    });
+
+    // Then: the drag is handled by the owning tab group, so "server" moves after "logs".
+    expect(useWorkspaceStore.getState().workspaces[1]?.tabs.map((tab) => tab.id)).toEqual([
+      'workspace-2-tab-2',
+      'workspace-2-tab-1',
+    ]);
+  });
+
+  it('reorders a tab to the workspace bottom drop zone', () => {
+    // Given: workspace-2 has multiple tabs and exposes a bottom drop zone after the last tab group.
+    const { container } = render(<WorkspacesView />);
+    const dataTransfer = createDataTransfer();
+    const bottomDropZone = container.querySelector(
+      '[data-workspace-bottom-drop-zone="workspace-2"]',
+    );
+    expect(bottomDropZone).toBeInstanceOf(HTMLElement);
+
+    // When: "server" is dragged to the workspace bottom.
+    fireEvent.dragStart(screen.getByRole('button', { name: 'server (2 panes)' }), { dataTransfer });
+    expect(
+      fireEvent.dragOver(bottomDropZone as HTMLElement, {
+        dataTransfer,
+        clientX: 0,
+        clientY: 10,
+      }),
+    ).toBe(false);
+    fireEvent.drop(bottomDropZone as HTMLElement, {
+      dataTransfer,
+      clientX: 0,
+      clientY: 10,
+    });
+
+    // Then: the tab is placed after the current last tab.
+    expect(useWorkspaceStore.getState().workspaces[1]?.tabs.map((tab) => tab.id)).toEqual([
+      'workspace-2-tab-2',
+      'workspace-2-tab-1',
+    ]);
+  });
+
   it('moves a tab to another workspace by dropping it on one of that workspace tabs', () => {
     // Given: the sidebar shows workspace-1 (one tab) and workspace-2 (two tabs).
     render(<WorkspacesView />);
@@ -960,6 +1026,13 @@ describe('WorkspacesView', () => {
 
     // When: "logs" from workspace-2 is dragged onto a tab of workspace-1.
     fireEvent.dragStart(screen.getByRole('button', { name: 'logs (1 pane)' }), { dataTransfer });
+    expect(
+      fireEvent.dragOver(screen.getByRole('button', { name: 'zsh (1 pane)' }), {
+        dataTransfer,
+        clientX: 0,
+        clientY: 0,
+      }),
+    ).toBe(false);
     fireEvent.drop(screen.getByRole('button', { name: 'zsh (1 pane)' }), {
       dataTransfer,
       clientX: 0,
@@ -984,6 +1057,9 @@ describe('WorkspacesView', () => {
 
     // When: "logs" is dragged onto the "Default" workspace header row.
     fireEvent.dragStart(screen.getByRole('button', { name: 'logs (1 pane)' }), { dataTransfer });
+    expect(
+      fireEvent.dragOver(screen.getByRole('button', { name: 'Default' }), { dataTransfer }),
+    ).toBe(false);
     fireEvent.drop(screen.getByRole('button', { name: 'Default' }), { dataTransfer });
 
     // Then: the tab is appended to the destination workspace.
@@ -1002,6 +1078,9 @@ describe('WorkspacesView', () => {
 
     // When: that lone tab is dragged onto the "Project" workspace header.
     fireEvent.dragStart(screen.getByRole('button', { name: 'zsh (1 pane)' }), { dataTransfer });
+    expect(
+      fireEvent.dragOver(screen.getByRole('button', { name: 'Project' }), { dataTransfer }),
+    ).toBe(true);
     fireEvent.drop(screen.getByRole('button', { name: 'Project' }), { dataTransfer });
 
     // Then: the move is refused and both workspaces keep their tabs.

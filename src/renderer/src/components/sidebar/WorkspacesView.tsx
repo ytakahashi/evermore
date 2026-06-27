@@ -487,6 +487,29 @@ export function WorkspacesView(): React.JSX.Element {
   const isTabDrag = (event: DragEvent): boolean =>
     useTabDragStore.getState().dragging !== null && event.dataTransfer.types.includes(TAB_DND_MIME);
 
+  const canMoveDraggedTabOut = (sourceWorkspaceId: string): boolean => {
+    const sourceWorkspace = workspaces.find((workspace) => workspace.id === sourceWorkspaceId);
+    return (sourceWorkspace?.tabs.length ?? 0) > 1;
+  };
+
+  const clearDropTarget = (): void => {
+    setDropTarget(null);
+  };
+
+  const clearDropTargetWhenLeaving = (event: DragEvent<HTMLElement>): void => {
+    if (event.relatedTarget instanceof Node && event.currentTarget.contains(event.relatedTarget)) {
+      return;
+    }
+    clearDropTarget();
+  };
+
+  const handleSidebarDragOver = (event: DragEvent<HTMLDivElement>): void => {
+    if (!isTabDrag(event) || dropTarget === null) {
+      return;
+    }
+    clearDropTarget();
+  };
+
   const handleTabDragStart = (
     event: DragEvent<HTMLButtonElement>,
     workspaceId: string,
@@ -505,7 +528,7 @@ export function WorkspacesView(): React.JSX.Element {
   };
 
   const handleTabDragOver = (
-    event: DragEvent<HTMLButtonElement>,
+    event: DragEvent<HTMLDivElement>,
     workspaceId: string,
     tabId: string,
   ): void => {
@@ -513,7 +536,15 @@ export function WorkspacesView(): React.JSX.Element {
     if (!dragging || !isTabDrag(event)) {
       return;
     }
+    if (
+      dragging.sourceWorkspaceId !== workspaceId &&
+      !canMoveDraggedTabOut(dragging.sourceWorkspaceId)
+    ) {
+      clearDropTarget();
+      return;
+    }
     event.preventDefault();
+    event.stopPropagation();
     event.dataTransfer.dropEffect = 'move';
     if (dragging.sourceWorkspaceId === workspaceId) {
       const edge = resolveDropEdge(
@@ -528,7 +559,7 @@ export function WorkspacesView(): React.JSX.Element {
   };
 
   const handleTabDrop = (
-    event: DragEvent<HTMLButtonElement>,
+    event: DragEvent<HTMLDivElement>,
     workspaceId: string,
     tabId: string,
   ): void => {
@@ -536,7 +567,15 @@ export function WorkspacesView(): React.JSX.Element {
     if (!dragging || !isTabDrag(event)) {
       return;
     }
+    if (
+      dragging.sourceWorkspaceId !== workspaceId &&
+      !canMoveDraggedTabOut(dragging.sourceWorkspaceId)
+    ) {
+      clearDropTarget();
+      return;
+    }
     event.preventDefault();
+    event.stopPropagation();
     if (dragging.sourceWorkspaceId === workspaceId) {
       const workspace = workspaces.find((current) => current.id === workspaceId);
       const fromIndex = workspace?.tabs.findIndex((tab) => tab.id === dragging.tabId) ?? -1;
@@ -560,6 +599,76 @@ export function WorkspacesView(): React.JSX.Element {
     setDropTarget(null);
   };
 
+  const handleWorkspaceBottomDragOver = (
+    event: DragEvent<HTMLDivElement>,
+    workspaceId: string,
+  ): void => {
+    const dragging = useTabDragStore.getState().dragging;
+    if (!dragging || !isTabDrag(event)) {
+      return;
+    }
+
+    const workspace = workspaces.find((current) => current.id === workspaceId);
+    if (!workspace) {
+      return;
+    }
+
+    if (
+      dragging.sourceWorkspaceId !== workspaceId &&
+      !canMoveDraggedTabOut(dragging.sourceWorkspaceId)
+    ) {
+      clearDropTarget();
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+    event.dataTransfer.dropEffect = 'move';
+
+    if (dragging.sourceWorkspaceId === workspaceId) {
+      const lastTab = workspace.tabs.at(-1);
+      if (lastTab) {
+        setDropTarget({ kind: 'tab', workspaceId, tabId: lastTab.id, edge: 'after' });
+      }
+    } else {
+      setDropTarget({ kind: 'workspace', workspaceId });
+    }
+  };
+
+  const handleWorkspaceBottomDrop = (
+    event: DragEvent<HTMLDivElement>,
+    workspaceId: string,
+  ): void => {
+    const dragging = useTabDragStore.getState().dragging;
+    if (!dragging || !isTabDrag(event)) {
+      return;
+    }
+
+    const workspace = workspaces.find((current) => current.id === workspaceId);
+    if (!workspace) {
+      return;
+    }
+
+    if (
+      dragging.sourceWorkspaceId !== workspaceId &&
+      !canMoveDraggedTabOut(dragging.sourceWorkspaceId)
+    ) {
+      clearDropTarget();
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+
+    if (dragging.sourceWorkspaceId === workspaceId) {
+      reorderWorkspaceTab(workspaceId, dragging.tabId, workspace.tabs.length - 1);
+    } else {
+      moveTabToWorkspace(dragging.sourceWorkspaceId, dragging.tabId, workspaceId);
+      expandWorkspace(workspaceId);
+    }
+    clearDropTarget();
+  };
+
   // Dropping onto a workspace header (its name row) moves a tab in from another workspace. Same as
   // dropping on one of that workspace's tabs, but reachable even when the workspace is collapsed.
   const handleWorkspaceDragOver = (event: DragEvent<HTMLDivElement>, workspaceId: string): void => {
@@ -567,7 +676,12 @@ export function WorkspacesView(): React.JSX.Element {
     if (!dragging || !isTabDrag(event) || dragging.sourceWorkspaceId === workspaceId) {
       return;
     }
+    if (!canMoveDraggedTabOut(dragging.sourceWorkspaceId)) {
+      clearDropTarget();
+      return;
+    }
     event.preventDefault();
+    event.stopPropagation();
     event.dataTransfer.dropEffect = 'move';
     setDropTarget({ kind: 'workspace', workspaceId });
   };
@@ -577,14 +691,19 @@ export function WorkspacesView(): React.JSX.Element {
     if (!dragging || !isTabDrag(event) || dragging.sourceWorkspaceId === workspaceId) {
       return;
     }
+    if (!canMoveDraggedTabOut(dragging.sourceWorkspaceId)) {
+      clearDropTarget();
+      return;
+    }
     event.preventDefault();
+    event.stopPropagation();
     moveTabToWorkspace(dragging.sourceWorkspaceId, dragging.tabId, workspaceId);
     expandWorkspace(workspaceId);
     setDropTarget(null);
   };
 
   return (
-    <div className="mb-4">
+    <div className="mb-4" onDragOver={handleSidebarDragOver}>
       <div className="mb-1 flex items-center justify-between px-2 text-[10px] font-bold uppercase tracking-wider text-subtle">
         <span>Workspaces</span>
         <button
@@ -613,6 +732,7 @@ export function WorkspacesView(): React.JSX.Element {
                 onDragOver={(event) => {
                   handleWorkspaceDragOver(event, workspace.id);
                 }}
+                onDragLeave={clearDropTargetWhenLeaving}
                 onDrop={(event) => {
                   handleWorkspaceDrop(event, workspace.id);
                 }}
@@ -702,18 +822,28 @@ export function WorkspacesView(): React.JSX.Element {
                     const paneOrder = flattenLayout(tab.layout).panes;
 
                     return (
-                      <div key={tab.id} className="space-y-0.5">
-                        <div className="relative pl-6">
-                          {dropTarget?.kind === 'tab' &&
-                            dropTarget.workspaceId === workspace.id &&
-                            dropTarget.tabId === tab.id && (
-                              <span
-                                aria-hidden="true"
-                                className={`pointer-events-none absolute inset-x-6 z-10 h-0.5 bg-brand ${
-                                  dropTarget.edge === 'before' ? 'top-0' : 'bottom-0'
-                                }`}
-                              />
-                            )}
+                      <div
+                        key={tab.id}
+                        className="relative space-y-0.5"
+                        onDragOver={(event) => {
+                          handleTabDragOver(event, workspace.id, tab.id);
+                        }}
+                        onDragLeave={clearDropTargetWhenLeaving}
+                        onDrop={(event) => {
+                          handleTabDrop(event, workspace.id, tab.id);
+                        }}
+                      >
+                        {dropTarget?.kind === 'tab' &&
+                          dropTarget.workspaceId === workspace.id &&
+                          dropTarget.tabId === tab.id && (
+                            <span
+                              aria-hidden="true"
+                              className={`pointer-events-none absolute inset-x-6 z-10 h-0.5 bg-brand ${
+                                dropTarget.edge === 'before' ? 'top-0' : 'bottom-0'
+                              }`}
+                            />
+                          )}
+                        <div className="pl-6">
                           <div className="group flex w-full items-center gap-1">
                             {isEditingTab ? (
                               <input
@@ -751,12 +881,6 @@ export function WorkspacesView(): React.JSX.Element {
                                   handleTabDragStart(event, workspace.id, tab.id);
                                 }}
                                 onDragEnd={handleTabDragEnd}
-                                onDragOver={(event) => {
-                                  handleTabDragOver(event, workspace.id, tab.id);
-                                }}
-                                onDrop={(event) => {
-                                  handleTabDrop(event, workspace.id, tab.id);
-                                }}
                               >
                                 <Hash
                                   size={14}
@@ -816,6 +940,18 @@ export function WorkspacesView(): React.JSX.Element {
                       </div>
                     );
                   })}
+                  <div
+                    aria-hidden="true"
+                    className="h-2"
+                    data-workspace-bottom-drop-zone={workspace.id}
+                    onDragOver={(event) => {
+                      handleWorkspaceBottomDragOver(event, workspace.id);
+                    }}
+                    onDragLeave={clearDropTargetWhenLeaving}
+                    onDrop={(event) => {
+                      handleWorkspaceBottomDrop(event, workspace.id);
+                    }}
+                  />
                 </div>
               )}
             </div>
