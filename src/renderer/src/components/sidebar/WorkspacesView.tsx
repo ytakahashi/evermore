@@ -16,7 +16,13 @@ import { useUiStore } from '../../stores/uiStore';
 import { useWorkspaceStore } from '../../stores/workspaceStore';
 import { ContextMenu } from '../common/ContextMenu';
 import { hasActionableItem, type ContextMenuItem } from '../common/contextMenuItems';
-import { resolveDropEdge, toReorderIndex, TAB_DND_MIME, type DropEdge } from '../common/tabDnd';
+import {
+  resolveDropEdge,
+  toInsertIndex,
+  toReorderIndex,
+  TAB_DND_MIME,
+  type DropEdge,
+} from '../common/tabDnd';
 import { getPaneRunningIndicator } from './pane-running-indicator';
 import { SparklesIcon } from './SparklesIcon';
 
@@ -193,9 +199,11 @@ export function WorkspacesView(): React.JSX.Element {
     y: number;
   } | null>(null);
 
-  // Tracks where an in-flight tab drag would land, driving the drop indicators. A same-workspace
-  // drag shows an insertion line on the hovered tab (`kind: 'tab'`); a cross-workspace drag
-  // highlights the destination workspace (`kind: 'workspace'`), since Stage 1 always appends.
+  // Tracks where an in-flight tab drag would land, driving the drop indicators. Hovering a tab row
+  // shows an insertion line on that tab (`kind: 'tab'`) whether the drag stays in its workspace
+  // (reorder) or crosses into another (positional move). Dropping onto a collapsed workspace's
+  // header has no visible tab rows to anchor a line, so it highlights the whole destination
+  // (`kind: 'workspace'`) and appends.
   const [dropTarget, setDropTarget] = useState<
     | { kind: 'tab'; workspaceId: string; tabId: string; edge: DropEdge }
     | { kind: 'workspace'; workspaceId: string }
@@ -470,8 +478,12 @@ export function WorkspacesView(): React.JSX.Element {
 
   // --- Tab drag-and-drop handlers ---
   // The vertical sidebar tree supports both reordering a tab within its workspace and moving it to a
-  // different workspace. Cross-workspace drops reuse `moveTabToWorkspace`, which appends to the
-  // destination (positional cross-workspace insert is a planned follow-up).
+  // different workspace. A drop onto a tab row reuses the hovered tab's index for both: same
+  // workspace via `reorderWorkspaceTab`, cross workspace via `moveTabToWorkspace` with the resolved
+  // insertion index. A drop onto a (collapsed) workspace header still appends.
+  // TODO: Split sidebar tab DnD hit zones into the tab row, an explicit "after this tab" zone, and
+  // the pane area. The current tab group handler includes pane rows in its bounding rect, so the
+  // midpoint and insertion indicator can feel ambiguous around the tab/pane boundary.
 
   const expandWorkspace = (workspaceId: string): void => {
     setCollapsedWorkspaceIds((current) => {
@@ -552,16 +564,14 @@ export function WorkspacesView(): React.JSX.Element {
     event.preventDefault();
     event.stopPropagation();
     event.dataTransfer.dropEffect = 'move';
-    if (dragging.sourceWorkspaceId === workspaceId) {
-      const edge = resolveDropEdge(
-        'vertical',
-        { x: event.clientX, y: event.clientY },
-        event.currentTarget.getBoundingClientRect(),
-      );
-      setDropTarget({ kind: 'tab', workspaceId, tabId, edge });
-    } else {
-      setDropTarget({ kind: 'workspace', workspaceId });
-    }
+    // Both reorder and cross-workspace move land relative to the hovered tab, so the insertion line
+    // is the right affordance for either case.
+    const edge = resolveDropEdge(
+      'vertical',
+      { x: event.clientX, y: event.clientY },
+      event.currentTarget.getBoundingClientRect(),
+    );
+    setDropTarget({ kind: 'tab', workspaceId, tabId, edge });
   };
 
   const handleTabDrop = (
@@ -582,25 +592,32 @@ export function WorkspacesView(): React.JSX.Element {
     }
     event.preventDefault();
     event.stopPropagation();
-    if (dragging.sourceWorkspaceId === workspaceId) {
-      const workspace = workspaces.find((current) => current.id === workspaceId);
-      const fromIndex = workspace?.tabs.findIndex((tab) => tab.id === dragging.tabId) ?? -1;
-      const displayIndex = workspace?.tabs.findIndex((tab) => tab.id === tabId) ?? -1;
-      if (fromIndex !== -1 && displayIndex !== -1) {
-        const edge = resolveDropEdge(
-          'vertical',
-          { x: event.clientX, y: event.clientY },
-          event.currentTarget.getBoundingClientRect(),
-        );
-        reorderWorkspaceTab(
-          workspaceId,
+    const workspace = workspaces.find((current) => current.id === workspaceId);
+    const displayIndex = workspace?.tabs.findIndex((tab) => tab.id === tabId) ?? -1;
+    if (displayIndex !== -1) {
+      const edge = resolveDropEdge(
+        'vertical',
+        { x: event.clientX, y: event.clientY },
+        event.currentTarget.getBoundingClientRect(),
+      );
+      if (dragging.sourceWorkspaceId === workspaceId) {
+        const fromIndex = workspace?.tabs.findIndex((tab) => tab.id === dragging.tabId) ?? -1;
+        if (fromIndex !== -1) {
+          reorderWorkspaceTab(
+            workspaceId,
+            dragging.tabId,
+            toReorderIndex(fromIndex, displayIndex, edge),
+          );
+        }
+      } else {
+        moveTabToWorkspace(
+          dragging.sourceWorkspaceId,
           dragging.tabId,
-          toReorderIndex(fromIndex, displayIndex, edge),
+          workspaceId,
+          toInsertIndex(displayIndex, edge),
         );
+        expandWorkspace(workspaceId);
       }
-    } else {
-      moveTabToWorkspace(dragging.sourceWorkspaceId, dragging.tabId, workspaceId);
-      expandWorkspace(workspaceId);
     }
     finishTabDrag();
   };
@@ -631,13 +648,11 @@ export function WorkspacesView(): React.JSX.Element {
     event.stopPropagation();
     event.dataTransfer.dropEffect = 'move';
 
-    if (dragging.sourceWorkspaceId === workspaceId) {
-      const lastTab = workspace.tabs.at(-1);
-      if (lastTab) {
-        setDropTarget({ kind: 'tab', workspaceId, tabId: lastTab.id, edge: 'after' });
-      }
-    } else {
-      setDropTarget({ kind: 'workspace', workspaceId });
+    // Dropping below the last tab lands at the end of the list for both reorder and cross-workspace
+    // move, so anchor the insertion line after the last tab in either case.
+    const lastTab = workspace.tabs.at(-1);
+    if (lastTab) {
+      setDropTarget({ kind: 'tab', workspaceId, tabId: lastTab.id, edge: 'after' });
     }
   };
 
@@ -669,7 +684,13 @@ export function WorkspacesView(): React.JSX.Element {
     if (dragging.sourceWorkspaceId === workspaceId) {
       reorderWorkspaceTab(workspaceId, dragging.tabId, workspace.tabs.length - 1);
     } else {
-      moveTabToWorkspace(dragging.sourceWorkspaceId, dragging.tabId, workspaceId);
+      // Append: the target list does not contain the dragged tab, so its length is the tail index.
+      moveTabToWorkspace(
+        dragging.sourceWorkspaceId,
+        dragging.tabId,
+        workspaceId,
+        workspace.tabs.length,
+      );
       expandWorkspace(workspaceId);
     }
     finishTabDrag();

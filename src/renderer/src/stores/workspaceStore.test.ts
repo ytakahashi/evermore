@@ -2337,5 +2337,92 @@ describe('workspaceStore', () => {
         'workspace-1-b',
       ]);
     });
+
+    it('inserts the moved tab at the given index in the target workspace', async () => {
+      // Given: a two-tab source and a three-tab target workspace.
+      const source = createMultiTabWorkspace('workspace-1', ['a', 'b']);
+      const target = createMultiTabWorkspace('workspace-2', ['x', 'y', 'z']);
+      workspaceApi.list = vi.fn(() =>
+        Promise.resolve({ workspaces: [source, target], activeWorkspaceId: 'workspace-1' }),
+      );
+      const useStore = createWorkspaceStore({ workspaceApi });
+      await useStore.getState().loadWorkspaces();
+
+      // When: a source tab is moved into the middle of the target list.
+      useStore.getState().moveTabToWorkspace('workspace-1', 'workspace-1-a', 'workspace-2', 1);
+
+      // Then: the tab lands at that index and becomes active.
+      const updatedTarget = useStore.getState().workspaces[1];
+      expect(updatedTarget?.tabs.map((tab) => tab.id)).toEqual([
+        'workspace-2-x',
+        'workspace-1-a',
+        'workspace-2-y',
+        'workspace-2-z',
+      ]);
+      expect(updatedTarget?.activeTabId).toBe('workspace-1-a');
+    });
+
+    it('inserts the moved tab at the head when the index is zero', async () => {
+      // Given: a two-tab source and a two-tab target workspace.
+      const source = createMultiTabWorkspace('workspace-1', ['a', 'b']);
+      const target = createMultiTabWorkspace('workspace-2', ['x', 'y']);
+      workspaceApi.list = vi.fn(() =>
+        Promise.resolve({ workspaces: [source, target], activeWorkspaceId: 'workspace-1' }),
+      );
+      const useStore = createWorkspaceStore({ workspaceApi });
+      await useStore.getState().loadWorkspaces();
+
+      // When: a source tab is dropped before the first target tab.
+      useStore.getState().moveTabToWorkspace('workspace-1', 'workspace-1-a', 'workspace-2', 0);
+
+      // Then: the moved tab becomes the first tab in the target.
+      expect(useStore.getState().workspaces[1]?.tabs.map((tab) => tab.id)).toEqual([
+        'workspace-1-a',
+        'workspace-2-x',
+        'workspace-2-y',
+      ]);
+    });
+
+    it('clamps an out-of-range index so the moved tab appends', async () => {
+      // Given: a two-tab source and a two-tab target workspace.
+      const source = createMultiTabWorkspace('workspace-1', ['a', 'b']);
+      const target = createMultiTabWorkspace('workspace-2', ['x', 'y']);
+      workspaceApi.list = vi.fn(() =>
+        Promise.resolve({ workspaces: [source, target], activeWorkspaceId: 'workspace-1' }),
+      );
+      const useStore = createWorkspaceStore({ workspaceApi });
+      await useStore.getState().loadWorkspaces();
+
+      // When: a source tab is dropped with an index past the end of the target list.
+      useStore.getState().moveTabToWorkspace('workspace-1', 'workspace-1-a', 'workspace-2', 99);
+
+      // Then: the index clamps to the tail, matching the default append behaviour.
+      expect(useStore.getState().workspaces[1]?.tabs.map((tab) => tab.id)).toEqual([
+        'workspace-2-x',
+        'workspace-2-y',
+        'workspace-1-a',
+      ]);
+    });
+
+    it('appends the moved tab when no index is given', async () => {
+      // Given: a two-tab source and a two-tab target workspace.
+      const source = createMultiTabWorkspace('workspace-1', ['a', 'b']);
+      const target = createMultiTabWorkspace('workspace-2', ['x', 'y']);
+      workspaceApi.list = vi.fn(() =>
+        Promise.resolve({ workspaces: [source, target], activeWorkspaceId: 'workspace-1' }),
+      );
+      const useStore = createWorkspaceStore({ workspaceApi });
+      await useStore.getState().loadWorkspaces();
+
+      // When: a source tab is moved without specifying an index (menu-driven move).
+      useStore.getState().moveTabToWorkspace('workspace-1', 'workspace-1-a', 'workspace-2');
+
+      // Then: the tab is appended to the end of the target list.
+      expect(useStore.getState().workspaces[1]?.tabs.map((tab) => tab.id)).toEqual([
+        'workspace-2-x',
+        'workspace-2-y',
+        'workspace-1-a',
+      ]);
+    });
   });
 });
