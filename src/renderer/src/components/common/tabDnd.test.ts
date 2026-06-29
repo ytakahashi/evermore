@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { resolveDropEdge, toReorderIndex, type Bounds } from './tabDnd';
+import { resolveDropEdge, toInsertIndex, toReorderIndex, type Bounds } from './tabDnd';
 
 const horizontalBounds: Bounds = { left: 100, right: 200, top: 0, bottom: 30 };
 const verticalBounds: Bounds = { left: 0, right: 200, top: 100, bottom: 140 };
@@ -46,5 +46,25 @@ describe('toReorderIndex', () => {
     // Given: a tab dropped onto either edge of its own slot.
     expect(toReorderIndex(2, 2, 'before')).toBe(2);
     expect(toReorderIndex(2, 2, 'after')).toBe(2);
+  });
+});
+
+describe('toInsertIndex', () => {
+  it('inserts at the hovered index when dropping before it', () => {
+    // Given: a cross-workspace tab dropped on the leading edge of the tab at index 2.
+    // When / Then: no shift compensation applies, so it lands at index 2.
+    expect(toInsertIndex(2, 'before')).toBe(2);
+  });
+
+  it('inserts after the hovered index when dropping after it', () => {
+    // Given: a cross-workspace tab dropped on the trailing edge of the tab at index 2.
+    // When / Then: it lands one slot later, at index 3.
+    expect(toInsertIndex(2, 'after')).toBe(3);
+  });
+
+  it('maps a drop after the first tab to index one (head insert otherwise)', () => {
+    // Given: drops on either edge of the first tab.
+    expect(toInsertIndex(0, 'before')).toBe(0);
+    expect(toInsertIndex(0, 'after')).toBe(1);
   });
 });

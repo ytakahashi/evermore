@@ -55,18 +55,26 @@ export interface WorkspaceStoreState {
    */
   reorderWorkspaceTab: (workspaceId: string, tabId: string, toIndex: number) => void;
   /**
-   * Moves a tab and the panes it owns from `sourceWorkspaceId` to `targetWorkspaceId`, appending it
-   * to the target's tab list and making it the target's active tab. No-op when either workspace or
-   * the tab is missing, when source equals target, or when the tab is the only one left in the
-   * source workspace (the "at least one tab" invariant mirrors {@link closeWorkspaceTab}). The
-   * source's active tab advances by the same rule as a tab close, and both workspaces are persisted.
+   * Moves a tab and the panes it owns from `sourceWorkspaceId` to `targetWorkspaceId`, inserting it
+   * at `toIndex` in the target's tab list and making it the target's active tab. When `toIndex` is
+   * omitted the tab is appended (menu-driven moves rely on this default); when given it is clamped
+   * to `[0, targetTabs.length]` so drag-and-drop can drop the tab at any position. No-op when either
+   * workspace or the tab is missing, when source equals target, or when the tab is the only one left
+   * in the source workspace (the "at least one tab" invariant mirrors {@link closeWorkspaceTab}).
+   * The source's active tab advances by the same rule as a tab close, and both workspaces are
+   * persisted in a single update.
    *
    * The moved panes keep their runtime `ptyId` on purpose. `MainTerminalArea` mounts every tab in a
    * single list keyed by `tab.id`, so a moved tab keeps its React identity and its terminals are not
    * unmounted — the live PTY survives the move. Carrying `ptyId` here keeps the moved pane in sync
    * with that still-running terminal; dropping it would desync the pane from its live PTY.
    */
-  moveTabToWorkspace: (sourceWorkspaceId: string, tabId: string, targetWorkspaceId: string) => void;
+  moveTabToWorkspace: (
+    sourceWorkspaceId: string,
+    tabId: string,
+    targetWorkspaceId: string,
+    toIndex?: number,
+  ) => void;
   setActivePane: (paneId: string) => void;
   setPanePtyId: (paneId: string, ptyId: string | null) => void;
   splitPane: (paneId: string, direction: SplitDirection) => void;
@@ -900,6 +908,7 @@ export function createWorkspaceStore(
         sourceWorkspaceId: string,
         tabId: string,
         targetWorkspaceId: string,
+        toIndex?: number,
       ): void => {
         if (sourceWorkspaceId === targetWorkspaceId) {
           return;
@@ -979,9 +988,18 @@ export function createWorkspaceStore(
               : sourceWorkspace.activeTabId,
         };
 
+        // Clamp to `[0, length]` (inclusive of length so a drop past the last tab appends); an
+        // omitted `toIndex` keeps the historical append behaviour that menu-driven moves depend on.
+        const insertAt =
+          toIndex === undefined
+            ? targetWorkspace.tabs.length
+            : Math.min(Math.max(toIndex, 0), targetWorkspace.tabs.length);
+        const nextTargetTabs = [...targetWorkspace.tabs];
+        nextTargetTabs.splice(insertAt, 0, movedTab);
+
         const updatedTarget: Workspace = {
           ...targetWorkspace,
-          tabs: [...targetWorkspace.tabs, movedTab],
+          tabs: nextTargetTabs,
           panes: [...targetWorkspace.panes, ...movingPanes],
           // A moved tab always becomes active in its new home, regardless of whether the move
           // follows focus there. This keeps the rule simple and matches direct-manipulation (future

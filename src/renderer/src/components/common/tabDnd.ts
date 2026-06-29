@@ -53,3 +53,13 @@ export function toReorderIndex(fromIndex: number, displayIndex: number, edge: Dr
   const insertBefore = edge === 'after' ? displayIndex + 1 : displayIndex;
   return insertBefore > fromIndex ? insertBefore - 1 : insertBefore;
 }
+
+/**
+ * Translates a hovered tab's display index and drop edge into the `toIndex` argument of
+ * `moveTabToWorkspace` for a cross-workspace move. Unlike {@link toReorderIndex} this applies no
+ * shift compensation: the dragged tab lives in a different workspace, so it does not occupy a slot
+ * in the destination list and dropping after the last tab maps to that list's length (append).
+ */
+export function toInsertIndex(displayIndex: number, edge: DropEdge): number {
+  return edge === 'after' ? displayIndex + 1 : displayIndex;
+}

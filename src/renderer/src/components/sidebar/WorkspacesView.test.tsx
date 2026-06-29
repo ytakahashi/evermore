@@ -28,6 +28,18 @@ function createDataTransfer(): DataTransfer {
   } as unknown as DataTransfer;
 }
 
+/*
+ * Drag coordinate limitation in these tests:
+ * jsdom's synthetic DragEvent does not carry `clientX` / `clientY`, so the values passed to
+ * `fireEvent.dragOver` / `fireEvent.drop` never reach `resolveDropEdge` — it reads `undefined`.
+ * Combined with jsdom's zero-sized `getBoundingClientRect`, the midpoint comparison always resolves
+ * to the `'after'` edge regardless of the coordinates supplied below. The DnD tests are therefore
+ * written to assert `'after'`-edge outcomes only; the `'before'` edge cannot be exercised here and
+ * is covered instead by the pure `resolveDropEdge` / `toInsertIndex` / `toReorderIndex` unit tests
+ * in `common/tabDnd.test.ts`. To distinguish a positional insert from an append, drop onto a
+ * non-last tab so the resolved `'after'` index still lands mid-list.
+ */
+
 const workspace1: Workspace = {
   id: 'workspace-1',
   name: 'Default',
@@ -938,8 +950,8 @@ describe('WorkspacesView', () => {
     render(<WorkspacesView />);
     const dataTransfer = createDataTransfer();
 
-    // When: "server" is dragged onto the trailing half of "logs".
-    // (jsdom rects are zero-sized, so a positive clientY lands past the midpoint => "after".)
+    // When: "server" is dragged onto "logs". The drop resolves to the "after" edge — see the drag
+    // coordinate limitation note above; the coordinates here are illustrative only.
     fireEvent.dragStart(screen.getByRole('button', { name: 'server (2 panes)' }), { dataTransfer });
     expect(
       fireEvent.dragOver(screen.getByRole('button', { name: 'logs (1 pane)' }), {
@@ -1049,6 +1061,59 @@ describe('WorkspacesView', () => {
     ]);
     expect(destination.panes.some((pane) => pane.id === 'workspace-2-pane-3')).toBe(true);
     expect(useWorkspaceStore.getState().activeWorkspaceId).toBe('workspace-1');
+  });
+
+  it('moves a tab into the dropped position of another workspace', () => {
+    // Given: a two-tab source workspace (so a tab may leave it) and the two-tab "Project"
+    // destination, whose insert position is observable because it holds more than one tab.
+    const twoTabSource: Workspace = {
+      ...workspace1,
+      tabs: [
+        ...workspace1.tabs,
+        {
+          id: 'workspace-1-tab-2',
+          name: 'extra',
+          layout: { type: 'leaf', paneId: 'workspace-1-pane-2' },
+          activePaneId: 'workspace-1-pane-2',
+        },
+      ],
+      panes: [...workspace1.panes, { id: 'workspace-1-pane-2', cwd: '/Users/tester' }],
+    };
+    useWorkspaceStore.setState({
+      workspaces: [twoTabSource, workspace2],
+      activeWorkspaceId: 'workspace-1',
+      isLoading: false,
+      error: null,
+    });
+    render(<WorkspacesView />);
+    const dataTransfer = createDataTransfer();
+
+    // When: "extra" is dragged onto the first destination tab "server". The drop resolves to the
+    // "after" edge (see the drag coordinate limitation note above), which inserts between the two
+    // destination tabs rather than appending — proving the position is honored.
+    fireEvent.dragStart(screen.getByRole('button', { name: 'extra (1 pane)' }), { dataTransfer });
+    expect(
+      fireEvent.dragOver(screen.getByRole('button', { name: 'server (2 panes)' }), {
+        dataTransfer,
+        clientX: 0,
+        clientY: 10,
+      }),
+    ).toBe(false);
+    fireEvent.drop(screen.getByRole('button', { name: 'server (2 panes)' }), {
+      dataTransfer,
+      clientX: 0,
+      clientY: 10,
+    });
+
+    // Then: the tab is inserted at the dropped position rather than appended to the end.
+    const [source, destination] = useWorkspaceStore.getState().workspaces;
+    expect(source.tabs.map((tab) => tab.id)).toEqual(['workspace-1-tab-1']);
+    expect(destination.tabs.map((tab) => tab.id)).toEqual([
+      'workspace-2-tab-1',
+      'workspace-1-tab-2',
+      'workspace-2-tab-2',
+    ]);
+    expect(destination.activeTabId).toBe('workspace-1-tab-2');
   });
 
   it('moves a tab to another workspace by dropping it on the workspace header', () => {
