@@ -994,7 +994,7 @@ describe('WorkspacesView', () => {
       clientY: 10,
     });
 
-    // Then: the drag is handled by the owning tab group, so "server" moves after "logs".
+    // Then: the pane area is a dedicated "after this tab" drop zone, so "server" moves after "logs".
     expect(useWorkspaceStore.getState().workspaces[1]?.tabs.map((tab) => tab.id)).toEqual([
       'workspace-2-tab-2',
       'workspace-2-tab-1',

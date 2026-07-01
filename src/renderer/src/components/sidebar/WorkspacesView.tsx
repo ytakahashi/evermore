@@ -11,7 +11,7 @@ import { countPaneLeaves, flattenLayout } from '../../../../shared/pane-layout';
 import { getPathBasename, getTruncatedPathLabel } from '../../../../shared/path-label';
 import type { Pane, PaneRuntimeInfo } from '../../../../shared/types';
 import { usePaneInfoStore } from '../../stores/paneInfoStore';
-import { useTabDragStore } from '../../stores/tabDragStore';
+import { useTabDragStore, type TabDragDescriptor } from '../../stores/tabDragStore';
 import { useUiStore } from '../../stores/uiStore';
 import { useWorkspaceStore } from '../../stores/workspaceStore';
 import { ContextMenu } from '../common/ContextMenu';
@@ -481,9 +481,12 @@ export function WorkspacesView(): React.JSX.Element {
   // different workspace. A drop onto a tab row reuses the hovered tab's index for both: same
   // workspace via `reorderWorkspaceTab`, cross workspace via `moveTabToWorkspace` with the resolved
   // insertion index. A drop onto a (collapsed) workspace header still appends.
-  // TODO: Split sidebar tab DnD hit zones into the tab row, an explicit "after this tab" zone, and
-  // the pane area. The current tab group handler includes pane rows in its bounding rect, so the
-  // midpoint and insertion indicator can feel ambiguous around the tab/pane boundary.
+  //
+  // The tab row and the pane rows beneath it are separate hit zones (rather than one bounding rect
+  // spanning both): the tab row does its own before/after midpoint split against its own rect, while
+  // the pane rows below always resolve to "after this tab" without a midpoint check of their own.
+  // Both cases render the same insertion indicator, anchored to the whole tab+panes group (see the
+  // group wrapper below) rather than to whichever sub-element happened to be hovered.
 
   const expandWorkspace = (workspaceId: string): void => {
     setCollapsedWorkspaceIds((current) => {
@@ -545,27 +548,80 @@ export function WorkspacesView(): React.JSX.Element {
     finishTabDrag();
   };
 
-  const handleTabDragOver = (
-    event: DragEvent<HTMLDivElement>,
+  // Shared dragover/drop guard for the tab-row and after-tab hit zones below: `not-dragging` means no
+  // tab drag is in flight (leave any existing indicator alone), `rejected` means a drag is in flight
+  // but can't land here (e.g. the only tab in its workspace), `ok` carries the drag descriptor.
+  const evaluateTabDragTarget = (
+    event: DragEvent,
     workspaceId: string,
-    tabId: string,
-  ): void => {
+  ):
+    | { status: 'not-dragging' }
+    | { status: 'rejected' }
+    | { status: 'ok'; dragging: TabDragDescriptor } => {
     const dragging = useTabDragStore.getState().dragging;
     if (!dragging || !isTabDrag(event)) {
-      return;
+      return { status: 'not-dragging' };
     }
     if (
       dragging.sourceWorkspaceId !== workspaceId &&
       !canMoveDraggedTabOut(dragging.sourceWorkspaceId)
     ) {
+      return { status: 'rejected' };
+    }
+    return { status: 'ok', dragging };
+  };
+
+  // Applies a resolved drop edge relative to `tabId`: same workspace reorders in place, cross
+  // workspace inserts at the resolved position and expands the destination.
+  const applyTabDrop = (
+    workspaceId: string,
+    tabId: string,
+    edge: DropEdge,
+    dragging: TabDragDescriptor,
+  ): void => {
+    const workspace = workspaces.find((current) => current.id === workspaceId);
+    const displayIndex = workspace?.tabs.findIndex((tab) => tab.id === tabId) ?? -1;
+    if (displayIndex === -1) {
+      return;
+    }
+    if (dragging.sourceWorkspaceId === workspaceId) {
+      const fromIndex = workspace?.tabs.findIndex((tab) => tab.id === dragging.tabId) ?? -1;
+      if (fromIndex !== -1) {
+        reorderWorkspaceTab(
+          workspaceId,
+          dragging.tabId,
+          toReorderIndex(fromIndex, displayIndex, edge),
+        );
+      }
+    } else {
+      moveTabToWorkspace(
+        dragging.sourceWorkspaceId,
+        dragging.tabId,
+        workspaceId,
+        toInsertIndex(displayIndex, edge),
+      );
+      expandWorkspace(workspaceId);
+    }
+  };
+
+  // Tab row hit zone: `event.currentTarget` is the row itself, so its own rect drives the
+  // before/after midpoint split.
+  const handleTabRowDragOver = (
+    event: DragEvent<HTMLDivElement>,
+    workspaceId: string,
+    tabId: string,
+  ): void => {
+    const result = evaluateTabDragTarget(event, workspaceId);
+    if (result.status === 'not-dragging') {
+      return;
+    }
+    if (result.status === 'rejected') {
       clearDropTarget();
       return;
     }
     event.preventDefault();
     event.stopPropagation();
     event.dataTransfer.dropEffect = 'move';
-    // Both reorder and cross-workspace move land relative to the hovered tab, so the insertion line
-    // is the right affordance for either case.
     const edge = resolveDropEdge(
       'vertical',
       { x: event.clientX, y: event.clientY },
@@ -574,51 +630,68 @@ export function WorkspacesView(): React.JSX.Element {
     setDropTarget({ kind: 'tab', workspaceId, tabId, edge });
   };
 
-  const handleTabDrop = (
+  const handleTabRowDrop = (
     event: DragEvent<HTMLDivElement>,
     workspaceId: string,
     tabId: string,
   ): void => {
-    const dragging = useTabDragStore.getState().dragging;
-    if (!dragging || !isTabDrag(event)) {
+    const result = evaluateTabDragTarget(event, workspaceId);
+    if (result.status === 'not-dragging') {
       return;
     }
-    if (
-      dragging.sourceWorkspaceId !== workspaceId &&
-      !canMoveDraggedTabOut(dragging.sourceWorkspaceId)
-    ) {
+    if (result.status === 'rejected') {
       finishTabDrag();
       return;
     }
     event.preventDefault();
     event.stopPropagation();
-    const workspace = workspaces.find((current) => current.id === workspaceId);
-    const displayIndex = workspace?.tabs.findIndex((tab) => tab.id === tabId) ?? -1;
-    if (displayIndex !== -1) {
-      const edge = resolveDropEdge(
-        'vertical',
-        { x: event.clientX, y: event.clientY },
-        event.currentTarget.getBoundingClientRect(),
-      );
-      if (dragging.sourceWorkspaceId === workspaceId) {
-        const fromIndex = workspace?.tabs.findIndex((tab) => tab.id === dragging.tabId) ?? -1;
-        if (fromIndex !== -1) {
-          reorderWorkspaceTab(
-            workspaceId,
-            dragging.tabId,
-            toReorderIndex(fromIndex, displayIndex, edge),
-          );
-        }
-      } else {
-        moveTabToWorkspace(
-          dragging.sourceWorkspaceId,
-          dragging.tabId,
-          workspaceId,
-          toInsertIndex(displayIndex, edge),
-        );
-        expandWorkspace(workspaceId);
-      }
+    const edge = resolveDropEdge(
+      'vertical',
+      { x: event.clientX, y: event.clientY },
+      event.currentTarget.getBoundingClientRect(),
+    );
+    applyTabDrop(workspaceId, tabId, edge, result.dragging);
+    finishTabDrag();
+  };
+
+  // Pane-rows hit zone beneath a tab row: no midpoint split, always "after this tab". The insertion
+  // indicator this sets is the same one the tab row's own after-half uses, anchored to the bottom of
+  // the whole tab+panes group (see the group wrapper in the render below).
+  const handleTabAfterDragOver = (
+    event: DragEvent<HTMLDivElement>,
+    workspaceId: string,
+    tabId: string,
+  ): void => {
+    const result = evaluateTabDragTarget(event, workspaceId);
+    if (result.status === 'not-dragging') {
+      return;
     }
+    if (result.status === 'rejected') {
+      clearDropTarget();
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    event.dataTransfer.dropEffect = 'move';
+    setDropTarget({ kind: 'tab', workspaceId, tabId, edge: 'after' });
+  };
+
+  const handleTabAfterDrop = (
+    event: DragEvent<HTMLDivElement>,
+    workspaceId: string,
+    tabId: string,
+  ): void => {
+    const result = evaluateTabDragTarget(event, workspaceId);
+    if (result.status === 'not-dragging') {
+      return;
+    }
+    if (result.status === 'rejected') {
+      finishTabDrag();
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    applyTabDrop(workspaceId, tabId, 'after', result.dragging);
     finishTabDrag();
   };
 
@@ -849,17 +922,14 @@ export function WorkspacesView(): React.JSX.Element {
                     const paneOrder = flattenLayout(tab.layout).panes;
 
                     return (
-                      <div
-                        key={tab.id}
-                        className="relative space-y-0.5"
-                        onDragOver={(event) => {
-                          handleTabDragOver(event, workspace.id, tab.id);
-                        }}
-                        onDragLeave={clearDropTargetWhenLeaving}
-                        onDrop={(event) => {
-                          handleTabDrop(event, workspace.id, tab.id);
-                        }}
-                      >
+                      <div key={tab.id} className="relative space-y-0.5">
+                        {/*
+                          Anchored to the whole tab+panes group (not just the tab row) so the
+                          indicator always sits where the tab would actually land in the list:
+                          above this group for 'before', below this group's panes for 'after'.
+                          Both the tab row's own after-half and the pane area below resolve to
+                          'after', so they intentionally share this same bottom position.
+                        */}
                         {dropTarget?.kind === 'tab' &&
                           dropTarget.workspaceId === workspace.id &&
                           dropTarget.tabId === tab.id && (
@@ -870,7 +940,16 @@ export function WorkspacesView(): React.JSX.Element {
                               }`}
                             />
                           )}
-                        <div className="pl-6">
+                        <div
+                          className="pl-6"
+                          onDragOver={(event) => {
+                            handleTabRowDragOver(event, workspace.id, tab.id);
+                          }}
+                          onDragLeave={clearDropTargetWhenLeaving}
+                          onDrop={(event) => {
+                            handleTabRowDrop(event, workspace.id, tab.id);
+                          }}
+                        >
                           <div className="group flex w-full items-center gap-1">
                             {isEditingTab ? (
                               <input
@@ -937,7 +1016,16 @@ export function WorkspacesView(): React.JSX.Element {
                             </button>
                           </div>
                         </div>
-                        <div className="space-y-0.5">
+                        <div
+                          className="space-y-0.5"
+                          onDragOver={(event) => {
+                            handleTabAfterDragOver(event, workspace.id, tab.id);
+                          }}
+                          onDragLeave={clearDropTargetWhenLeaving}
+                          onDrop={(event) => {
+                            handleTabAfterDrop(event, workspace.id, tab.id);
+                          }}
+                        >
                           {paneOrder.map(({ paneId }, paneIndex) => {
                             const pane = workspace.panes.find(
                               (currentPane) => currentPane.id === paneId,
