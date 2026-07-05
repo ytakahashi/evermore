@@ -25,6 +25,7 @@ function createWorkspace(): Workspace {
       {
         id: 'tab-1',
         name: 'zsh',
+        isCustomName: false,
         layout: { type: 'leaf', paneId: 'pane-1' },
         activePaneId: 'pane-1',
       },
@@ -43,6 +44,7 @@ function createNestedWorkspace(): Workspace {
       {
         id: 'tab-1',
         name: 'zsh',
+        isCustomName: false,
         layout: {
           type: 'split',
           direction: 'vertical',
@@ -101,6 +103,7 @@ function createDeepWorkspace(depth: number): Workspace {
       {
         id: 'tab-1',
         name: 'zsh',
+        isCustomName: false,
         layout: createLayout(depth),
         activePaneId: 'pane-0',
       },
@@ -230,6 +233,7 @@ describe('readWorkspace', () => {
     ['wrong tab id type', { id: 1 }],
     ['over-limit tab id', { id: 'x'.repeat(MAX_ID_LENGTH + 1) }],
     ['over-limit tab name', { name: 'x'.repeat(MAX_NAME_LENGTH + 1) }],
+    ['wrong custom-name flag type', { isCustomName: 'false' }],
   ])('rejects invalid tab fields: %s', (_label: string, tabOverride: Record<string, unknown>) => {
     // Given: a workspace with an invalid tab field.
     const workspace = createWorkspace();
@@ -291,6 +295,7 @@ describe('readWorkspace', () => {
         {
           id: 'tab-2',
           name: 'second',
+          isCustomName: false,
           layout: { type: 'leaf', paneId: 'pane-1' },
           activePaneId: 'pane-1',
         },

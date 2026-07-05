@@ -26,6 +26,7 @@ const workspace: Workspace = {
     {
       id: 'tab-1',
       name: 'zsh',
+      isCustomName: false,
       layout: {
         type: 'leaf',
         paneId: 'pane-1',
@@ -35,6 +36,7 @@ const workspace: Workspace = {
     {
       id: 'tab-2',
       name: 'logs',
+      isCustomName: false,
       layout: {
         type: 'leaf',
         paneId: 'pane-2',

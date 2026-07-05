@@ -12,6 +12,7 @@ export interface Workspace {
 export interface Tab {
   id: string;
   name: string;
+  isCustomName: boolean;
   layout: PaneLayout;
   activePaneId: string | null;
 }

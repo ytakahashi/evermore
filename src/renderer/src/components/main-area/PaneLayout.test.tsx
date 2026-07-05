@@ -48,6 +48,7 @@ const workspace: Workspace = {
     {
       id: 'tab-1',
       name: 'zsh',
+      isCustomName: false,
       layout: {
         type: 'leaf',
         paneId: 'pane-1',
@@ -290,6 +291,7 @@ describe('PaneLayout', () => {
         {
           id: 'tab-1',
           name: 'zsh',
+          isCustomName: false,
           layout: {
             type: 'split',
             direction: 'vertical',
@@ -349,6 +351,7 @@ describe('PaneLayout', () => {
         {
           id: 'tab-1',
           name: 'zsh',
+          isCustomName: false,
           layout: {
             type: 'split',
             direction: 'vertical',
@@ -409,6 +412,7 @@ describe('PaneLayout', () => {
         {
           id: 'tab-1',
           name: 'zsh',
+          isCustomName: false,
           layout: {
             type: 'split',
             direction: 'vertical',
