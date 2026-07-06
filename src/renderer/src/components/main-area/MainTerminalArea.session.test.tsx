@@ -19,7 +19,13 @@ const initialWorkspaceStoreState = useWorkspaceStore.getState();
 const initialUiStoreState = useUiStore.getState();
 
 function leafTab(id: string, paneId: string): Tab {
-  return { id, name: id, layout: { type: 'leaf', paneId }, activePaneId: paneId };
+  return {
+    id,
+    name: id,
+    isCustomName: false,
+    layout: { type: 'leaf', paneId },
+    activePaneId: paneId,
+  };
 }
 
 describe('MainTerminalArea tab move keeps the session', () => {

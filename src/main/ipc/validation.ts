@@ -130,6 +130,26 @@ export function readNullableStringField(
 }
 
 /**
+ * Reads a required boolean field from a validated IPC payload object.
+ */
+export function readBooleanField(
+  object: Record<string, unknown>,
+  key: string,
+  channel: string,
+): boolean {
+  if (!Object.hasOwn(object, key)) {
+    throw invalidPayload(channel);
+  }
+
+  const value = object[key];
+  if (typeof value !== 'boolean') {
+    throw invalidPayload(channel);
+  }
+
+  return value;
+}
+
+/**
  * Reads a finite numeric field from a validated IPC payload object.
  */
 export function readFiniteNumberField(

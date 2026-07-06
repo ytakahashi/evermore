@@ -64,7 +64,8 @@ describe('WorkspaceStore', () => {
         tabs: [
           {
             id: 'tab-1',
-            name: 'zsh',
+            name: 'tester',
+            isCustomName: false,
             layout: {
               type: 'leaf',
               paneId: 'pane-1',
@@ -238,7 +239,7 @@ describe('WorkspaceStore', () => {
     expect(store.getActiveWorkspaceId()).toBeNull();
   });
 
-  it('uses the current shell basename for the initial tab name', () => {
+  it('uses the workspace root basename for the initial tab name', () => {
     // Given: the platform reports a non-default shell path.
     store = new WorkspaceStore({
       createId: () => ids.shift() ?? 'fallback-id',
@@ -251,8 +252,9 @@ describe('WorkspaceStore', () => {
     // When: the default workspace is created.
     const workspace = store.list()[0];
 
-    // Then: the shell basename is used as the user-facing tab name.
-    expect(workspace?.tabs[0]?.name).toBe('fish');
+    // Then: the cwd-derived basename is used for auto-renamable tabs.
+    expect(workspace?.tabs[0]?.name).toBe('tester');
+    expect(workspace?.tabs[0]?.isCustomName).toBe(false);
     expect(workspace?.panes[0]).toEqual({
       id: 'pane-1',
       cwd: '/Users/tester',
@@ -306,6 +308,7 @@ describe('WorkspaceStore', () => {
     expect(workspaces[0]?.tabs[0]).toEqual({
       id: 'legacy-tab',
       name: 'legacy-tab-title',
+      isCustomName: false,
       layout: {
         type: 'leaf',
         paneId: 'legacy-pane',
@@ -329,6 +332,7 @@ describe('WorkspaceStore', () => {
           {
             id: `${id}-tab`,
             name: 'zsh',
+            isCustomName: false,
             layout: { type: 'leaf', paneId },
             activePaneId: paneId,
           },
@@ -545,6 +549,7 @@ describe('WorkspaceStore', () => {
           {
             id: 'workspace-1-tab',
             name: 'zsh',
+            isCustomName: false,
             layout: {
               type: 'split',
               direction: 'vertical',
@@ -594,6 +599,7 @@ describe('WorkspaceStore', () => {
           {
             id: 'workspace-1-tab',
             name: 'zsh',
+            isCustomName: false,
             layout: { type: 'leaf', paneId: 'pane-2' },
             activePaneId: 'pane-2',
           },
@@ -625,12 +631,14 @@ describe('WorkspaceStore', () => {
           {
             id: 'dup-tab',
             name: 'first',
+            isCustomName: false,
             layout: { type: 'leaf', paneId: 'pane-1' },
             activePaneId: 'pane-1',
           },
           {
             id: 'dup-tab',
             name: 'second',
+            isCustomName: true,
             layout: { type: 'leaf', paneId: 'pane-2' },
             activePaneId: 'pane-2',
           },

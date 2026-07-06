@@ -36,6 +36,7 @@ const workspace: Workspace = {
     {
       id: 'tab-1',
       name: 'zsh',
+      isCustomName: false,
       layout: {
         type: 'leaf',
         paneId: 'pane-1',
@@ -96,6 +97,7 @@ describe('TabBar', () => {
       {
         id: 'tab-2',
         name: 'build',
+        isCustomName: false,
         layout: { type: 'leaf', paneId: 'pane-2' },
         activePaneId: 'pane-2',
       },
@@ -137,6 +139,7 @@ describe('TabBar', () => {
             {
               id: 'tab-2',
               name: 'build',
+              isCustomName: false,
               layout: {
                 type: 'leaf',
                 paneId: 'pane-2',
@@ -288,6 +291,7 @@ describe('TabBar', () => {
             {
               id: 'tab-2',
               name: 'build',
+              isCustomName: false,
               layout: { type: 'leaf', paneId: 'pane-2' },
               activePaneId: 'pane-2',
             },
@@ -321,6 +325,7 @@ describe('TabBar', () => {
             {
               id: 'tab-2',
               name: 'build',
+              isCustomName: false,
               layout: { type: 'leaf', paneId: 'pane-2' },
               activePaneId: 'pane-2',
             },
@@ -335,6 +340,7 @@ describe('TabBar', () => {
             {
               id: 'tab-3',
               name: 'main',
+              isCustomName: false,
               layout: { type: 'leaf', paneId: 'pane-3' },
               activePaneId: 'pane-3',
             },

@@ -48,6 +48,7 @@ const workspace1: Workspace = {
     {
       id: 'workspace-1-tab-1',
       name: 'zsh',
+      isCustomName: false,
       layout: {
         type: 'leaf',
         paneId: 'workspace-1-pane-1',
@@ -74,6 +75,7 @@ const workspace2: Workspace = {
     {
       id: 'workspace-2-tab-1',
       name: 'server',
+      isCustomName: false,
       layout: {
         type: 'split',
         direction: 'vertical',
@@ -94,6 +96,7 @@ const workspace2: Workspace = {
     {
       id: 'workspace-2-tab-2',
       name: 'logs',
+      isCustomName: false,
       layout: {
         type: 'leaf',
         paneId: 'workspace-2-pane-3',
@@ -129,6 +132,7 @@ const newWorkspace: Workspace = {
     {
       id: 'workspace-new-tab-1',
       name: 'zsh',
+      isCustomName: false,
       layout: {
         type: 'leaf',
         paneId: 'workspace-new-pane-1',
@@ -1073,6 +1077,7 @@ describe('WorkspacesView', () => {
         {
           id: 'workspace-1-tab-2',
           name: 'extra',
+          isCustomName: false,
           layout: { type: 'leaf', paneId: 'workspace-1-pane-2' },
           activePaneId: 'workspace-1-pane-2',
         },

@@ -128,6 +128,7 @@ describe('useShortcutBridge', () => {
         {
           id: 'tab-1',
           name: 'zsh',
+          isCustomName: false,
           layout: { type: 'leaf', paneId: 'pane-2' },
           activePaneId: 'pane-2',
         },

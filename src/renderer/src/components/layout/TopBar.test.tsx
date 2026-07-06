@@ -14,6 +14,7 @@ const workspace1: Workspace = {
     {
       id: 'workspace-1-tab-1',
       name: 'zsh',
+      isCustomName: false,
       layout: { type: 'leaf', paneId: 'workspace-1-pane-1' },
       activePaneId: 'workspace-1-pane-1',
     },
@@ -32,6 +33,7 @@ const workspace2: Workspace = {
     {
       id: 'workspace-2-tab-1',
       name: 'zsh',
+      isCustomName: false,
       layout: { type: 'leaf', paneId: 'workspace-2-pane-1' },
       activePaneId: 'workspace-2-pane-1',
     },

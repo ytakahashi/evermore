@@ -6,6 +6,7 @@ import {
   MAX_NAME_LENGTH,
   MAX_PATH_LENGTH,
   assertIpcPayloadValid,
+  readBooleanField,
   readFiniteNumberField,
   readNullableStringField,
   readObject,
@@ -125,6 +126,7 @@ function readTab(
   return {
     id: readStringField(object, 'id', channel, { maxLength: MAX_ID_LENGTH }),
     name: readNameField(object, 'name', channel),
+    isCustomName: readBooleanField(object, 'isCustomName', channel),
     layout: layoutResult.layout,
     activePaneId,
   };

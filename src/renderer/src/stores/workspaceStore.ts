@@ -7,6 +7,7 @@ import type { Pane, PaneLayout, Tab, Workspace } from '../../../shared/types';
 const DEFAULT_SAVE_DEBOUNCE_MS = 300;
 const DEFAULT_CWD_SAVE_DEBOUNCE_MS = 1000;
 const DEFAULT_SPLIT_RATIO = 0.5;
+const AUTO_TAB_NAME_FALLBACK = 'Tab';
 /**
  * Tolerance for comparing pane edge positions in container-percentage units. `flattenLayout`
  * produces values derived from float multiplication on `ratio`, so exact equality cannot be
@@ -200,6 +201,30 @@ function replaceTab(workspace: Workspace, tab: Tab): Workspace {
     ...workspace,
     tabs: workspace.tabs.map((currentTab) => (currentTab.id === tab.id ? tab : currentTab)),
   };
+}
+
+function getAutomaticTabName(cwd: string): string {
+  return getPathBasename(cwd, {
+    emptyFallback: AUTO_TAB_NAME_FALLBACK,
+    rootFallback: AUTO_TAB_NAME_FALLBACK,
+  });
+}
+
+function getTabActivePaneId(tab: Tab): string | null {
+  return tab.activePaneId ?? findFirstPaneId(tab.layout);
+}
+
+function syncTabNameWithPane(tab: Tab, pane: Pane): Tab {
+  if (tab.isCustomName) {
+    return tab;
+  }
+
+  const name = getAutomaticTabName(pane.cwd);
+  return tab.name === name ? tab : { ...tab, name };
+}
+
+function setTabActivePane(tab: Tab, pane: Pane): Tab {
+  return syncTabNameWithPane({ ...tab, activePaneId: pane.id }, pane);
 }
 
 function replacePaneLayout(
@@ -421,6 +446,7 @@ function shellQuote(value: string): string {
 interface CreateTabWithPaneOptions {
   cwd: string;
   initialCommand?: string;
+  isCustomName?: boolean;
   tabName: string;
 }
 
@@ -440,6 +466,7 @@ function createTabWithPane(
     tab: {
       id: tabId,
       name: options.tabName,
+      isCustomName: options.isCustomName ?? false,
       layout: {
         type: 'leaf',
         paneId,
@@ -572,10 +599,14 @@ export function createWorkspaceStore(
         return;
       }
 
+      const updatedPane = { ...pane, cwd };
       const updatedWorkspace = updateWorkspaceState({
         ...workspace,
         panes: workspace.panes.map((currentPane) =>
-          currentPane.id === paneId ? { ...currentPane, cwd } : currentPane,
+          currentPane.id === paneId ? updatedPane : currentPane,
+        ),
+        tabs: workspace.tabs.map((tab) =>
+          getTabActivePaneId(tab) === paneId ? syncTabNameWithPane(tab, updatedPane) : tab,
         ),
       });
       persistWorkspaceDebounced(updatedWorkspace.id, cwdDebounceMs);
@@ -669,7 +700,7 @@ export function createWorkspaceStore(
 
         const activePane = findWorkspaceActivePane(workspace);
         const cwd = activePane?.cwd ?? workspace.rootPath;
-        const tabName = getPathBasename(cwd, { emptyFallback: 'Tab', rootFallback: 'Tab' });
+        const tabName = getAutomaticTabName(cwd);
         const { pane, tab } = createTabWithPane(createStoreId, { cwd, tabName });
         const updatedWorkspace: Workspace = {
           ...workspace,
@@ -706,7 +737,7 @@ export function createWorkspaceStore(
         }
 
         const tab = workspace.tabs.find((currentTab) => currentTab.id === tabId);
-        if (!tab || tab.name === trimmedName) {
+        if (!tab || (tab.name === trimmedName && tab.isCustomName)) {
           return;
         }
 
@@ -714,6 +745,7 @@ export function createWorkspaceStore(
           replaceTab(workspace, {
             ...tab,
             name: trimmedName,
+            isCustomName: true,
           }),
         );
       },
@@ -732,6 +764,7 @@ export function createWorkspaceStore(
         const { pane, tab } = createTabWithPane(createStoreId, {
           cwd,
           initialCommand,
+          isCustomName: true,
           tabName: alias,
         });
 
@@ -793,10 +826,8 @@ export function createWorkspaceStore(
           return;
         }
 
-        if (
-          !collectPaneIds(selectedTab.layout).includes(paneId) ||
-          !workspace.panes.some((pane) => pane.id === paneId)
-        ) {
+        const selectedPane = workspace.panes.find((pane) => pane.id === paneId);
+        if (!collectPaneIds(selectedTab.layout).includes(paneId) || !selectedPane) {
           return;
         }
 
@@ -823,8 +854,7 @@ export function createWorkspaceStore(
               activeTabId: selectedTab.id,
             },
             {
-              ...selectedTab,
-              activePaneId: paneId,
+              ...setTabActivePane(selectedTab, selectedPane),
             },
           ),
         );
@@ -1024,16 +1054,12 @@ export function createWorkspaceStore(
           return;
         }
 
-        if (!collectPaneIds(tab.layout).includes(paneId)) {
+        const pane = workspace.panes.find((currentPane) => currentPane.id === paneId);
+        if (!collectPaneIds(tab.layout).includes(paneId) || !pane) {
           return;
         }
 
-        get().updateWorkspace(
-          replaceTab(workspace, {
-            ...tab,
-            activePaneId: paneId,
-          }),
-        );
+        get().updateWorkspace(replaceTab(workspace, setTabActivePane(tab, pane)));
       },
       setPanePtyId: (paneId: string, ptyId: string | null): void => {
         set((state) => ({
@@ -1171,7 +1197,7 @@ export function createWorkspaceStore(
           cwd: sourcePane.cwd,
         };
         const updatedTab: Tab = {
-          ...tab,
+          ...setTabActivePane(tab, newPane),
           layout: replacePaneLayout(tab.layout, paneId, {
             type: 'split',
             direction,
@@ -1187,7 +1213,6 @@ export function createWorkspaceStore(
               },
             ],
           }),
-          activePaneId: newPaneId,
         };
 
         get().updateWorkspace({
@@ -1222,8 +1247,9 @@ export function createWorkspaceStore(
           targetTab.activePaneId && remainingPaneIds.has(targetTab.activePaneId)
             ? targetTab.activePaneId
             : findFirstPaneId(removedLayout.layout);
+        const activePane = targetWorkspace.panes.find((pane) => pane.id === activePaneId);
         const updatedTab: Tab = {
-          ...targetTab,
+          ...(activePane ? setTabActivePane(targetTab, activePane) : targetTab),
           layout: removedLayout.layout,
           activePaneId,
         };

@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { homedir } from 'node:os';
 import path from 'node:path';
 import Store from 'electron-store';
+import { getPathBasename } from '../../shared/path-label';
 import type { Pane, PaneLayout, Tab, Workspace } from '../../shared/types';
 import { createSilentLogger, type Logger } from '../logging/logger';
 import type { WorkspaceStorageAdapter, WorkspaceStoreOptions } from './types';
@@ -42,7 +43,11 @@ class ElectronWorkspaceStorageAdapter implements WorkspaceStorageAdapter {
 }
 
 type LegacyPane = Pane & { title?: string };
-type LegacyTab = Omit<Tab, 'name'> & { name?: string; title?: string };
+type LegacyTab = Omit<Tab, 'name' | 'isCustomName'> & {
+  isCustomName?: boolean;
+  name?: string;
+  title?: string;
+};
 type LegacyWorkspace = Omit<Workspace, 'panes' | 'tabs'> & {
   panes: LegacyPane[];
   tabs: LegacyTab[];
@@ -60,6 +65,7 @@ function sanitizeTab(tab: LegacyTab): Tab {
   return {
     id: tab.id,
     name: legacyName || legacyTitle || 'Tab',
+    isCustomName: typeof tab.isCustomName === 'boolean' ? tab.isCustomName : false,
     layout: tab.layout,
     activePaneId: tab.activePaneId,
   };
@@ -423,7 +429,10 @@ export class WorkspaceStore {
     const workspaceId = this.createId();
     const tabId = this.createId();
     const paneId = this.createId();
-    const tabName = path.basename(this.getShellPath() || '/bin/zsh');
+    const tabName = getPathBasename(rootPath, {
+      emptyFallback: path.basename(this.getShellPath() || '/bin/zsh'),
+      rootFallback: 'Tab',
+    });
 
     return {
       id: workspaceId,
@@ -433,6 +442,7 @@ export class WorkspaceStore {
         {
           id: tabId,
           name: tabName,
+          isCustomName: false,
           layout: {
             type: 'leaf',
             paneId,
