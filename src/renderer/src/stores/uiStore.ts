@@ -22,6 +22,7 @@ interface UiStoreState {
   sidebarWidth: number; // px, always within [SIDEBAR_MIN_WIDTH, SIDEBAR_MAX_WIDTH]
   activeView: ActiveView;
   tabBarOpen: boolean;
+  tabSearchOpen: boolean;
   clearFullscreen: () => void;
   setFullscreenPaneId: (paneId: string | null) => void;
   setSidebarView: (view: SidebarView) => void;
@@ -31,6 +32,8 @@ interface UiStoreState {
   setActiveView: (view: ActiveView) => void;
   setTabBarOpen: (open: boolean) => void;
   toggleTabBar: () => void;
+  openTabSearch: () => void;
+  closeTabSearch: () => void;
   setWindowFullScreen: (isFullScreen: boolean) => void;
   /** Switches the main pane to the SettingsView. Idempotent; no-op when already active. */
   openSettings: () => void;
@@ -51,6 +54,7 @@ export const useUiStore = create<UiStoreState>((set, get) => ({
   sidebarWidth: SIDEBAR_DEFAULT_WIDTH,
   activeView: 'workspace',
   tabBarOpen: false,
+  tabSearchOpen: false,
   clearFullscreen: () => {
     set({ fullscreenPaneId: null });
   },
@@ -90,6 +94,12 @@ export const useUiStore = create<UiStoreState>((set, get) => ({
   },
   toggleTabBar: () => {
     set((state) => ({ tabBarOpen: !state.tabBarOpen }));
+  },
+  openTabSearch: () => {
+    set({ tabSearchOpen: true });
+  },
+  closeTabSearch: () => {
+    set({ tabSearchOpen: false });
   },
   setWindowFullScreen: (isFullScreen) => {
     set({ windowFullScreen: isFullScreen });

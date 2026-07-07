@@ -99,6 +99,8 @@ export function buildApplicationMenu(
       actionItem('workspace.newTab', options),
       actionItem('workspace.closeTab', options),
       { type: 'separator' },
+      actionItem('ui.openTabSearch', options),
+      { type: 'separator' },
       actionItem('workspace.nextTab', options),
       actionItem('workspace.previousTab', options),
       actionItem('workspace.nextTabGlobal', options),

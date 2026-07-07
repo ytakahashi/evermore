@@ -96,6 +96,9 @@ function handleShortcut(actionId: KeyboardShortcutActionId): void {
       uiState.setFullscreenPaneId(activePane.id);
       return;
     }
+    case 'ui.openTabSearch':
+      uiState.openTabSearch();
+      return;
     case 'ui.toggleSidebar':
       uiState.toggleSidebar();
       return;

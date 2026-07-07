@@ -9,6 +9,7 @@ describe('useUiStore', () => {
       sidebarOpen: true,
       sidebarWidth: SIDEBAR_DEFAULT_WIDTH,
       activeView: 'workspace',
+      tabSearchOpen: false,
     });
   });
 
@@ -24,6 +25,7 @@ describe('useUiStore', () => {
     expect(state.sidebarWidth).toBe(SIDEBAR_DEFAULT_WIDTH);
     expect(state.fullscreenPaneId).toBeNull();
     expect(state.activeView).toBe('workspace');
+    expect(state.tabSearchOpen).toBe(false);
   });
 
   it('opens and closes the settings view through dedicated actions', () => {
@@ -81,6 +83,23 @@ describe('useUiStore', () => {
 
     // Then: fullscreen state returns to its transient default.
     expect(useUiStore.getState().fullscreenPaneId).toBeNull();
+  });
+
+  it('opens and closes the tab search palette through dedicated actions', () => {
+    // Given: the tab search palette is closed by default.
+    expect(useUiStore.getState().tabSearchOpen).toBe(false);
+
+    // When: callers open the tab search palette.
+    useUiStore.getState().openTabSearch();
+
+    // Then: the palette open state is set.
+    expect(useUiStore.getState().tabSearchOpen).toBe(true);
+
+    // When: callers close the tab search palette.
+    useUiStore.getState().closeTabSearch();
+
+    // Then: the palette returns to its closed state.
+    expect(useUiStore.getState().tabSearchOpen).toBe(false);
   });
 
   it('updates the active sidebar view', () => {

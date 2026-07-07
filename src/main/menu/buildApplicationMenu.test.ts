@@ -84,6 +84,9 @@ describe('buildApplicationMenu', () => {
     expect(findItemByLabel(template, 'Preferences…')?.accelerator).toBe(
       DEFAULT_KEYBINDINGS['ui.openSettings'],
     );
+    expect(findItemByLabel(template, 'Search Tabs…')?.accelerator).toBe(
+      DEFAULT_KEYBINDINGS['ui.openTabSearch'],
+    );
     expect(findItemByLabel(template, 'Focus Left Pane')?.accelerator).toBe(
       DEFAULT_KEYBINDINGS['pane.focusLeft'],
     );

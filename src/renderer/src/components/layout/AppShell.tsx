@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import { MainTerminalArea } from '../main-area/MainTerminalArea';
+import { TabSearchPalette } from '../main-area/TabSearchPalette';
 import { SettingsView } from '../settings/SettingsView';
 import { useUiStore } from '../../stores/uiStore';
 import { Sidebar } from './Sidebar';
@@ -60,6 +61,7 @@ export function AppShell(): React.JSX.Element {
           >
             <SettingsView />
           </div>
+          <TabSearchPalette />
         </div>
       </div>
     </div>
