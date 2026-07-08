@@ -118,6 +118,18 @@ describe('useShortcutBridge', () => {
     expect(useUiStore.getState().activeView).toBe('settings');
   });
 
+  it('opens tab search via ui.openTabSearch regardless of current view', () => {
+    // Given: the Settings view is active and the tab search palette is closed.
+    useUiStore.setState({ activeView: 'settings', tabSearchOpen: false });
+    render(<TestBridge />);
+
+    // When: the open-tab-search action fires.
+    emit('ui.openTabSearch');
+
+    // Then: the palette opens without requiring the workspace view to be active first.
+    expect(useUiStore.getState().tabSearchOpen).toBe(true);
+  });
+
   it('toggles pane fullscreen for the active pane and clears it on a second invocation', () => {
     // Given: an active workspace with two panes, pane-2 currently active in the tab.
     const workspace: Workspace = {

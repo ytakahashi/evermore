@@ -22,6 +22,7 @@ export type KeyboardShortcutActionId =
   | 'pane.focusUp'
   | 'pane.focusDown'
   | 'pane.toggleFullscreen'
+  | 'ui.openTabSearch'
   | 'ui.toggleSidebar'
   | 'ui.openSettings';
 
@@ -39,6 +40,7 @@ export const KEYBOARD_SHORTCUT_ACTION_IDS: readonly KeyboardShortcutActionId[] =
   'pane.focusUp',
   'pane.focusDown',
   'pane.toggleFullscreen',
+  'ui.openTabSearch',
   'ui.toggleSidebar',
   'ui.openSettings',
 ] as const;
@@ -72,6 +74,7 @@ export const DEFAULT_KEYBINDINGS: Record<KeyboardShortcutActionId, string> = {
   'pane.focusUp': 'Command+Option+Up',
   'pane.focusDown': 'Command+Option+Down',
   'pane.toggleFullscreen': 'Command+Shift+F',
+  'ui.openTabSearch': 'Command+P',
   'ui.toggleSidebar': 'Command+B',
   'ui.openSettings': 'Command+,',
 };
@@ -90,6 +93,7 @@ export const ACTION_LABELS: Record<KeyboardShortcutActionId, string> = {
   'pane.focusUp': 'Focus Upper Pane',
   'pane.focusDown': 'Focus Lower Pane',
   'pane.toggleFullscreen': 'Toggle Pane Full Screen',
+  'ui.openTabSearch': 'Search Tabs…',
   'ui.toggleSidebar': 'Toggle Sidebar',
   'ui.openSettings': 'Preferences…',
 };

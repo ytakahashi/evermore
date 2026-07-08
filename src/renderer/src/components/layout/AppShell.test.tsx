@@ -7,6 +7,10 @@ vi.mock('../main-area/MainTerminalArea', () => ({
   MainTerminalArea: () => <div data-testid="workspace-pane">workspace</div>,
 }));
 
+vi.mock('../main-area/TabSearchPalette', () => ({
+  TabSearchPalette: () => <div data-testid="tab-search-palette" />,
+}));
+
 vi.mock('../settings/SettingsView', () => ({
   SettingsView: () => <div data-testid="settings-pane">settings</div>,
 }));
@@ -21,11 +25,11 @@ vi.mock('./TopBar', () => ({
 
 describe('AppShell', () => {
   beforeEach(() => {
-    useUiStore.setState({ activeView: 'workspace' });
+    useUiStore.setState({ activeView: 'workspace', tabSearchOpen: false });
   });
 
   afterEach(() => {
-    useUiStore.setState({ activeView: 'workspace' });
+    useUiStore.setState({ activeView: 'workspace', tabSearchOpen: false });
   });
 
   it('mounts both the workspace and settings panes simultaneously', () => {

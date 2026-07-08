@@ -8,7 +8,8 @@ import {
 } from 'react';
 import { ChevronRight, Folder, Hash, Plus, Terminal, X, Zap } from 'lucide-react';
 import { countPaneLeaves, flattenLayout } from '../../../../shared/pane-layout';
-import { getPathBasename, getTruncatedPathLabel } from '../../../../shared/path-label';
+import { getPaneDisplayLabel } from '../../../../shared/pane-label';
+import { getTruncatedPathLabel } from '../../../../shared/path-label';
 import type { Pane, PaneRuntimeInfo } from '../../../../shared/types';
 import { usePaneInfoStore } from '../../stores/paneInfoStore';
 import { useTabDragStore, type TabDragDescriptor } from '../../stores/tabDragStore';
@@ -121,12 +122,8 @@ function PaneSummary({
   pane,
   paneIndex,
 }: PaneSummaryProps): React.JSX.Element {
-  const isRunning = info?.processActivity === 'running';
   const indicator = getPaneRunningIndicator(info);
-  const label =
-    isRunning && info?.foregroundCommand
-      ? info.foregroundCommand
-      : getPathBasename(pane.cwd, { emptyFallback: '(loading)' });
+  const label = getPaneDisplayLabel(info, pane.cwd);
   const cwdLabel = getTruncatedPathLabel(pane.cwd);
 
   return (
