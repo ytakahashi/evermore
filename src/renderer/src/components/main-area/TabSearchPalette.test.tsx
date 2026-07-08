@@ -1,7 +1,8 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Workspace } from '../../../../shared/types';
+import type { PaneRuntimeInfo, Workspace } from '../../../../shared/types';
 import { useUiStore } from '../../stores/uiStore';
+import { usePaneInfoStore } from '../../stores/paneInfoStore';
 import { useWorkspaceStore, type WorkspaceStoreState } from '../../stores/workspaceStore';
 import { createTabSearchEntries, filterTabSearchEntries, type TabSearchEntry } from './tabSearch';
 import { TabSearchPalette } from './TabSearchPalette';
@@ -30,8 +31,24 @@ function createWorkspace(
   };
 }
 
+function createRuntimeInfo(ptyId: string, foregroundCommand: string): PaneRuntimeInfo {
+  return {
+    ptyId,
+    processActivity: 'running',
+    foregroundCommand,
+    foregroundSession: { kind: 'other' },
+    integration: {
+      shell: false,
+      protocols: [],
+      lastSequenceAt: 1,
+      stale: false,
+    },
+    observedAt: 1,
+  };
+}
+
 describe('TabSearchPalette search helpers', () => {
-  it('creates entries for every tab across all workspaces', () => {
+  it('creates entries for every tab across all workspaces with pane titles', () => {
     // Given: two loaded workspaces with one active tab in the second workspace.
     const workspaces = [
       createWorkspace('workspace-1', 'Backend', [{ id: 'tab-1', name: 'API Server' }], 'tab-1'),
@@ -48,6 +65,7 @@ describe('TabSearchPalette search helpers', () => {
         workspaceName: 'Backend',
         tabId: 'tab-1',
         tabName: 'API Server',
+        paneTitles: ['workspace-1'],
         isActive: false,
       },
       {
@@ -55,9 +73,53 @@ describe('TabSearchPalette search helpers', () => {
         workspaceName: 'Frontend',
         tabId: 'tab-2',
         tabName: 'Client',
+        paneTitles: ['workspace-2'],
         isActive: true,
       },
     ]);
+  });
+
+  it('orders pane titles by tab layout and prefers foreground commands for running panes', () => {
+    // Given: a split tab whose second pane has live runtime info.
+    const workspaces: Workspace[] = [
+      {
+        id: 'workspace-1',
+        name: 'Backend',
+        rootPath: '/Users/tester/project',
+        tabs: [
+          {
+            id: 'tab-1',
+            name: 'API Server',
+            isCustomName: true,
+            layout: {
+              type: 'split',
+              direction: 'vertical',
+              ratio: 0.5,
+              children: [
+                { type: 'leaf', paneId: 'pane-1' },
+                { type: 'leaf', paneId: 'pane-2' },
+              ],
+            },
+            activePaneId: 'pane-1',
+          },
+        ],
+        panes: [
+          { id: 'pane-1', cwd: '/Users/tester/project/server' },
+          { id: 'pane-2', cwd: '/Users/tester/project/worker', ptyId: 'pty-2' },
+        ],
+        activeTabId: 'tab-1',
+        createdAt: 1,
+        updatedAt: 1,
+      },
+    ];
+
+    // When: the tab search entries are flattened with runtime info.
+    const entries = createTabSearchEntries(workspaces, 'workspace-1', {
+      'pty-2': createRuntimeInfo('pty-2', 'pnpm dev'),
+    });
+
+    // Then: titles reflect the pane layout order and use the live command for the running pane.
+    expect(entries[0]?.paneTitles).toEqual(['server', 'pnpm dev']);
   });
 
   it('filters by tab name only and ignores workspace names', () => {
@@ -68,6 +130,7 @@ describe('TabSearchPalette search helpers', () => {
         workspaceName: 'Backend API',
         tabId: 'tab-1',
         tabName: 'Shell',
+        paneTitles: ['project'],
         isActive: false,
       },
     ];
@@ -87,6 +150,7 @@ describe('TabSearchPalette search helpers', () => {
         workspaceName: 'Backend',
         tabId: 'tab-1',
         tabName: 'Staging API',
+        paneTitles: ['project'],
         isActive: false,
       },
       {
@@ -94,6 +158,7 @@ describe('TabSearchPalette search helpers', () => {
         workspaceName: 'Backend',
         tabId: 'tab-2',
         tabName: 'api',
+        paneTitles: ['project'],
         isActive: false,
       },
       {
@@ -101,6 +166,7 @@ describe('TabSearchPalette search helpers', () => {
         workspaceName: 'Backend',
         tabId: 'tab-3',
         tabName: 'API Server',
+        paneTitles: ['project'],
         isActive: false,
       },
     ];
@@ -141,6 +207,7 @@ describe('TabSearchPalette', () => {
         ),
       ],
     });
+    usePaneInfoStore.setState({ infosByPtyId: {} });
     useUiStore.setState({ activeView: 'settings', tabSearchOpen: true });
   });
 
@@ -150,6 +217,7 @@ describe('TabSearchPalette', () => {
       selectWorkspaceTab: previousSelectWorkspaceTab,
       workspaces: [],
     });
+    usePaneInfoStore.setState({ infosByPtyId: {} });
     useUiStore.setState({ activeView: 'workspace', tabSearchOpen: false });
   });
 
@@ -181,6 +249,15 @@ describe('TabSearchPalette', () => {
     expect(selectWorkspaceTab).toHaveBeenCalledWith('workspace-1', 'tab-2');
     expect(useUiStore.getState().tabSearchOpen).toBe(false);
     expect(useUiStore.getState().activeView).toBe('workspace');
+  });
+
+  it('shows pane titles next to the workspace name', () => {
+    // Given: the palette is open with one pane per tab.
+    render(<TabSearchPalette />);
+
+    // When / Then: each result includes the workspace name followed by the pane-title summary.
+    expect(screen.getAllByText('(workspace-1)')).toHaveLength(2);
+    expect(screen.getByText('(workspace-2)')).toBeInTheDocument();
   });
 
   it('selects a clicked tab from another workspace', () => {

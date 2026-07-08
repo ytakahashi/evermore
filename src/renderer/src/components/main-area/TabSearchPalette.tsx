@@ -1,5 +1,6 @@
 import { Search } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent } from 'react';
+import { usePaneInfoStore } from '../../stores/paneInfoStore';
 import { useUiStore } from '../../stores/uiStore';
 import { useWorkspaceStore } from '../../stores/workspaceStore';
 import { createTabSearchEntries, filterTabSearchEntries, type TabSearchEntry } from './tabSearch';
@@ -16,13 +17,14 @@ export function TabSearchPalette(): React.JSX.Element | null {
   const workspaces = useWorkspaceStore((state) => state.workspaces);
   const activeWorkspaceId = useWorkspaceStore((state) => state.activeWorkspaceId);
   const selectWorkspaceTab = useWorkspaceStore((state) => state.selectWorkspaceTab);
+  const paneInfosByPtyId = usePaneInfoStore((state) => state.infosByPtyId);
   const [query, setQuery] = useState('');
   const [selectedIndex, setSelectedIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement | null>(null);
 
   const entries = useMemo(
-    () => createTabSearchEntries(workspaces, activeWorkspaceId),
-    [activeWorkspaceId, workspaces],
+    () => createTabSearchEntries(workspaces, activeWorkspaceId, paneInfosByPtyId),
+    [activeWorkspaceId, paneInfosByPtyId, workspaces],
   );
   const filteredEntries = useMemo(
     () => filterTabSearchEntries(entries, query).slice(0, MAX_VISIBLE_RESULTS),
@@ -165,6 +167,9 @@ export function TabSearchPalette(): React.JSX.Element | null {
                     </span>
                     <span className="block truncate text-xs text-subtle">
                       {entry.workspaceName}
+                      {entry.paneTitles.length > 0 && (
+                        <span> ({entry.paneTitles.join(' / ')})</span>
+                      )}
                     </span>
                   </span>
                   {entry.isActive && (

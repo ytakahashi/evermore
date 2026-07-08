@@ -1,10 +1,13 @@
-import type { Workspace } from '../../../../shared/types';
+import { flattenLayout } from '../../../../shared/pane-layout';
+import { getPaneDisplayLabel } from '../../../../shared/pane-label';
+import type { PaneRuntimeInfo, Workspace } from '../../../../shared/types';
 
 export interface TabSearchEntry {
   workspaceId: string;
   workspaceName: string;
   tabId: string;
   tabName: string;
+  paneTitles: string[];
   isActive: boolean;
 }
 
@@ -21,6 +24,7 @@ interface ScoredTabSearchEntry {
 export function createTabSearchEntries(
   workspaces: Workspace[],
   activeWorkspaceId: string | null,
+  paneInfosByPtyId: Record<string, PaneRuntimeInfo> = {},
 ): TabSearchEntry[] {
   return workspaces.flatMap((workspace) =>
     workspace.tabs.map((tab) => ({
@@ -28,6 +32,12 @@ export function createTabSearchEntries(
       workspaceName: workspace.name,
       tabId: tab.id,
       tabName: tab.name,
+      paneTitles: flattenLayout(tab.layout).panes.flatMap((paneRect) => {
+        const pane = workspace.panes.find((currentPane) => currentPane.id === paneRect.paneId);
+        return pane
+          ? [getPaneDisplayLabel(pane.ptyId ? paneInfosByPtyId[pane.ptyId] : undefined, pane.cwd)]
+          : [];
+      }),
       isActive: workspace.id === activeWorkspaceId && tab.id === workspace.activeTabId,
     })),
   );
