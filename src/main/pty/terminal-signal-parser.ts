@@ -12,12 +12,7 @@ const ST_FINAL = '\\';
 const DEFAULT_MAX_OSC_PAYLOAD_CODE_UNITS = 8192;
 
 type ParserState =
-  | 'normal'
-  | 'esc-seen'
-  | 'osc-payload'
-  | 'osc-esc-seen'
-  | 'osc-discard'
-  | 'osc-discard-esc-seen';
+  'normal' | 'esc-seen' | 'osc-payload' | 'osc-esc-seen' | 'osc-discard' | 'osc-discard-esc-seen';
 
 export interface TerminalSignalParserOptions {
   /**
