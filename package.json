@@ -65,7 +65,7 @@
     "format:fix": "prettier --write .",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
-    "postinstall": "electron-builder install-app-deps",
+    "postinstall": "install-electron --no && electron-builder install-app-deps",
     "start": "electron-vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
