@@ -1,4 +1,5 @@
 import { act, render, screen } from '@testing-library/react';
+import { useEffect } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Tab, Workspace } from '../../../../shared/types';
 import { useUiStore } from '../../stores/uiStore';
@@ -9,10 +10,19 @@ vi.mock('./TabBar', () => ({
   TabBar: () => <div data-testid="tab-bar" />,
 }));
 
-// Mock the terminal so the real PaneLayout/PaneCell mount a stable, identifiable node per pane
-// without spinning up xterm or a PTY. The node identity is what proves React preserved the subtree.
+// Mock the terminal so the real PaneCell mounts a stable, identifiable node per pane without
+// spinning up xterm or a PTY. The node identity is what proves React preserved the subtree.
+const terminalUnmounts = vi.hoisted(() => vi.fn());
 vi.mock('../terminal/TerminalView', () => ({
-  TerminalView: ({ paneId }: { paneId?: string }) => <div data-testid={`terminal-${paneId}`} />,
+  TerminalView: ({ paneId }: { paneId?: string }) => {
+    useEffect(
+      () => () => {
+        terminalUnmounts(paneId);
+      },
+      [paneId],
+    );
+    return <div data-testid={`terminal-${paneId}`} />;
+  },
 }));
 
 const initialWorkspaceStoreState = useWorkspaceStore.getState();
@@ -31,6 +41,7 @@ function leafTab(id: string, paneId: string): Tab {
 describe('MainTerminalArea tab move keeps the session', () => {
   beforeEach(() => {
     vi.useFakeTimers();
+    terminalUnmounts.mockClear();
     Object.defineProperty(window, 'api', {
       configurable: true,
       value: {
@@ -102,5 +113,65 @@ describe('MainTerminalArea tab move keeps the session', () => {
       'tab-1',
       'tab-a',
     ]);
+  });
+
+  it('preserves pane terminal nodes when pane ownership changes between tabs', () => {
+    // Given: two pane terminals are mounted as siblings in one source tab.
+    const state = useWorkspaceStore.getState();
+    const source = state.workspaces.find((workspace) => workspace.id === 'workspace-2');
+    if (!source) {
+      throw new Error('Expected source workspace.');
+    }
+    const splitSource: Workspace = {
+      ...source,
+      tabs: [
+        {
+          ...source.tabs[0]!,
+          layout: {
+            type: 'split',
+            direction: 'vertical',
+            ratio: 0.5,
+            children: [
+              { type: 'leaf', paneId: 'pane-a' },
+              { type: 'leaf', paneId: 'pane-c' },
+            ],
+          },
+        },
+        source.tabs[1]!,
+      ],
+      panes: [...source.panes, { id: 'pane-c', cwd: '/Users/tester/c' }],
+    };
+    useWorkspaceStore.setState({
+      workspaces: state.workspaces.map((workspace) =>
+        workspace.id === splitSource.id ? splitSource : workspace,
+      ),
+    });
+    render(<MainTerminalArea />);
+    const movedTerminalBefore = screen.getByTestId('terminal-pane-a');
+    const siblingTerminalBefore = screen.getByTestId('terminal-pane-c');
+
+    // When: pane-a becomes the only leaf of a new tab and pane-c remains in the source tab.
+    act(() => {
+      useWorkspaceStore.setState({
+        workspaces: useWorkspaceStore.getState().workspaces.map((workspace) =>
+          workspace.id === splitSource.id
+            ? {
+                ...workspace,
+                tabs: [
+                  { ...workspace.tabs[0]!, layout: { type: 'leaf', paneId: 'pane-c' } },
+                  workspace.tabs[1]!,
+                  leafTab('tab-c', 'pane-a'),
+                ],
+                activeTabId: 'tab-c',
+              }
+            : workspace,
+        ),
+      });
+    });
+
+    // Then: both terminals retain their DOM and React identities across the ownership change.
+    expect(screen.getByTestId('terminal-pane-a')).toBe(movedTerminalBefore);
+    expect(screen.getByTestId('terminal-pane-c')).toBe(siblingTerminalBefore);
+    expect(terminalUnmounts).not.toHaveBeenCalled();
   });
 });
