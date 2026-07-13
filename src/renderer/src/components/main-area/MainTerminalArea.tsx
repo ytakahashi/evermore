@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef } from 'react';
 import { flattenLayout } from '../../../../shared/pane-layout';
 import { useUiStore } from '../../stores/uiStore';
 import { useWorkspaceStore } from '../../stores/workspaceStore';
-import { PaneLayout } from './PaneLayout';
+import { PaneCell, PaneSplitters } from './PaneLayout';
 import { TabBar } from './TabBar';
 
 interface ActiveSelection {
@@ -30,6 +30,34 @@ export function MainTerminalArea(): React.JSX.Element {
   const activePaneIds = useMemo(
     () => (activeTab ? flattenLayout(activeTab.layout).panes.map((pane) => pane.paneId) : []),
     [activeTab],
+  );
+  const activeFullscreenPaneId =
+    fullscreenPaneId && activePaneIds.includes(fullscreenPaneId) ? fullscreenPaneId : null;
+  const isFullscreenLayout = activeFullscreenPaneId !== null;
+  const renderedPanes = useMemo(
+    () =>
+      workspaces.flatMap((workspace) => {
+        const isActiveWorkspace = workspace.id === activeWorkspaceId;
+
+        return workspace.tabs.flatMap((tab) => {
+          const isActiveTab = isActiveWorkspace && tab.id === workspace.activeTabId;
+
+          return flattenLayout(tab.layout).panes.flatMap((rect) => {
+            const pane = workspace.panes.find((currentPane) => currentPane.id === rect.paneId);
+            if (!pane) {
+              console.warn(`Pane with id ${rect.paneId} not found for leaf layout`);
+              return [];
+            }
+
+            return [{ isActiveWorkspace, isActiveTab, pane, rect, tab }];
+          });
+        });
+      }),
+    [activeWorkspaceId, workspaces],
+  );
+  const activeSplitRects = useMemo(
+    () => (activeTab && !isFullscreenLayout ? flattenLayout(activeTab.layout).splits : []),
+    [activeTab, isFullscreenLayout],
   );
 
   useEffect(() => {
@@ -83,42 +111,39 @@ export function MainTerminalArea(): React.JSX.Element {
   } else if (workspaces.length > 0) {
     content = (
       <div className="relative h-full min-h-0 w-full">
-        {/* Every tab of every workspace is mounted in one flat list keyed by `tab.id`. Keeping a tab
-            at a stable position in the React tree (independent of which workspace owns it) means
-            React preserves its subtree — and therefore its live PTYs/terminals — when the tab is
-            reordered or moved to another workspace. `tab.id` is guaranteed globally unique by the
-            main-process `WorkspaceStore`, so these sibling keys never collide.
+        {/* Every pane of every workspace is mounted in one flat list keyed by `pane.id`. Keeping a
+            pane at a stable position in the React tree (independent of which tab or workspace owns
+            it) means React preserves the live PTY/xterm when its layout ownership changes.
+            `pane.id` is guaranteed globally unique by the main-process `WorkspaceStore`.
 
             Non-active workspaces are hidden with `display: none` so their terminals are not painted
             while their PTYs stay alive; the active workspace's inactive tabs use `opacity-0` so a
             tab switch reveals an already-sized terminal. `display: none` can let a hidden xterm
             report zero size and drift to the fallback PTY size — accepted, as before, because
             keeping PTYs alive is the higher priority. */}
-        {workspaces.flatMap((workspace) => {
-          const isActiveWorkspace = workspace.id === activeWorkspaceId;
-
-          return workspace.tabs.map((tab) => {
-            const isActive = isActiveWorkspace && tab.id === workspace.activeTabId;
-
-            return (
-              <div
-                key={tab.id}
-                aria-hidden={!isActive}
-                className={`absolute inset-0 min-h-0 w-full ${
-                  isActive ? 'z-10 opacity-100' : 'pointer-events-none z-0 opacity-0'
-                }`}
-                style={{ display: isActiveWorkspace ? undefined : 'none' }}
-              >
-                <PaneLayout
-                  isActiveTab={isActive}
-                  layout={tab.layout}
-                  panes={workspace.panes}
-                  tab={tab}
-                />
-              </div>
-            );
-          });
+        {renderedPanes.map((descriptor) => {
+          const isFullscreen = activeFullscreenPaneId === descriptor.pane.id;
+          return (
+            <PaneCell
+              key={descriptor.pane.id}
+              {...descriptor}
+              isFullscreen={isFullscreen}
+              isFullscreenLayout={descriptor.isActiveTab && isFullscreenLayout}
+              rect={
+                isFullscreen
+                  ? {
+                      paneId: descriptor.pane.id,
+                      leftPct: 0,
+                      topPct: 0,
+                      widthPct: 100,
+                      heightPct: 100,
+                    }
+                  : descriptor.rect
+              }
+            />
+          );
         })}
+        {activeSplitRects.length > 0 && <PaneSplitters splits={activeSplitRects} />}
       </div>
     );
   } else {

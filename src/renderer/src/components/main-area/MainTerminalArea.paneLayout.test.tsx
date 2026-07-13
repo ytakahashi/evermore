@@ -5,10 +5,18 @@ import type { Workspace } from '../../../../shared/types';
 import { usePaneInfoStore } from '../../stores/paneInfoStore';
 import { useSettingsStore } from '../../stores/settingsStore';
 import { useUiStore } from '../../stores/uiStore';
-import { useWorkspaceStore } from '../../stores/workspaceStore';
-import { PaneLayout } from './PaneLayout';
+import { useWorkspaceStore, type WorkspaceStoreState } from '../../stores/workspaceStore';
+import { MainTerminalArea } from './MainTerminalArea';
 import type { PtyIdChangeReason } from '../terminal/useTerminal';
 
+vi.mock('./TabBar', () => ({
+  TabBar: () => <div data-testid="tab-bar" />,
+}));
+
+// Mock the terminal so pane split/close/resize/fullscreen/PTY-lifecycle behavior can be driven and
+// asserted without spinning up xterm or a PTY. Rendering the real `PaneCell`/`PaneSplitters` (via
+// the real `MainTerminalArea`) rather than mocking them is what makes these tests exercise the
+// same tree the app actually mounts.
 vi.mock('../terminal/TerminalView', () => ({
   TerminalView: ({
     cwd,
@@ -40,6 +48,9 @@ vi.mock('../terminal/TerminalView', () => ({
   ),
 }));
 
+const initialWorkspaceStoreState = useWorkspaceStore.getState();
+const initialUiStoreState = useUiStore.getState();
+
 const workspace: Workspace = {
   id: 'workspace-1',
   name: 'Default',
@@ -67,7 +78,18 @@ const workspace: Workspace = {
   updatedAt: 1,
 };
 
-describe('PaneLayout', () => {
+function setWorkspaces(workspaces: Workspace[], activeWorkspaceId: string): void {
+  useWorkspaceStore.setState({
+    workspaces,
+    activeWorkspaceId,
+    isLoading: false,
+    error: null,
+    // Prevent the mount effect from calling the (unmocked) list IPC and clobbering this state.
+    loadWorkspaces: vi.fn<WorkspaceStoreState['loadWorkspaces']>(() => Promise.resolve()),
+  });
+}
+
+describe('MainTerminalArea pane layout', () => {
   beforeEach(() => {
     vi.useFakeTimers();
     Object.defineProperty(window, 'api', {
@@ -78,47 +100,23 @@ describe('PaneLayout', () => {
         },
       } as unknown as Window['api'],
     });
-    useWorkspaceStore.setState({
-      workspaces: [workspace],
-      activeWorkspaceId: workspace.id,
-      isLoading: false,
-      error: null,
-    });
+    setWorkspaces([workspace], workspace.id);
     usePaneInfoStore.setState({ infosByPtyId: {}, isLoading: false, error: null });
     useUiStore.setState({ fullscreenPaneId: null });
   });
 
   afterEach(() => {
-    useWorkspaceStore.setState({
-      workspaces: [],
-      activeWorkspaceId: null,
-      isLoading: false,
-      error: null,
-    });
+    useWorkspaceStore.setState(initialWorkspaceStoreState, true);
+    useUiStore.setState(initialUiStoreState, true);
     usePaneInfoStore.setState({ infosByPtyId: {}, isLoading: false, error: null });
     useSettingsStore.setState({ settings: null });
-    useUiStore.setState({ fullscreenPaneId: null });
     Reflect.deleteProperty(window, 'api');
     vi.useRealTimers();
   });
 
   it('renders a leaf terminal pane', () => {
-    // Given: the current tab has one leaf pane.
-    const currentWorkspace = useWorkspaceStore.getState().workspaces[0];
-    const currentTab = currentWorkspace?.tabs[0];
-    if (!currentWorkspace || !currentTab) {
-      throw new Error('Expected test workspace and tab.');
-    }
-
-    // When: the layout renders.
-    render(
-      <PaneLayout
-        isActiveTab
-        layout={currentTab.layout}
-        panes={currentWorkspace.panes}
-        tab={currentTab}
-      />,
-    );
+    // Given / When: the active tab has one leaf pane.
+    render(<MainTerminalArea />);
 
     // Then: one terminal is shown with the pane cwd.
     expect(screen.getByTestId('terminal-view')).toHaveTextContent('/Users/tester');
@@ -130,36 +128,11 @@ describe('PaneLayout', () => {
   });
 
   it('splits and closes panes through toolbar actions', () => {
-    // Given: the current tab has one leaf pane.
-    const currentWorkspace = useWorkspaceStore.getState().workspaces[0];
-    const currentTab = currentWorkspace?.tabs[0];
-    if (!currentWorkspace || !currentTab) {
-      throw new Error('Expected test workspace and tab.');
-    }
-    const { rerender } = render(
-      <PaneLayout
-        isActiveTab
-        layout={currentTab.layout}
-        panes={currentWorkspace.panes}
-        tab={currentTab}
-      />,
-    );
+    // Given: the active tab has one leaf pane.
+    render(<MainTerminalArea />);
 
     // When: the pane is split vertically.
     fireEvent.click(screen.getByRole('button', { name: 'Split pane vertically' }));
-    const splitWorkspace = useWorkspaceStore.getState().workspaces[0];
-    const splitTab = splitWorkspace?.tabs[0];
-    if (!splitWorkspace || !splitTab) {
-      throw new Error('Expected split workspace and tab.');
-    }
-    rerender(
-      <PaneLayout
-        isActiveTab
-        layout={splitTab.layout}
-        panes={splitWorkspace.panes}
-        tab={splitTab}
-      />,
-    );
 
     // Then: two terminal panes are rendered and close becomes available.
     expect(screen.getAllByTestId('terminal-view')).toHaveLength(2);
@@ -181,21 +154,9 @@ describe('PaneLayout', () => {
   });
 
   it('updates split ratio when dragging a splitter', () => {
-    // Given: the current tab has a vertical split.
+    // Given: the active tab has a vertical split.
     useWorkspaceStore.getState().splitPane('pane-1', 'vertical');
-    const splitWorkspace = useWorkspaceStore.getState().workspaces[0];
-    const splitTab = splitWorkspace?.tabs[0];
-    if (!splitWorkspace || !splitTab) {
-      throw new Error('Expected split workspace and tab.');
-    }
-    render(
-      <PaneLayout
-        isActiveTab
-        layout={splitTab.layout}
-        panes={splitWorkspace.panes}
-        tab={splitTab}
-      />,
-    );
+    render(<MainTerminalArea />);
     const separator = screen.getByRole('separator', { name: 'Resize vertical split' });
     const container = separator.parentElement;
     if (!container) {
@@ -231,17 +192,15 @@ describe('PaneLayout', () => {
 
   it('removes the pane info entry when a PTY id is cleared', () => {
     // Given: a pane has an active PTY id and a paneInfo snapshot for it.
-    useWorkspaceStore.setState({
-      workspaces: [
+    setWorkspaces(
+      [
         {
           ...workspace,
           panes: [{ ...workspace.panes[0]!, ptyId: 'pty-1' }],
         },
       ],
-      activeWorkspaceId: workspace.id,
-      isLoading: false,
-      error: null,
-    });
+      workspace.id,
+    );
     usePaneInfoStore.setState({
       infosByPtyId: {
         'pty-1': {
@@ -261,19 +220,7 @@ describe('PaneLayout', () => {
       isLoading: false,
       error: null,
     });
-    const currentWorkspace = useWorkspaceStore.getState().workspaces[0];
-    const currentTab = currentWorkspace?.tabs[0];
-    if (!currentWorkspace || !currentTab) {
-      throw new Error('Expected test workspace and tab.');
-    }
-    render(
-      <PaneLayout
-        isActiveTab
-        layout={currentTab.layout}
-        panes={currentWorkspace.panes}
-        tab={currentTab}
-      />,
-    );
+    render(<MainTerminalArea />);
 
     // When: TerminalView reports the PTY id has been cleared.
     fireEvent.click(screen.getByTestId('terminal-exit-pty'));
@@ -309,25 +256,9 @@ describe('PaneLayout', () => {
         { id: 'pane-2', cwd: '/Users/tester/two', ptyId: 'pty-2' },
       ],
     };
-    useWorkspaceStore.setState({
-      workspaces: [splitWorkspace],
-      activeWorkspaceId: splitWorkspace.id,
-      isLoading: false,
-      error: null,
-    });
+    setWorkspaces([splitWorkspace], splitWorkspace.id);
     useSettingsStore.setState({ settings: DEFAULT_APP_SETTINGS });
-    const currentTab = splitWorkspace.tabs[0];
-    if (!currentTab) {
-      throw new Error('Expected test tab.');
-    }
-    render(
-      <PaneLayout
-        isActiveTab
-        layout={currentTab.layout}
-        panes={splitWorkspace.panes}
-        tab={currentTab}
-      />,
-    );
+    render(<MainTerminalArea />);
 
     // When: the first pane's PTY exit is simulated by clearing its PTY id.
     const clearButtons = screen.getAllByTestId('terminal-exit-pty');
@@ -369,25 +300,9 @@ describe('PaneLayout', () => {
         { id: 'pane-2', cwd: '/Users/tester/two', ptyId: 'pty-2' },
       ],
     };
-    useWorkspaceStore.setState({
-      workspaces: [splitWorkspace],
-      activeWorkspaceId: splitWorkspace.id,
-      isLoading: false,
-      error: null,
-    });
+    setWorkspaces([splitWorkspace], splitWorkspace.id);
     useSettingsStore.setState({ settings: DEFAULT_APP_SETTINGS });
-    const currentTab = splitWorkspace.tabs[0];
-    if (!currentTab) {
-      throw new Error('Expected test tab.');
-    }
-    render(
-      <PaneLayout
-        isActiveTab
-        layout={currentTab.layout}
-        panes={splitWorkspace.panes}
-        tab={currentTab}
-      />,
-    );
+    render(<MainTerminalArea />);
 
     // When: the first pane reports PTY cleanup from React unmount rather than process exit.
     const clearButtons = screen.getAllByTestId('terminal-unmount-pty');
@@ -430,30 +345,14 @@ describe('PaneLayout', () => {
         { id: 'pane-2', cwd: '/Users/tester/two', ptyId: 'pty-2' },
       ],
     };
-    useWorkspaceStore.setState({
-      workspaces: [splitWorkspace],
-      activeWorkspaceId: splitWorkspace.id,
-      isLoading: false,
-      error: null,
-    });
+    setWorkspaces([splitWorkspace], splitWorkspace.id);
     useSettingsStore.setState({
       settings: {
         ...DEFAULT_APP_SETTINGS,
         terminal: { ...DEFAULT_APP_SETTINGS.terminal, closePaneOnExit: false },
       },
     });
-    const currentTab = splitWorkspace.tabs[0];
-    if (!currentTab) {
-      throw new Error('Expected test tab.');
-    }
-    render(
-      <PaneLayout
-        isActiveTab
-        layout={currentTab.layout}
-        panes={splitWorkspace.panes}
-        tab={currentTab}
-      />,
-    );
+    render(<MainTerminalArea />);
 
     // When: the first pane's PTY exit is simulated.
     const clearButtons = screen.getAllByTestId('terminal-exit-pty');
@@ -470,28 +369,36 @@ describe('PaneLayout', () => {
   });
 
   it('does not mark panes in inactive tabs as active terminals', () => {
-    // Given: a tab remains mounted while another tab is selected.
-    const inactiveTab = {
-      ...workspace.tabs[0],
-      activePaneId: 'pane-1',
+    // Given: a second tab is active, so the first tab remains mounted but inactive.
+    const twoTabWorkspace: Workspace = {
+      ...workspace,
+      tabs: [
+        workspace.tabs[0]!,
+        {
+          id: 'tab-2',
+          name: 'logs',
+          isCustomName: false,
+          layout: { type: 'leaf', paneId: 'pane-2' },
+          activePaneId: 'pane-2',
+        },
+      ],
+      panes: [...workspace.panes, { id: 'pane-2', cwd: '/Users/tester/logs' }],
+      activeTabId: 'tab-2',
     };
 
-    // When: the inactive tab layout renders.
-    render(
-      <PaneLayout
-        isActiveTab={false}
-        layout={inactiveTab.layout}
-        panes={workspace.panes}
-        tab={inactiveTab}
-      />,
-    );
+    // When: the workspace renders with tab-1 inactive.
+    setWorkspaces([twoTabWorkspace], twoTabWorkspace.id);
+    render(<MainTerminalArea />);
 
-    // Then: its terminal is not eligible for focus.
-    expect(screen.getByTestId('terminal-view')).toHaveAttribute('data-active', 'false');
+    // Then: tab-1's terminal is not eligible for focus.
+    const inactiveTerminal = screen
+      .getByText('/Users/tester')
+      .closest('[data-testid="terminal-view"]');
+    expect(inactiveTerminal).toHaveAttribute('data-active', 'false');
   });
 
   it('maximizes the selected pane without unmounting sibling terminals', () => {
-    // Given: the current tab has a split layout and pane-2 is fullscreen.
+    // Given: the active tab has a split layout and pane-2 is fullscreen.
     const splitWorkspace: Workspace = {
       ...workspace,
       tabs: [
@@ -526,27 +433,11 @@ describe('PaneLayout', () => {
         },
       ],
     };
-    useWorkspaceStore.setState({
-      workspaces: [splitWorkspace],
-      activeWorkspaceId: splitWorkspace.id,
-      isLoading: false,
-      error: null,
-    });
+    setWorkspaces([splitWorkspace], splitWorkspace.id);
     useUiStore.getState().setFullscreenPaneId('pane-2');
-    const currentTab = splitWorkspace.tabs[0];
-    if (!currentTab) {
-      throw new Error('Expected test tab.');
-    }
 
     // When: the layout renders in fullscreen mode.
-    render(
-      <PaneLayout
-        isActiveTab
-        layout={currentTab.layout}
-        panes={splitWorkspace.panes}
-        tab={currentTab}
-      />,
-    );
+    render(<MainTerminalArea />);
 
     // Then: both terminal components stay mounted, but only the fullscreen pane occupies the area.
     expect(screen.getAllByTestId('terminal-view')).toHaveLength(2);
@@ -571,21 +462,9 @@ describe('PaneLayout', () => {
     // Given: a split layout is rendered while fullscreen state points at a missing pane.
     useWorkspaceStore.getState().splitPane('pane-1', 'vertical');
     useUiStore.getState().setFullscreenPaneId('missing-pane');
-    const splitWorkspace = useWorkspaceStore.getState().workspaces[0];
-    const splitTab = splitWorkspace?.tabs[0];
-    if (!splitWorkspace || !splitTab) {
-      throw new Error('Expected split workspace and tab.');
-    }
 
     // When: the layout renders.
-    render(
-      <PaneLayout
-        isActiveTab
-        layout={splitTab.layout}
-        panes={splitWorkspace.panes}
-        tab={splitTab}
-      />,
-    );
+    render(<MainTerminalArea />);
 
     // Then: fullscreen is not applied to this tab.
     expect(screen.getByRole('separator', { name: 'Resize vertical split' })).toBeInTheDocument();
@@ -594,25 +473,17 @@ describe('PaneLayout', () => {
   });
 
   it('toggles fullscreen from the pane toolbar and makes that pane active', () => {
-    // Given: the current tab has two panes and pane-1 is active.
+    // Given: the active tab has two panes and pane-1 is active.
     useWorkspaceStore.getState().splitPane('pane-1', 'vertical');
     useWorkspaceStore.getState().setActivePane('pane-1');
     const splitWorkspace = useWorkspaceStore.getState().workspaces[0];
-    const splitTab = splitWorkspace?.tabs[0];
     const secondPaneId = splitWorkspace?.panes.find((pane) => pane.id !== 'pane-1')?.id;
-    if (!splitWorkspace || !splitTab || !secondPaneId) {
-      throw new Error('Expected split workspace and tab.');
+    if (!splitWorkspace || !secondPaneId) {
+      throw new Error('Expected split workspace.');
     }
 
     // When: the second pane is maximized.
-    render(
-      <PaneLayout
-        isActiveTab
-        layout={splitTab.layout}
-        panes={splitWorkspace.panes}
-        tab={splitTab}
-      />,
-    );
+    render(<MainTerminalArea />);
     const secondMaximizeButton = screen.getAllByRole('button', { name: 'Maximize pane' })[1];
     if (!secondMaximizeButton) {
       throw new Error('Expected second maximize button.');

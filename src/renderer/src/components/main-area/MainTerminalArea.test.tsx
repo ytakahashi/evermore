@@ -10,9 +10,10 @@ vi.mock('./TabBar', () => ({
 }));
 
 vi.mock('./PaneLayout', () => ({
-  PaneLayout: ({ isActiveTab, tab }: { isActiveTab: boolean; tab: { id: string } }) => (
+  PaneCell: ({ isActiveTab, tab }: { isActiveTab: boolean; tab: { id: string } }) => (
     <div data-active={isActiveTab ? 'true' : 'false'} data-testid={`pane-layout-${tab.id}`} />
   ),
+  PaneSplitters: () => <div data-testid="pane-splitters" />,
 }));
 
 const initialWorkspaceStoreState = useWorkspaceStore.getState();
