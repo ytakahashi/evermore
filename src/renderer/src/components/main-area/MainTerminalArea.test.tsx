@@ -9,10 +9,13 @@ vi.mock('./TabBar', () => ({
   TabBar: () => <div data-testid="tab-bar" />,
 }));
 
-vi.mock('./PaneLayout', () => ({
+vi.mock('./PaneCell', () => ({
   PaneCell: ({ isActiveTab, tab }: { isActiveTab: boolean; tab: { id: string } }) => (
     <div data-active={isActiveTab ? 'true' : 'false'} data-testid={`pane-layout-${tab.id}`} />
   ),
+}));
+
+vi.mock('./PaneSplitters', () => ({
   PaneSplitters: () => <div data-testid="pane-splitters" />,
 }));
 

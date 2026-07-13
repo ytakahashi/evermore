@@ -2,7 +2,8 @@ import { useEffect, useMemo, useRef } from 'react';
 import { flattenLayout } from '../../../../shared/pane-layout';
 import { useUiStore } from '../../stores/uiStore';
 import { useWorkspaceStore } from '../../stores/workspaceStore';
-import { PaneCell, PaneSplitters } from './PaneLayout';
+import { PaneCell } from './PaneCell';
+import { PaneSplitters } from './PaneSplitters';
 import { TabBar } from './TabBar';
 
 interface ActiveSelection {
