@@ -7,7 +7,15 @@
  * components that build menus without tripping `react-refresh/only-export-components`.
  */
 export type ContextMenuItem =
-  | { type: 'action'; id: string; label: string; disabled?: boolean; onSelect: () => void }
+  | {
+      type: 'action';
+      id: string;
+      label: string;
+      disabled?: boolean;
+      /** Rendered as the button's `title` attribute; typically explains why a disabled item is disabled. */
+      title?: string;
+      onSelect: () => void;
+    }
   | { type: 'separator' }
   | { type: 'label'; label: string };
 

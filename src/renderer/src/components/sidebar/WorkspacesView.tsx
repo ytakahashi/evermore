@@ -11,6 +11,7 @@ import { countPaneLeaves, flattenLayout } from '../../../../shared/pane-layout';
 import { getPaneDisplayLabel } from '../../../../shared/pane-label';
 import { getTruncatedPathLabel } from '../../../../shared/path-label';
 import type { Pane, PaneRuntimeInfo } from '../../../../shared/types';
+import { MAX_WORKSPACE_TABS } from '../../../../shared/workspace-constants';
 import { usePaneInfoStore } from '../../stores/paneInfoStore';
 import { useTabDragStore, type TabDragDescriptor } from '../../stores/tabDragStore';
 import { useUiStore } from '../../stores/uiStore';
@@ -36,6 +37,7 @@ interface PaneSummaryProps {
   isActivePane: boolean;
   isActiveTab: boolean;
   onClick: () => void;
+  onContextMenu: (event: MouseEvent<HTMLButtonElement>) => void;
   pane: Pane;
   paneIndex: number;
 }
@@ -119,6 +121,7 @@ function PaneSummary({
   isActivePane,
   isActiveTab,
   onClick,
+  onContextMenu,
   pane,
   paneIndex,
 }: PaneSummaryProps): React.JSX.Element {
@@ -141,6 +144,7 @@ function PaneSummary({
           }`}
           type="button"
           onClick={onClick}
+          onContextMenu={onContextMenu}
         >
           <PaneLeadingIcon info={info} isActivePane={isActivePane} paneIndex={paneIndex} />
           {indicator && (
@@ -184,6 +188,7 @@ export function WorkspacesView(): React.JSX.Element {
   const setActiveWorkspace = useWorkspaceStore((state) => state.setActiveWorkspace);
   const reorderWorkspaceTab = useWorkspaceStore((state) => state.reorderWorkspaceTab);
   const moveTabToWorkspace = useWorkspaceStore((state) => state.moveTabToWorkspace);
+  const createTabFromPane = useWorkspaceStore((state) => state.createTabFromPane);
   const beginTabDrag = useTabDragStore((state) => state.begin);
   const endTabDrag = useTabDragStore((state) => state.end);
   const closeSettings = useUiStore((state) => state.closeSettings);
@@ -192,6 +197,17 @@ export function WorkspacesView(): React.JSX.Element {
   const [tabMenu, setTabMenu] = useState<{
     workspaceId: string;
     tabId: string;
+    x: number;
+    y: number;
+  } | null>(null);
+
+  // Holds the right-clicked pane row's workspace / owning tab / pane, plus the click point; null
+  // while closed. `sourceTabId` is captured at open time so the action still targets the correct
+  // tab even if the active tab/pane selection changes while the menu is open.
+  const [paneMenu, setPaneMenu] = useState<{
+    workspaceId: string;
+    sourceTabId: string;
+    paneId: string;
     x: number;
     y: number;
   } | null>(null);
@@ -470,7 +486,57 @@ export function WorkspacesView(): React.JSX.Element {
     if (!hasActionableItem(buildTabMenuItems(workspaceId, tabId))) {
       return;
     }
+    setPaneMenu(null);
     setTabMenu({ workspaceId, tabId, x: event.clientX, y: event.clientY });
+  };
+
+  // --- Pane context-menu handlers ---
+
+  // Built lazily on open, like `buildTabMenuItems`, so disabled state reflects the latest layout.
+  const buildPaneMenuItems = (
+    workspaceId: string,
+    sourceTabId: string,
+    paneId: string,
+  ): ContextMenuItem[] => {
+    const workspace = workspaces.find((currentWorkspace) => currentWorkspace.id === workspaceId);
+    const sourceTab = workspace?.tabs.find((tab) => tab.id === sourceTabId);
+    if (!workspace || !sourceTab) {
+      return [];
+    }
+
+    const tooFewPanes = countPaneLeaves(sourceTab.layout) <= 1;
+    const atTabLimit = workspace.tabs.length >= MAX_WORKSPACE_TABS;
+
+    return [
+      {
+        type: 'action',
+        id: 'create-tab-from-pane',
+        label: 'Create Tab from Pane',
+        disabled: tooFewPanes || atTabLimit,
+        title: tooFewPanes
+          ? 'At least two panes are required'
+          : atTabLimit
+            ? 'The workspace has reached the tab limit'
+            : undefined,
+        onSelect: () => {
+          createTabFromPane(workspaceId, sourceTabId, paneId);
+          closeSettings();
+        },
+      },
+    ];
+  };
+
+  const openPaneMenu = (
+    event: MouseEvent,
+    workspaceId: string,
+    sourceTabId: string,
+    paneId: string,
+  ): void => {
+    event.preventDefault();
+    // Unlike `openTabMenu`, this intentionally skips `hasActionableItem`: a lone-pane tab's only
+    // action is disabled, but the menu still opens to surface *why* via the item's `title`.
+    setTabMenu(null);
+    setPaneMenu({ workspaceId, sourceTabId, paneId, x: event.clientX, y: event.clientY });
   };
 
   // --- Tab drag-and-drop handlers ---
@@ -1045,6 +1111,9 @@ export function WorkspacesView(): React.JSX.Element {
                                   selectWorkspacePane(workspace.id, tab.id, pane.id);
                                   closeSettings();
                                 }}
+                                onContextMenu={(event) => {
+                                  openPaneMenu(event, workspace.id, tab.id, pane.id);
+                                }}
                               />
                             );
                           })}
@@ -1092,6 +1161,15 @@ export function WorkspacesView(): React.JSX.Element {
           items={buildTabMenuItems(tabMenu.workspaceId, tabMenu.tabId)}
           onClose={() => {
             setTabMenu(null);
+          }}
+        />
+      )}
+      {paneMenu && (
+        <ContextMenu
+          position={{ x: paneMenu.x, y: paneMenu.y }}
+          items={buildPaneMenuItems(paneMenu.workspaceId, paneMenu.sourceTabId, paneMenu.paneId)}
+          onClose={() => {
+            setPaneMenu(null);
           }}
         />
       )}

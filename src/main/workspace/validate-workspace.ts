@@ -1,5 +1,6 @@
 import { MAX_SPLIT_RATIO, MIN_SPLIT_RATIO } from '../../shared/pane-layout-constants';
 import type { Pane, PaneLayout, Tab, Workspace } from '../../shared/types';
+import { MAX_WORKSPACE_TABS } from '../../shared/workspace-constants';
 import {
   MAX_COMMAND_LENGTH,
   MAX_ID_LENGTH,
@@ -14,7 +15,6 @@ import {
   readStringField,
 } from '../ipc/validation';
 
-export const MAX_WORKSPACE_TABS = 100;
 export const MAX_WORKSPACE_PANES = 256;
 export const MAX_LAYOUT_DEPTH = 32;
 

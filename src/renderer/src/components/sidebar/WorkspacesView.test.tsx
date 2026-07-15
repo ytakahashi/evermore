@@ -1,8 +1,10 @@
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Workspace } from '../../../../shared/types';
+import { MAX_WORKSPACE_TABS } from '../../../../shared/workspace-constants';
 import { usePaneInfoStore } from '../../stores/paneInfoStore';
 import { useTabDragStore } from '../../stores/tabDragStore';
+import { useUiStore } from '../../stores/uiStore';
 import { useWorkspaceStore } from '../../stores/workspaceStore';
 import { WorkspacesView } from './WorkspacesView';
 
@@ -1163,5 +1165,212 @@ describe('WorkspacesView', () => {
       'workspace-2-tab-2',
     ]);
     expect(useTabDragStore.getState().dragging).toBeNull();
+  });
+
+  describe('Pane context menu (Create Tab from Pane)', () => {
+    // workspace-1's only tab is a two-pane split with distinct cwds (so pane rows have distinct
+    // accessible names), replacing the single-pane workspace-1 fixture used by the outer suite.
+    const splitWorkspace: Workspace = {
+      id: 'workspace-1',
+      name: 'Default',
+      rootPath: '/Users/tester',
+      tabs: [
+        {
+          id: 'workspace-1-tab-1',
+          name: 'zsh',
+          isCustomName: false,
+          layout: {
+            type: 'split',
+            direction: 'vertical',
+            ratio: 0.5,
+            children: [
+              { type: 'leaf', paneId: 'workspace-1-pane-1' },
+              { type: 'leaf', paneId: 'workspace-1-pane-2' },
+            ],
+          },
+          activePaneId: 'workspace-1-pane-1',
+        },
+      ],
+      panes: [
+        { id: 'workspace-1-pane-1', cwd: '/Users/tester/left' },
+        { id: 'workspace-1-pane-2', cwd: '/Users/tester/right' },
+      ],
+      activeTabId: 'workspace-1-tab-1',
+      createdAt: 1,
+      updatedAt: 1,
+    };
+
+    beforeEach(() => {
+      useWorkspaceStore.setState({
+        workspaces: [splitWorkspace, workspace2],
+        activeWorkspaceId: splitWorkspace.id,
+        isLoading: false,
+        error: null,
+      });
+    });
+
+    it('shows an enabled action for a pane in a multi-pane tab', () => {
+      // Given: the active workspace's tab has two panes.
+      render(<WorkspacesView />);
+
+      // When: the non-active pane row is right-clicked.
+      fireEvent.contextMenu(screen.getByRole('button', { name: /right \.\.\.\/tester\/right/ }));
+
+      // Then: the action is shown enabled.
+      expect(screen.getByRole('menuitem', { name: 'Create Tab from Pane' })).not.toBeDisabled();
+    });
+
+    it('disables the action with a reason for a lone-pane tab', () => {
+      // Given: workspace-2's "logs" tab has a single pane.
+      render(<WorkspacesView />);
+
+      // When: that lone pane row is right-clicked.
+      fireEvent.contextMenu(screen.getByRole('button', { name: /logs \.\.\.\/project\/logs/ }));
+
+      // Then: the action is shown disabled with an explanatory title.
+      const item = screen.getByRole('menuitem', { name: 'Create Tab from Pane' });
+      expect(item).toBeDisabled();
+      expect(item).toHaveAttribute('title', 'At least two panes are required');
+    });
+
+    it('disables the action with a reason at the workspace tab limit', () => {
+      // Given: the active workspace already has MAX_WORKSPACE_TABS tabs.
+      const fillerTabs = Array.from({ length: MAX_WORKSPACE_TABS - 1 }, (_, index) => ({
+        id: `filler-${index}`,
+        name: `filler-${index}`,
+        isCustomName: true,
+        layout: { type: 'leaf' as const, paneId: `filler-pane-${index}` },
+        activePaneId: `filler-pane-${index}`,
+      }));
+      const fillerPanes = fillerTabs.map((tab) => ({
+        id: tab.activePaneId as string,
+        cwd: '/Users/tester',
+      }));
+      const fullWorkspace: Workspace = {
+        ...splitWorkspace,
+        tabs: [...splitWorkspace.tabs, ...fillerTabs],
+        panes: [...splitWorkspace.panes, ...fillerPanes],
+      };
+      useWorkspaceStore.setState({
+        workspaces: [fullWorkspace, workspace2],
+        activeWorkspaceId: fullWorkspace.id,
+        isLoading: false,
+        error: null,
+      });
+      render(<WorkspacesView />);
+
+      // When: a pane row in the (still two-pane) original tab is right-clicked.
+      fireEvent.contextMenu(screen.getByRole('button', { name: /right \.\.\.\/tester\/right/ }));
+
+      // Then: the action is shown disabled with the tab-limit reason.
+      const item = screen.getByRole('menuitem', { name: 'Create Tab from Pane' });
+      expect(item).toBeDisabled();
+      expect(item).toHaveAttribute('title', 'The workspace has reached the tab limit');
+    });
+
+    it('does not change active selection merely by opening the menu', () => {
+      // Given: the sidebar shows a lone pane in an inactive workspace's inactive tab.
+      render(<WorkspacesView />);
+
+      // When: that pane row is right-clicked.
+      fireEvent.contextMenu(screen.getByRole('button', { name: /logs \.\.\.\/project\/logs/ }));
+
+      // Then: no active workspace / tab / pane changes.
+      expect(useWorkspaceStore.getState().activeWorkspaceId).toBe('workspace-1');
+      const projectWorkspace = useWorkspaceStore
+        .getState()
+        .workspaces.find((workspace) => workspace.id === 'workspace-2');
+      expect(projectWorkspace?.activeTabId).toBe('workspace-2-tab-1');
+    });
+
+    it('creates a new tab from the targeted pane and closes the menu', () => {
+      // Given: the sidebar shows the active workspace's two-pane tab.
+      render(<WorkspacesView />);
+
+      // When: the non-active pane's action is selected.
+      fireEvent.contextMenu(screen.getByRole('button', { name: /right \.\.\.\/tester\/right/ }));
+      fireEvent.click(screen.getByRole('menuitem', { name: 'Create Tab from Pane' }));
+
+      // Then: a new tab referencing exactly that pane is appended and made active, and the menu
+      // closes.
+      const updatedWorkspace = useWorkspaceStore
+        .getState()
+        .workspaces.find((workspace) => workspace.id === 'workspace-1');
+      const newTab = updatedWorkspace?.tabs.find((tab) => tab.id !== 'workspace-1-tab-1');
+      expect(newTab?.layout).toEqual({ type: 'leaf', paneId: 'workspace-1-pane-2' });
+      expect(newTab?.activePaneId).toBe('workspace-1-pane-2');
+      expect(updatedWorkspace?.activeTabId).toBe(newTab?.id);
+      expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+    });
+
+    it('closes the Settings view after the action runs', () => {
+      // Given: Settings is open and the sidebar is rendered.
+      act(() => {
+        useUiStore.getState().openSettings();
+      });
+      render(<WorkspacesView />);
+      expect(useUiStore.getState().activeView).toBe('settings');
+
+      // When: the pane action is selected.
+      fireEvent.contextMenu(screen.getByRole('button', { name: /right \.\.\.\/tester\/right/ }));
+      fireEvent.click(screen.getByRole('menuitem', { name: 'Create Tab from Pane' }));
+
+      // Then: the main pane returns to the workspace view.
+      expect(useUiStore.getState().activeView).toBe('workspace');
+      useUiStore.getState().closeSettings();
+    });
+
+    it('closes an open pane menu when the tab menu is opened', () => {
+      // Given: a pane menu is open on a lone pane.
+      render(<WorkspacesView />);
+      fireEvent.contextMenu(screen.getByRole('button', { name: /logs \.\.\.\/project\/logs/ }));
+      expect(screen.getByRole('menuitem', { name: 'Create Tab from Pane' })).toBeInTheDocument();
+
+      // When: an actionable tab is right-clicked.
+      fireEvent.contextMenu(screen.getByRole('button', { name: 'server (2 panes)' }));
+
+      // Then: only the tab menu remains, not the pane menu.
+      expect(
+        screen.queryByRole('menuitem', { name: 'Create Tab from Pane' }),
+      ).not.toBeInTheDocument();
+      expect(screen.getByRole('menuitem', { name: 'Move down' })).toBeInTheDocument();
+    });
+
+    it('closes an open tab menu when a pane menu is opened', () => {
+      // Given: an actionable tab menu is open.
+      render(<WorkspacesView />);
+      fireEvent.contextMenu(screen.getByRole('button', { name: 'server (2 panes)' }));
+      expect(screen.getByRole('menuitem', { name: 'Move down' })).toBeInTheDocument();
+
+      // When: a pane row is right-clicked.
+      fireEvent.contextMenu(screen.getByRole('button', { name: /right \.\.\.\/tester\/right/ }));
+
+      // Then: only the pane menu remains, not the tab menu.
+      expect(screen.queryByRole('menuitem', { name: 'Move down' })).not.toBeInTheDocument();
+      expect(screen.getByRole('menuitem', { name: 'Create Tab from Pane' })).toBeInTheDocument();
+    });
+
+    it('does not affect other workspaces', () => {
+      // Given: the sidebar shows two workspaces.
+      render(<WorkspacesView />);
+
+      // When: a pane is split into a new tab on the active workspace.
+      fireEvent.contextMenu(screen.getByRole('button', { name: /right \.\.\.\/tester\/right/ }));
+      fireEvent.click(screen.getByRole('menuitem', { name: 'Create Tab from Pane' }));
+
+      // Then: the other workspace's tabs and panes are untouched.
+      const otherWorkspace = useWorkspaceStore
+        .getState()
+        .workspaces.find((workspace) => workspace.id === 'workspace-2');
+      expect(otherWorkspace?.tabs.map((tab) => tab.id)).toEqual([
+        'workspace-2-tab-1',
+        'workspace-2-tab-2',
+      ]);
+      expect(otherWorkspace?.panes.map((pane) => pane.id)).toEqual([
+        'workspace-2-pane-1',
+        'workspace-2-pane-2',
+        'workspace-2-pane-3',
+      ]);
+    });
   });
 });

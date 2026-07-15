@@ -152,6 +152,7 @@ export function ContextMenu({ position, items, onClose }: ContextMenuProps): Rea
             role="menuitem"
             type="button"
             disabled={item.disabled}
+            title={item.title}
             className={`flex w-full items-center px-3 py-1.5 text-left text-foreground disabled:cursor-default disabled:text-subtle/50 ${
               isActive && !item.disabled ? 'bg-raised' : 'hover:bg-raised'
             }`}

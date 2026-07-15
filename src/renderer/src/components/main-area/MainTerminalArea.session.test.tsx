@@ -174,4 +174,72 @@ describe('MainTerminalArea tab move keeps the session', () => {
     expect(screen.getByTestId('terminal-pane-c')).toBe(siblingTerminalBefore);
     expect(terminalUnmounts).not.toHaveBeenCalled();
   });
+
+  it('preserves moved and sibling pane terminal nodes across createTabFromPane', () => {
+    // Given: a two-pane tab (pane-a active, pane-b sibling) in the active workspace.
+    useWorkspaceStore.setState({
+      workspaces: [
+        {
+          id: 'workspace-1',
+          name: 'Default',
+          rootPath: '/Users/tester',
+          tabs: [
+            {
+              id: 'tab-1',
+              name: 'zsh',
+              isCustomName: false,
+              layout: {
+                type: 'split',
+                direction: 'vertical',
+                ratio: 0.5,
+                children: [
+                  { type: 'leaf', paneId: 'pane-a' },
+                  { type: 'leaf', paneId: 'pane-b' },
+                ],
+              },
+              activePaneId: 'pane-a',
+            },
+          ],
+          panes: [
+            { id: 'pane-a', cwd: '/Users/tester/a' },
+            { id: 'pane-b', cwd: '/Users/tester/b' },
+          ],
+          activeTabId: 'tab-1',
+          createdAt: 1,
+          updatedAt: 1,
+        },
+      ],
+      activeWorkspaceId: 'workspace-1',
+    });
+    render(<MainTerminalArea />);
+    const movedTerminalBefore = screen.getByTestId('terminal-pane-b');
+    const siblingTerminalBefore = screen.getByTestId('terminal-pane-a');
+
+    // When: the non-active pane is split out into a new tab via the real store action.
+    act(() => {
+      useWorkspaceStore.getState().createTabFromPane('workspace-1', 'tab-1', 'pane-b');
+    });
+
+    // Then: both the moved pane (now in the destination tab) and the sibling pane left behind in
+    // the source tab keep their DOM/React identity, so neither terminal was unmounted.
+    expect(screen.getByTestId('terminal-pane-b')).toBe(movedTerminalBefore);
+    expect(screen.getByTestId('terminal-pane-a')).toBe(siblingTerminalBefore);
+    expect(terminalUnmounts).not.toHaveBeenCalled();
+
+    // And: switching between the source and destination tabs still doesn't unmount either node.
+    const updatedWorkspace = useWorkspaceStore.getState().workspaces[0];
+    const destinationTabId = updatedWorkspace?.tabs.find((tab) => tab.id !== 'tab-1')?.id;
+    if (!destinationTabId) {
+      throw new Error('Expected a destination tab to have been created.');
+    }
+    act(() => {
+      useWorkspaceStore.getState().selectWorkspaceTab('workspace-1', 'tab-1');
+    });
+    act(() => {
+      useWorkspaceStore.getState().selectWorkspaceTab('workspace-1', destinationTabId);
+    });
+    expect(screen.getByTestId('terminal-pane-b')).toBe(movedTerminalBefore);
+    expect(screen.getByTestId('terminal-pane-a')).toBe(siblingTerminalBefore);
+    expect(terminalUnmounts).not.toHaveBeenCalled();
+  });
 });
