@@ -1,18 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import { MAX_SPLIT_RATIO, MIN_SPLIT_RATIO } from '../../shared/pane-layout-constants';
 import type { Pane, PaneLayout, Workspace } from '../../shared/types';
+import { MAX_WORKSPACE_TABS } from '../../shared/workspace-constants';
 import {
   MAX_COMMAND_LENGTH,
   MAX_ID_LENGTH,
   MAX_NAME_LENGTH,
   MAX_PATH_LENGTH,
 } from '../ipc/validation';
-import {
-  MAX_LAYOUT_DEPTH,
-  MAX_WORKSPACE_PANES,
-  MAX_WORKSPACE_TABS,
-  readWorkspace,
-} from './validate-workspace';
+import { MAX_LAYOUT_DEPTH, MAX_WORKSPACE_PANES, readWorkspace } from './validate-workspace';
 
 const CHANNEL = 'workspace:update';
 

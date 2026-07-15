@@ -1,8 +1,9 @@
 import { create, type StoreApi, type UseBoundStore } from 'zustand';
-import { flattenLayout, type PaneRect } from '../../../shared/pane-layout';
+import { countPaneLeaves, flattenLayout, type PaneRect } from '../../../shared/pane-layout';
 import { MAX_SPLIT_RATIO, MIN_SPLIT_RATIO } from '../../../shared/pane-layout-constants';
 import { getPathBasename } from '../../../shared/path-label';
 import type { Pane, PaneLayout, Tab, Workspace } from '../../../shared/types';
+import { MAX_WORKSPACE_TABS } from '../../../shared/workspace-constants';
 
 const DEFAULT_SAVE_DEBOUNCE_MS = 300;
 const DEFAULT_CWD_SAVE_DEBOUNCE_MS = 1000;
@@ -76,6 +77,18 @@ export interface WorkspaceStoreState {
     targetWorkspaceId: string,
     toIndex?: number,
   ) => void;
+  /**
+   * Splits `paneId` out of `sourceTabId` into a brand-new tab appended to `workspaceId`'s tab list,
+   * making the new tab and the moved pane active. No-op unless the workspace and source tab exist,
+   * the pane is referenced exactly once by the source tab's layout, the source tab has at least two
+   * panes (so it is never left empty), and the workspace has not reached {@link MAX_WORKSPACE_TABS}.
+   * `Workspace.panes` is untouched — only the source and destination tabs' layout references change
+   * — so the moved pane's `pane.id` stays stable and `MainTerminalArea`'s flat pane rendering keeps
+   * its PTY/xterm session alive across the tab change. Switches the active workspace to
+   * `workspaceId` when it differs, mirroring {@link addWorkspaceTab}, so the destination tab is
+   * immediately visible and the existing active-selection effect clears fullscreen / moves focus.
+   */
+  createTabFromPane: (workspaceId: string, sourceTabId: string, paneId: string) => void;
   setActivePane: (paneId: string) => void;
   setPanePtyId: (paneId: string, ptyId: string | null) => void;
   splitPane: (paneId: string, direction: SplitDirection) => void;
@@ -304,6 +317,48 @@ function removePaneLayout(
   }
 
   return { layout, removed: false };
+}
+
+export interface DetachPaneResult {
+  updatedSourceTab: Tab;
+  movedPaneId: string;
+}
+
+/**
+ * Removes `paneId`'s leaf from `sourceTab.layout` and collapses the vacated split, returning the
+ * updated tab and the detached pane id. Returns `null` when `paneId` is not referenced by the
+ * layout exactly once, or when the tab has fewer than two panes (a tab must never lose its only
+ * pane through this path — that case is surfaced as a disabled action in the UI instead).
+ *
+ * Deliberately takes no `Workspace.panes`: it only reconciles layout and `activePaneId`. Tab-name
+ * sync (which needs the pane's `cwd`) is the caller's responsibility, keeping this helper reusable
+ * for a future "move to existing tab" attach primitive that has different naming rules.
+ */
+export function detachPaneFromTab(sourceTab: Tab, paneId: string): DetachPaneResult | null {
+  const paneOccurrences = collectPaneIds(sourceTab.layout).filter((id) => id === paneId).length;
+  if (paneOccurrences !== 1 || countPaneLeaves(sourceTab.layout) < 2) {
+    return null;
+  }
+
+  const removedLayout = removePaneLayout(sourceTab.layout, paneId);
+  if (!removedLayout.removed || !removedLayout.layout) {
+    return null;
+  }
+
+  const remainingPaneIds = collectPaneIds(removedLayout.layout);
+  const activePaneId =
+    sourceTab.activePaneId !== null && remainingPaneIds.includes(sourceTab.activePaneId)
+      ? sourceTab.activePaneId
+      : findFirstPaneId(removedLayout.layout);
+
+  return {
+    updatedSourceTab: {
+      ...sourceTab,
+      layout: removedLayout.layout,
+      activePaneId,
+    },
+    movedPaneId: paneId,
+  };
 }
 
 function updateSplitRatio(layout: PaneLayout, path: number[], ratio: number): PaneLayout {
@@ -694,7 +749,7 @@ export function createWorkspaceStore(
         const workspace = get().workspaces.find(
           (currentWorkspace) => currentWorkspace.id === workspaceId,
         );
-        if (!workspace) {
+        if (!workspace || workspace.tabs.length >= MAX_WORKSPACE_TABS) {
           return;
         }
 
@@ -753,7 +808,7 @@ export function createWorkspaceStore(
         const state = get();
         const workspace = selectActiveWorkspace(state);
         const activePane = selectActivePane(state);
-        if (!workspace) {
+        if (!workspace || workspace.tabs.length >= MAX_WORKSPACE_TABS) {
           return;
         }
 
@@ -1046,6 +1101,65 @@ export function createWorkspaceStore(
         }
         persistWorkspaceDebounced(updatedSource.id);
         persistWorkspaceDebounced(updatedTarget.id);
+      },
+      createTabFromPane: (workspaceId: string, sourceTabId: string, paneId: string): void => {
+        const shouldSwitchWorkspace = get().activeWorkspaceId !== workspaceId;
+        const workspace = get().workspaces.find(
+          (currentWorkspace) => currentWorkspace.id === workspaceId,
+        );
+        if (!workspace || workspace.tabs.length >= MAX_WORKSPACE_TABS) {
+          return;
+        }
+
+        const sourceTab = workspace.tabs.find((tab) => tab.id === sourceTabId);
+        if (!sourceTab) {
+          return;
+        }
+
+        const movedPane = workspace.panes.find((pane) => pane.id === paneId);
+        if (!movedPane) {
+          return;
+        }
+
+        const detachResult = detachPaneFromTab(sourceTab, paneId);
+        if (!detachResult) {
+          return;
+        }
+
+        const { updatedSourceTab, movedPaneId } = detachResult;
+        // Only re-sync the source tab's automatic name when the detach changed which pane is
+        // active there; `syncTabNameWithPane` is itself a no-op for custom names.
+        const nextActivePane =
+          updatedSourceTab.activePaneId !== sourceTab.activePaneId
+            ? workspace.panes.find((pane) => pane.id === updatedSourceTab.activePaneId)
+            : undefined;
+        const finalSourceTab = nextActivePane
+          ? syncTabNameWithPane(updatedSourceTab, nextActivePane)
+          : updatedSourceTab;
+
+        const destinationTab: Tab = {
+          id: createStoreId(),
+          name: getAutomaticTabName(movedPane.cwd),
+          isCustomName: false,
+          layout: { type: 'leaf', paneId: movedPaneId },
+          activePaneId: movedPaneId,
+        };
+
+        get().updateWorkspace(
+          replaceTab(
+            {
+              ...workspace,
+              tabs: [...workspace.tabs, destinationTab],
+              activeTabId: destinationTab.id,
+            },
+            finalSourceTab,
+          ),
+        );
+
+        if (shouldSwitchWorkspace) {
+          set({ activeWorkspaceId: workspaceId });
+          void getWorkspaceApi().setActiveWorkspaceId(workspaceId);
+        }
       },
       setActivePane: (paneId: string): void => {
         const workspace = selectActiveWorkspace(get());
