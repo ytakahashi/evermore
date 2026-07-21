@@ -198,8 +198,10 @@ typed surface.
 - Translate the renderer's namespaced API calls into `ipcRenderer.invoke` calls keyed by the
   constants in `shared/ipc-channels.ts`.
 - For main-emitted events that fan out to many subscribers, register exactly one `ipcRenderer.on`
-  listener per channel and dispatch to a subscriber set. This avoids exceeding Node's default
-  10-listener cap when many panes or features subscribe to the same channel.
+  listener per channel and dispatch to a subscriber map, rather than adding one `ipcRenderer.on` per
+  subscriber (see the design note at the top of `preload/index.ts` for why). Subscribers are keyed
+  by a per-subscription `symbol` rather than the callback itself, so two subscriptions stay
+  independent even if they pass a referentially identical callback.
 - Declare the global `Window['api']` ambient type so the renderer TypeScript project can consume it.
 
 ### Invariants
