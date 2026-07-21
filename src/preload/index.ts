@@ -13,26 +13,44 @@ import type { Api, PtyCreateRequest, SettingsUpdate } from '../shared/api-types'
 
 // Each pane subscribes its own callback via onData/onExit. Registering a new ipcRenderer.on()
 // per pane would exceed Node's default 10-listener limit with many open panes. A single
-// ipcRenderer listener per channel dispatches to a subscriber set instead.
-const ptyDataSubscribers = new Set<(id: string, data: string) => void>();
-const ptyExitSubscribers = new Set<(id: string, code: number) => void>();
-const paneInfoChangedSubscribers = new Set<(info: PaneRuntimeInfo) => void>();
-const shortcutInvokeSubscribers = new Set<(actionId: KeyboardShortcutActionId) => void>();
+// ipcRenderer listener per channel dispatches to a subscriber map instead.
+//
+// Keyed by a per-subscribe() symbol rather than the callback itself: two subscriptions that
+// happen to pass a referentially identical function (e.g. a memoized callback reused across
+// hook instances) must stay independent, so unsubscribing one must never remove the other.
+//
+// Each dispatch loop below iterates `Map.values()` directly rather than a snapshot taken before
+// the loop starts. This is a deliberate choice: `Map.values()` is a live iterator, so an
+// unsubscribe triggered by an earlier callback in the same dispatch takes effect immediately and
+// the removed callback is skipped, while a subscribe triggered mid-dispatch may still receive the
+// event currently being fanned out. No current subscriber mutates subscriptions from inside its
+// own callback, so this asymmetry is not observed in practice; it is noted here so a future
+// subscriber that does mutate during dispatch does not treat the ordering as accidental.
+const ptyDataSubscribers = new Map<symbol, (id: string, data: string) => void>();
+const ptyExitSubscribers = new Map<symbol, (id: string, code: number) => void>();
+const paneInfoChangedSubscribers = new Map<symbol, (info: PaneRuntimeInfo) => void>();
+const shortcutInvokeSubscribers = new Map<symbol, (actionId: KeyboardShortcutActionId) => void>();
+const tunnelStatusChangedSubscribers = new Map<
+  symbol,
+  (alias: string, status: TunnelStatus, error?: string) => void
+>();
+const tunnelLogSubscribers = new Map<symbol, (alias: string, data: string) => void>();
+const windowFullScreenChangedSubscribers = new Map<symbol, (isFullScreen: boolean) => void>();
 
 ipcRenderer.on(IPC.PTY_DATA, (_: unknown, payload: { id: string; data: string }) => {
-  for (const cb of ptyDataSubscribers) {
+  for (const cb of ptyDataSubscribers.values()) {
     cb(payload.id, payload.data);
   }
 });
 
 ipcRenderer.on(IPC.PTY_EXIT, (_: unknown, payload: { id: string; code: number }) => {
-  for (const cb of ptyExitSubscribers) {
+  for (const cb of ptyExitSubscribers.values()) {
     cb(payload.id, payload.code);
   }
 });
 
 ipcRenderer.on(IPC.PANE_INFO_CHANGED, (_: unknown, payload: PaneRuntimeInfo) => {
-  for (const cb of paneInfoChangedSubscribers) {
+  for (const cb of paneInfoChangedSubscribers.values()) {
     cb(payload);
   }
 });
@@ -40,11 +58,32 @@ ipcRenderer.on(IPC.PANE_INFO_CHANGED, (_: unknown, payload: PaneRuntimeInfo) => 
 ipcRenderer.on(
   IPC.SHORTCUT_INVOKE,
   (_: unknown, payload: { actionId: KeyboardShortcutActionId }) => {
-    for (const cb of shortcutInvokeSubscribers) {
+    for (const cb of shortcutInvokeSubscribers.values()) {
       cb(payload.actionId);
     }
   },
 );
+
+ipcRenderer.on(
+  IPC.TUNNEL_STATUS_CHANGED,
+  (_: unknown, payload: { alias: string; status: TunnelStatus; error?: string }) => {
+    for (const cb of tunnelStatusChangedSubscribers.values()) {
+      cb(payload.alias, payload.status, payload.error);
+    }
+  },
+);
+
+ipcRenderer.on(IPC.TUNNEL_LOG, (_: unknown, payload: { alias: string; data: string }) => {
+  for (const cb of tunnelLogSubscribers.values()) {
+    cb(payload.alias, payload.data);
+  }
+});
+
+ipcRenderer.on(IPC.WINDOW_FULLSCREEN_CHANGED, (_: unknown, isFullScreen: boolean) => {
+  for (const cb of windowFullScreenChangedSubscribers.values()) {
+    cb(isFullScreen);
+  }
+});
 
 const api = {
   pty: {
@@ -55,15 +94,17 @@ const api = {
       ipcRenderer.invoke(IPC.PTY_RESIZE, { id, cols, rows }),
     dispose: (id: string): Promise<void> => ipcRenderer.invoke(IPC.PTY_DISPOSE, { id }),
     onData: (cb: (id: string, data: string) => void): (() => void) => {
-      ptyDataSubscribers.add(cb);
+      const token = Symbol();
+      ptyDataSubscribers.set(token, cb);
       return (): void => {
-        ptyDataSubscribers.delete(cb);
+        ptyDataSubscribers.delete(token);
       };
     },
     onExit: (cb: (id: string, code: number) => void): (() => void) => {
-      ptyExitSubscribers.add(cb);
+      const token = Symbol();
+      ptyExitSubscribers.set(token, cb);
       return (): void => {
-        ptyExitSubscribers.delete(cb);
+        ptyExitSubscribers.delete(token);
       };
     },
   },
@@ -72,9 +113,10 @@ const api = {
     notifyCommand: (ptyId: string, command: string): Promise<void> =>
       ipcRenderer.invoke(IPC.PANE_INFO_NOTIFY_COMMAND, { ptyId, command }),
     onChanged: (cb: (info: PaneRuntimeInfo) => void): (() => void) => {
-      paneInfoChangedSubscribers.add(cb);
+      const token = Symbol();
+      paneInfoChangedSubscribers.set(token, cb);
       return (): void => {
-        paneInfoChangedSubscribers.delete(cb);
+        paneInfoChangedSubscribers.delete(token);
       };
     },
   },
@@ -106,21 +148,17 @@ const api = {
     onStatusChanged: (
       cb: (alias: string, status: TunnelStatus, error?: string) => void,
     ): (() => void) => {
-      const handler = (
-        _: unknown,
-        payload: { alias: string; status: TunnelStatus; error?: string },
-      ): void => cb(payload.alias, payload.status, payload.error);
-      ipcRenderer.on(IPC.TUNNEL_STATUS_CHANGED, handler);
+      const token = Symbol();
+      tunnelStatusChangedSubscribers.set(token, cb);
       return (): void => {
-        ipcRenderer.removeListener(IPC.TUNNEL_STATUS_CHANGED, handler);
+        tunnelStatusChangedSubscribers.delete(token);
       };
     },
     onLog: (cb: (alias: string, data: string) => void): (() => void) => {
-      const handler = (_: unknown, payload: { alias: string; data: string }): void =>
-        cb(payload.alias, payload.data);
-      ipcRenderer.on(IPC.TUNNEL_LOG, handler);
+      const token = Symbol();
+      tunnelLogSubscribers.set(token, cb);
       return (): void => {
-        ipcRenderer.removeListener(IPC.TUNNEL_LOG, handler);
+        tunnelLogSubscribers.delete(token);
       };
     },
   },
@@ -136,18 +174,19 @@ const api = {
   window: {
     isFullScreen: (): Promise<boolean> => ipcRenderer.invoke(IPC.WINDOW_IS_FULLSCREEN),
     onFullScreenChanged: (cb: (isFullScreen: boolean) => void): (() => void) => {
-      const handler = (_: unknown, isFullScreen: boolean): void => cb(isFullScreen);
-      ipcRenderer.on(IPC.WINDOW_FULLSCREEN_CHANGED, handler);
+      const token = Symbol();
+      windowFullScreenChangedSubscribers.set(token, cb);
       return (): void => {
-        ipcRenderer.removeListener(IPC.WINDOW_FULLSCREEN_CHANGED, handler);
+        windowFullScreenChangedSubscribers.delete(token);
       };
     },
   },
   shortcuts: {
     onInvoke: (cb: (actionId: KeyboardShortcutActionId) => void): (() => void) => {
-      shortcutInvokeSubscribers.add(cb);
+      const token = Symbol();
+      shortcutInvokeSubscribers.set(token, cb);
       return (): void => {
-        shortcutInvokeSubscribers.delete(cb);
+        shortcutInvokeSubscribers.delete(token);
       };
     },
   },
