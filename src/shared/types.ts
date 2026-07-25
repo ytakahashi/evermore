@@ -106,7 +106,11 @@ export interface PaneAgentInfo {
   /** Optional metadata carried from an agent protocol payload. Unused by command-line detection. */
   detail?: {
     event?: string;
+    /** Agent-authored text. Safe to surface in the macOS notification body. */
     message?: string;
+    /** Sidebar-only, machine-generated activity summary. Never used as a notification body. */
+    activityLabel?: string;
+    toolName?: string;
   };
 }
 

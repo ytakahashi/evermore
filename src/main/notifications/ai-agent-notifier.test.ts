@@ -5,11 +5,6 @@ import type { AppSettings, PaneRuntimeInfo } from '../../shared/types';
 import { AiAgentNotifier } from './ai-agent-notifier';
 import type { NotificationService } from './notification-service';
 
-// Build the ANSI escape byte at runtime via String.fromCharCode so the source file stays plain
-// ASCII on disk. Embedding the raw 0x1B byte directly makes editors and code review tools refuse
-// to display the file.
-const ESC = String.fromCharCode(0x1b);
-
 interface FakeService {
   show: ReturnType<typeof vi.fn>;
 }
@@ -109,12 +104,13 @@ describe('AiAgentNotifier', () => {
     expect(payload.title).toBe('AI agent is waiting for your input');
   });
 
-  it('uses agent.detail.message as body and runs it through sanitization', () => {
-    // Given: an agent message containing an ANSI escape that must not reach the notification body.
-    const dirtyMessage = `${ESC}[31mApprove tool use?${ESC}[0m`;
+  it('uses agent.detail.message verbatim as the notification body', () => {
+    // Given: PaneInfoTracker.agentDetailFromEvent already sanitizes agent.detail.message before it
+    // reaches PaneRuntimeInfo (see pane-info-tracker.test.ts for that coverage), so the notifier's
+    // own responsibility is only to pass the value through unchanged.
     const { notifier, service } = makeNotifier(settingsWith(true));
 
-    // When: the observation includes the dirty message.
+    // When: the observation includes a message.
     notifier.observe(
       paneInfo({
         agent: {
@@ -123,14 +119,39 @@ describe('AiAgentNotifier', () => {
           status: 'awaiting-input',
           source: 'agent-protocol',
           observedAt: 1,
-          detail: { message: dirtyMessage },
+          detail: { message: 'Approve tool use?' },
         },
       }),
     );
 
-    // Then: the body reaches the service with the escapes stripped.
+    // Then: the body matches the detail message exactly.
     const payload = service.show.mock.calls[0]?.[0] as NotificationPayload;
     expect(payload.body).toBe('Approve tool use?');
+  });
+
+  it('falls back to the cwd basename when only detail.activityLabel is present', () => {
+    // Given: activityLabel is a Sidebar-only, machine-generated summary that may embed file paths
+    // or shell commands and must never leak into a macOS notification body.
+    const { notifier, service } = makeNotifier(settingsWith(true));
+
+    // When: the pane's agent detail has only a machine-generated activity label, no message.
+    notifier.observe(
+      paneInfo({
+        cwd: '/Users/test/project',
+        agent: {
+          known: 'claude',
+          kind: 'claude',
+          status: 'awaiting-input',
+          source: 'agent-protocol',
+          observedAt: 1,
+          detail: { activityLabel: 'Bash: rm -rf /tmp/cache' },
+        },
+      }),
+    );
+
+    // Then: the body falls back to the cwd basename, not the activity label.
+    const payload = service.show.mock.calls[0]?.[0] as NotificationPayload;
+    expect(payload.body).toBe('project');
   });
 
   it('falls back to the cwd basename when the agent message is missing or empty', () => {

@@ -10,6 +10,12 @@ import type {
   PaneProcessActivity,
   PaneRuntimeInfo,
 } from '../../shared/types';
+import {
+  AGENT_DETAIL_ACTIVITY_LABEL_MAX_CHARS,
+  AGENT_DETAIL_MESSAGE_MAX_CHARS,
+  AGENT_DETAIL_TOOL_NAME_MAX_CHARS,
+} from '../../shared/pane-integration-constants';
+import { sanitizeAgentText } from '../../shared/text/sanitize-agent-text';
 import { createSilentLogger, type Logger } from '../logging/logger';
 import { detectAgentFromCommand } from './agent-detection';
 import { classifyForegroundSession } from './foreground-session';
@@ -633,9 +639,21 @@ function agentInfoFromKind(kind: string): Pick<PaneAgentInfo, 'known' | 'kind'> 
 }
 
 function agentDetailFromEvent(event: EvermoreAgentEvent): Partial<Pick<PaneAgentInfo, 'detail'>> {
+  const message = event.message
+    ? sanitizeAgentText(event.message, AGENT_DETAIL_MESSAGE_MAX_CHARS)
+    : '';
+  const activityLabel = event.activityLabel
+    ? sanitizeAgentText(event.activityLabel, AGENT_DETAIL_ACTIVITY_LABEL_MAX_CHARS)
+    : '';
+  const toolName = event.toolName
+    ? sanitizeAgentText(event.toolName, AGENT_DETAIL_TOOL_NAME_MAX_CHARS)
+    : '';
+
   const detail = {
     ...(event.event ? { event: event.event } : {}),
-    ...(event.message ? { message: event.message } : {}),
+    ...(message ? { message } : {}),
+    ...(activityLabel ? { activityLabel } : {}),
+    ...(toolName ? { toolName } : {}),
   };
 
   return Object.keys(detail).length > 0 ? { detail } : {};

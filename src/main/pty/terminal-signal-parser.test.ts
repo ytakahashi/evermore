@@ -228,6 +228,7 @@ describe('TerminalSignalParser', () => {
       event: 'permission_request',
       cwd: '/Users/tester/project',
       toolName: 'write_file',
+      activityLabel: 'write_file: src/main.ts',
       toolInput: { file_path: 'src/main.ts' },
       extra: 'allowed',
     });
@@ -249,6 +250,7 @@ describe('TerminalSignalParser', () => {
           event: 'permission_request',
           cwd: '/Users/tester/project',
           toolName: 'write_file',
+          activityLabel: 'write_file: src/main.ts',
           toolInput: { file_path: 'src/main.ts' },
         },
       },
