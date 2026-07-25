@@ -55,4 +55,47 @@ describe('getPaneDisplayLabel', () => {
     // When / Then: the shared loading label is returned.
     expect(getPaneDisplayLabel(undefined, '')).toBe('(loading)');
   });
+
+  it('prefers the agent-aware label over the raw foreground command when an agent is detected', () => {
+    // Given: a running pane whose foreground command is a raw agent invocation, but the tracker
+    // has also identified it as a known agent with a hook-provided activity detail.
+    const runtimeInfo = info({
+      processActivity: 'running',
+      foregroundCommand: 'claude --dangerously-skip-permissions',
+      foregroundSession: { kind: 'other' },
+      agent: {
+        known: 'claude',
+        kind: 'claude',
+        status: 'running',
+        source: 'agent-protocol',
+        observedAt: 1,
+        detail: { message: 'Edit: src/App.tsx' },
+      },
+    });
+
+    // When: callers ask for the pane display label.
+    const label = getPaneDisplayLabel(runtimeInfo, '/Users/tester/project');
+
+    // Then: the agent-aware label wins, not the raw (potentially unstable) foreground command.
+    expect(label).toBe('Claude Code — Edit: src/App.tsx');
+  });
+
+  it('returns the agent display name only when the agent has no detail', () => {
+    // Given: a running pane detected as an agent via command-line matching (no hook configured).
+    const runtimeInfo = info({
+      processActivity: 'running',
+      foregroundCommand: 'claude',
+      foregroundSession: { kind: 'other' },
+      agent: {
+        known: 'claude',
+        kind: 'claude',
+        status: 'ready',
+        source: 'command-line',
+        observedAt: 1,
+      },
+    });
+
+    // When / Then: the label is the agent display name, not the raw foreground command.
+    expect(getPaneDisplayLabel(runtimeInfo, '/Users/tester/project')).toBe('Claude Code');
+  });
 });

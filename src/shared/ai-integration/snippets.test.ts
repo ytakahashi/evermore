@@ -14,6 +14,18 @@ describe('AI integration snippets', () => {
     expect(EVERMORE_AGENT_STATUS_HELPER_SCRIPT).toContain('jq -cn');
     expect(EVERMORE_AGENT_STATUS_HELPER_SCRIPT).toContain('claude|codex|antigravity|cursor');
     expect(EVERMORE_AGENT_STATUS_HELPER_SCRIPT).toContain('running|awaiting-input|complete');
+    expect(EVERMORE_AGENT_STATUS_HELPER_SCRIPT).toContain(
+      'TTY_DEVICE="${EVERMORE_AGENT_TTY_PATH:-/dev/tty}"',
+    );
+  });
+
+  it('builds a Sidebar-only activityLabel field alongside the other detail fields', () => {
+    // Given / When: the helper script text is inspected.
+    // Then: it defines the activityLabel builder and wires it into the emitted payload. Behavioral
+    // coverage (actual jq execution against fixture payloads) lives in
+    // tests/e2e/ai-integration.e2e.test.ts, which spawns the real script.
+    expect(EVERMORE_AGENT_STATUS_HELPER_SCRIPT).toContain('built_activity_label');
+    expect(EVERMORE_AGENT_STATUS_HELPER_SCRIPT).toContain('string_field("activityLabel"');
   });
 
   it('defines parseable JSON hook snippets for each supported AI CLI', () => {

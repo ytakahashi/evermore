@@ -155,10 +155,14 @@ function PaneSummary({
             />
           )}
           <div className="min-w-0 flex-1">
-            {/* Label is the runtime summary (foregroundCommand when running, cwd basename otherwise),
-                while the detail row keeps cwd context in a shortened form. Showing foregroundCommand
-                again in the detail row would just duplicate the label. */}
-            <div className={`truncate ${isActivePane ? 'text-foreground' : 'text-muted'}`}>
+            {/* Label is the runtime summary: agent-aware label when an agent is detected, else
+                foregroundCommand when running, else cwd basename (see getPaneDisplayLabel). The
+                detail row below keeps cwd context in a shortened form regardless of which summary
+                is shown, since foregroundCommand would just duplicate the label. */}
+            <div
+              className={`truncate ${isActivePane ? 'text-foreground' : 'text-muted'}`}
+              title={label}
+            >
               {label}
             </div>
             {pane.cwd && (
