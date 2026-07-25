@@ -31,6 +31,8 @@ export interface EvermoreAgentEvent {
   sessionId?: string;
   cwd?: string;
   toolName?: string;
+  /** Sidebar-only, machine-generated activity summary (for example `Edit: src/App.tsx`). */
+  activityLabel?: string;
   toolInput?: unknown;
 }
 

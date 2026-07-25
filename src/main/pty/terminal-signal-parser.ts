@@ -255,6 +255,7 @@ function parseEvermoreAgentEvent(
     ...optionalStringField(parsed, 'sessionId'),
     ...optionalStringField(parsed, 'cwd'),
     ...optionalStringField(parsed, 'toolName'),
+    ...optionalStringField(parsed, 'activityLabel'),
     ...(Object.hasOwn(parsed, 'toolInput') ? { toolInput: parsed['toolInput'] } : {}),
   };
 }
@@ -274,7 +275,7 @@ function normalizeAgentKind(value: unknown): string | null {
 
 function optionalStringField(
   payload: Record<string, unknown>,
-  field: 'message' | 'event' | 'sessionId' | 'cwd' | 'toolName',
+  field: 'message' | 'event' | 'sessionId' | 'cwd' | 'toolName' | 'activityLabel',
 ): Partial<Pick<EvermoreAgentEvent, typeof field>> {
   const value = payload[field];
   return typeof value === 'string' ? { [field]: value } : {};

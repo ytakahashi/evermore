@@ -3,11 +3,9 @@ import { formatAgentDisplayName } from '../../shared/ai-integration/agent-displa
 import type { NotificationPayload } from '../../shared/notifications';
 import type { AppSettings, PaneRuntimeInfo } from '../../shared/types';
 import type { NotificationService } from './notification-service';
-import { sanitizeNotificationBody } from './sanitize-notification-body';
 
 const NOTIFICATION_CATEGORY = 'ai-agent-awaiting-input';
 const NOTIFICATION_ID_PREFIX = 'ai-agent-awaiting-input:';
-const MAX_BODY_CHARS = 200;
 
 interface AiAgentNotifierOptions {
   service: NotificationService;
@@ -85,8 +83,11 @@ export class AiAgentNotifier {
 
   private buildPayload(info: PaneRuntimeInfo): NotificationPayload {
     const agentName = formatAgentDisplayName(info.agent);
-    const sanitizedMessage = sanitizeNotificationBody(info.agent?.detail?.message, MAX_BODY_CHARS);
-    const body = sanitizedMessage || this.cwdBasename(info.cwd) || undefined;
+    // agent.detail.message is already sanitized by PaneInfoTracker.agentDetailFromEvent, so it is
+    // used verbatim here. detail.activityLabel is intentionally never used as a fallback: it is a
+    // Sidebar-only, machine-generated summary that may embed file paths or shell commands, which
+    // should not leak into a macOS notification body (potentially visible on the lock screen).
+    const body = info.agent?.detail?.message || this.cwdBasename(info.cwd) || undefined;
 
     return {
       v: 1,

@@ -1,8 +1,18 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+  AGENT_DETAIL_ACTIVITY_LABEL_MAX_CHARS,
+  AGENT_DETAIL_MESSAGE_MAX_CHARS,
+  AGENT_DETAIL_TOOL_NAME_MAX_CHARS,
+} from '../../shared/pane-integration-constants';
 import type { PaneRuntimeInfo } from '../../shared/types';
 import { createLogger, type LogRecord, type LogTransport } from '../logging/logger';
 import { PaneInfoTracker } from './pane-info-tracker';
 import type { PaneInfoChangedEvent, ProcessTableRow } from './types';
+
+// Build the ANSI escape byte at runtime via String.fromCharCode so the source file stays plain
+// ASCII on disk. Embedding the raw 0x1B byte directly makes editors and code review tools refuse
+// to display the file.
+const ESC = String.fromCharCode(0x1b);
 
 function shellRow(tpgid: number): ProcessTableRow {
   return {
@@ -1188,6 +1198,141 @@ describe('PaneInfoTracker', () => {
       },
     });
     expect(tracker.list()[0]?.attention).toBeUndefined();
+  });
+
+  it('propagates activityLabel and toolName from Evermore agent events into agent.detail', () => {
+    // Given: a known agent command is running under shell integration.
+    tracker.register('pty-1', 123, '/tmp');
+    now = 1002;
+    tracker.applySignal('pty-1', {
+      type: 'shell-command-line',
+      command: 'claude',
+      source: 'osc633',
+    });
+    tracker.applySignal('pty-1', { type: 'shell-command-started', source: 'osc133' });
+
+    // When: the agent reports a tool use with a machine-generated activity label.
+    now = 1003;
+    tracker.applySignal('pty-1', {
+      type: 'agent-event',
+      source: 'evermore-osc777',
+      event: {
+        v: 1,
+        type: 'agent-status',
+        agent: 'claude',
+        status: 'running',
+        event: 'post_tool_use',
+        toolName: 'Edit',
+        activityLabel: 'Edit: src/App.tsx',
+      },
+    });
+
+    // Then: both fields land in PaneAgentInfo.detail alongside the existing event field.
+    expect(tracker.list()[0]?.agent?.detail).toEqual({
+      event: 'post_tool_use',
+      toolName: 'Edit',
+      activityLabel: 'Edit: src/App.tsx',
+    });
+  });
+
+  it('sanitizes ANSI escapes out of message, activityLabel, and toolName before storing them', () => {
+    // Given: a known agent command is running under shell integration.
+    tracker.register('pty-1', 123, '/tmp');
+    now = 1002;
+    tracker.applySignal('pty-1', {
+      type: 'shell-command-line',
+      command: 'claude',
+      source: 'osc633',
+    });
+    tracker.applySignal('pty-1', { type: 'shell-command-started', source: 'osc133' });
+
+    // When: the agent event carries ANSI color escapes in each detail field.
+    now = 1003;
+    tracker.applySignal('pty-1', {
+      type: 'agent-event',
+      source: 'evermore-osc777',
+      event: {
+        v: 1,
+        type: 'agent-status',
+        agent: 'claude',
+        status: 'awaiting-input',
+        message: `${ESC}[31mApprove?${ESC}[0m`,
+        activityLabel: `${ESC}[31mBash: rm -rf /tmp${ESC}[0m`,
+        toolName: `${ESC}[31mBash${ESC}[0m`,
+      },
+    });
+
+    // Then: the stored detail is plain text with the escapes stripped.
+    expect(tracker.list()[0]?.agent?.detail).toMatchObject({
+      message: 'Approve?',
+      activityLabel: 'Bash: rm -rf /tmp',
+      toolName: 'Bash',
+    });
+  });
+
+  it('omits detail fields that sanitize to an empty string', () => {
+    // Given: a known agent command is running under shell integration.
+    tracker.register('pty-1', 123, '/tmp');
+    now = 1002;
+    tracker.applySignal('pty-1', {
+      type: 'shell-command-line',
+      command: 'claude',
+      source: 'osc633',
+    });
+    tracker.applySignal('pty-1', { type: 'shell-command-started', source: 'osc133' });
+
+    // When: message and toolName consist entirely of escape sequences.
+    now = 1003;
+    tracker.applySignal('pty-1', {
+      type: 'agent-event',
+      source: 'evermore-osc777',
+      event: {
+        v: 1,
+        type: 'agent-status',
+        agent: 'claude',
+        status: 'running',
+        event: 'post_tool_use',
+        message: `${ESC}[2J${ESC}[H`,
+        toolName: `${ESC}[0m`,
+      },
+    });
+
+    // Then: only the raw hook event name survives; message/activityLabel/toolName are absent.
+    expect(tracker.list()[0]?.agent?.detail).toEqual({ event: 'post_tool_use' });
+  });
+
+  it('truncates detail fields that exceed their configured character limits', () => {
+    // Given: a known agent command is running under shell integration.
+    tracker.register('pty-1', 123, '/tmp');
+    now = 1002;
+    tracker.applySignal('pty-1', {
+      type: 'shell-command-line',
+      command: 'claude',
+      source: 'osc633',
+    });
+    tracker.applySignal('pty-1', { type: 'shell-command-started', source: 'osc133' });
+
+    // When: the agent event carries fields far longer than their configured limits.
+    now = 1003;
+    tracker.applySignal('pty-1', {
+      type: 'agent-event',
+      source: 'evermore-osc777',
+      event: {
+        v: 1,
+        type: 'agent-status',
+        agent: 'claude',
+        status: 'running',
+        message: 'm'.repeat(AGENT_DETAIL_MESSAGE_MAX_CHARS + 50),
+        activityLabel: 'a'.repeat(AGENT_DETAIL_ACTIVITY_LABEL_MAX_CHARS + 50),
+        toolName: 't'.repeat(AGENT_DETAIL_TOOL_NAME_MAX_CHARS + 50),
+      },
+    });
+
+    // Then: each field is truncated to its own limit plus the ellipsis marker.
+    const detail = tracker.list()[0]?.agent?.detail;
+    expect(detail?.message).toBe(`${'m'.repeat(AGENT_DETAIL_MESSAGE_MAX_CHARS)}…`);
+    expect(detail?.activityLabel).toBe(`${'a'.repeat(AGENT_DETAIL_ACTIVITY_LABEL_MAX_CHARS)}…`);
+    expect(detail?.toolName).toBe(`${'t'.repeat(AGENT_DETAIL_TOOL_NAME_MAX_CHARS)}…`);
   });
 
   it('lets agent-protocol status outrank command-line detection until the next shell command starts', async () => {

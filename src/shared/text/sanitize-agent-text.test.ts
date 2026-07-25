@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { sanitizeNotificationBody } from './sanitize-notification-body';
+import { sanitizeAgentText } from './sanitize-agent-text';
 
 // Build control characters at runtime via String.fromCharCode so the source file stays plain
 // ASCII on disk. Embedding the raw 0x1B / 0x07 / 0x00 bytes directly makes editors and code
@@ -8,11 +8,11 @@ const ESC = String.fromCharCode(0x1b);
 const BEL = String.fromCharCode(0x07);
 const NUL = String.fromCharCode(0x00);
 
-describe('sanitizeNotificationBody', () => {
+describe('sanitizeAgentText', () => {
   it('returns the empty string for undefined / empty input', () => {
     // Given / When / Then.
-    expect(sanitizeNotificationBody(undefined)).toBe('');
-    expect(sanitizeNotificationBody('')).toBe('');
+    expect(sanitizeAgentText(undefined)).toBe('');
+    expect(sanitizeAgentText('')).toBe('');
   });
 
   it('strips ANSI CSI color sequences and OSC title sequences from agent output', () => {
@@ -20,7 +20,7 @@ describe('sanitizeNotificationBody', () => {
     const input = `${ESC}[31mHello${ESC}[0m ${ESC}]0;title${BEL}there`;
 
     // When: sanitized.
-    const result = sanitizeNotificationBody(input);
+    const result = sanitizeAgentText(input);
 
     // Then: only the plain text survives, with whitespace runs collapsed.
     expect(result).toBe('Hello there');
@@ -31,7 +31,7 @@ describe('sanitizeNotificationBody', () => {
     const input = `a${NUL}b${BEL} c\td\ne`;
 
     // When: sanitized.
-    const result = sanitizeNotificationBody(input);
+    const result = sanitizeAgentText(input);
 
     // Then: control characters are dropped and the surviving whitespace is collapsed to spaces.
     expect(result).toBe('ab c d e');
@@ -42,7 +42,7 @@ describe('sanitizeNotificationBody', () => {
     const input = '   line one\r\nline    two\t\t  ';
 
     // When: sanitized.
-    const result = sanitizeNotificationBody(input);
+    const result = sanitizeAgentText(input);
 
     // Then: whitespace runs collapse to a single space and the result is trimmed.
     expect(result).toBe('line one line two');
@@ -53,7 +53,7 @@ describe('sanitizeNotificationBody', () => {
     const input = `${ESC}[2J${ESC}[H  `;
 
     // When: sanitized.
-    const result = sanitizeNotificationBody(input);
+    const result = sanitizeAgentText(input);
 
     // Then: nothing remains for the body, so the caller can apply a fallback.
     expect(result).toBe('');
@@ -64,7 +64,7 @@ describe('sanitizeNotificationBody', () => {
     const input = 'x'.repeat(20);
 
     // When: truncated to 5 characters.
-    const result = sanitizeNotificationBody(input, 5);
+    const result = sanitizeAgentText(input, 5);
 
     // Then: the result is exactly the limit plus an ellipsis marker.
     expect(result).toBe('xxxxx…');
@@ -75,7 +75,7 @@ describe('sanitizeNotificationBody', () => {
     const input = '😀😀😀😀😀😀';
 
     // When: truncated to four code points.
-    const result = sanitizeNotificationBody(input, 4);
+    const result = sanitizeAgentText(input, 4);
 
     // Then: the truncation respects code-point boundaries instead of slicing a surrogate pair.
     expect(result).toBe('😀😀😀😀…');
