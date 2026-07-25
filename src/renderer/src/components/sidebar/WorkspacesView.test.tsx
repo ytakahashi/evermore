@@ -337,6 +337,84 @@ describe('WorkspacesView', () => {
     expect(screen.getByLabelText('running')).toBeInTheDocument();
   });
 
+  it('shows the agent-aware label with hook detail instead of the raw foreground command', () => {
+    // Given: a pane running an agent whose hook reported an activity detail.
+    usePaneInfoStore.setState({
+      infosByPtyId: {
+        'pty-server': {
+          ptyId: 'pty-server',
+          processActivity: 'running',
+          foregroundCommand: 'claude --dangerously-skip-permissions',
+          foregroundSession: { kind: 'other' },
+          integration: {
+            shell: false,
+            protocols: [],
+            lastSequenceAt: 0,
+            stale: false,
+          },
+          agent: {
+            known: 'claude',
+            kind: 'claude',
+            status: 'running',
+            source: 'agent-protocol',
+            observedAt: 1000,
+            detail: { message: 'Edit: src/App.tsx' },
+          },
+          observedAt: 1000,
+        },
+      },
+      isLoading: false,
+      error: null,
+    });
+
+    // When: the workspace sidebar renders.
+    render(<WorkspacesView />);
+
+    // Then: the label combines the agent name with the hook detail, exposes it via `title`, and
+    // the raw (potentially unstable) foreground command is not shown anywhere.
+    const label = screen.getByText('Claude Code — Edit: src/App.tsx');
+    expect(label).toBeInTheDocument();
+    expect(label).toHaveAttribute('title', 'Claude Code — Edit: src/App.tsx');
+    expect(screen.queryByText('claude --dangerously-skip-permissions')).not.toBeInTheDocument();
+  });
+
+  it('shows the agent display name only when the agent has no hook detail', () => {
+    // Given: a pane detected as an agent via command-line matching only (no hook configured).
+    usePaneInfoStore.setState({
+      infosByPtyId: {
+        'pty-server': {
+          ptyId: 'pty-server',
+          processActivity: 'running',
+          foregroundCommand: 'claude',
+          foregroundSession: { kind: 'other' },
+          integration: {
+            shell: false,
+            protocols: [],
+            lastSequenceAt: 0,
+            stale: false,
+          },
+          agent: {
+            known: 'claude',
+            kind: 'claude',
+            status: 'ready',
+            source: 'command-line',
+            observedAt: 1000,
+          },
+          observedAt: 1000,
+        },
+      },
+      isLoading: false,
+      error: null,
+    });
+
+    // When: the workspace sidebar renders.
+    render(<WorkspacesView />);
+
+    // Then: the label falls back to the agent display name alone.
+    expect(screen.getByText('Claude Code')).toBeInTheDocument();
+    expect(screen.queryByText('claude')).not.toBeInTheDocument();
+  });
+
   it('shows the working dot when the agent reports it is processing a turn', () => {
     // Given: a pane has a runtime info snapshot where the agent status is `running`.
     usePaneInfoStore.setState({
