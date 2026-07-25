@@ -46,6 +46,7 @@ const AGENT_SNIPPETS: readonly [AgentSnippet, ...AgentSnippet[]] = [
       'Paste or merge this into ~/.claude/settings.json.',
       'Claude Code uses terminalSequence so the hook result asks Claude to emit the OSC sequence.',
       'After setup, the sidebar shows Claude as running while a turn is active, awaiting input when approval is needed, and ready when the turn completes.',
+      'PostToolUse and PermissionRequest also show the target file or command in the sidebar label.',
     ],
     snippet: {
       id: 'claude-code-hooks',
@@ -65,6 +66,7 @@ const AGENT_SNIPPETS: readonly [AgentSnippet, ...AgentSnippet[]] = [
       'Codex CLI can write the OSC sequence directly to /dev/tty from the hook process.',
       'When Codex asks to trust the configured hooks, approve them so Evermore can receive status updates.',
       'After setup, the sidebar shows Codex as running while a turn is active, awaiting input when approval is needed, and ready when the turn completes.',
+      'PostToolUse and PermissionRequest show Codex Bash commands and apply_patch target files in the sidebar label. Other tools fall back to a recognized target field or just the tool name.',
     ],
     snippet: {
       id: 'codex-cli-hooks',
@@ -84,6 +86,7 @@ const AGENT_SNIPPETS: readonly [AgentSnippet, ...AgentSnippet[]] = [
       'Antigravity CLI can write the OSC sequence directly to /dev/tty from the hook process.',
       'After setup, the sidebar shows Antigravity as running while a turn is active and ready when the turn completes.',
       'Approval prompts may not change the sidebar to awaiting input yet because Antigravity does not expose a reliable approval hook.',
+      "The helper script also tries to show the target file or command it is currently working on. This extraction is tuned for Claude Code's tool payload shape and is unconfirmed for Antigravity, so it may fall back to just the tool name.",
     ],
     snippet: {
       id: 'antigravity-cli-hooks',

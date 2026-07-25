@@ -61,6 +61,9 @@ describe('AIIntegrationSection', () => {
     expect(screen.getByText('Codex CLI hooks')).toBeInTheDocument();
     expect(screen.getByText('~/.codex/hooks.json')).toBeInTheDocument();
     expect(screen.getByText(/sidebar shows Codex as running/i)).toBeInTheDocument();
+    expect(
+      screen.getByText(/show Codex Bash commands and apply_patch target files/i),
+    ).toBeInTheDocument();
     expect(screen.queryByText(/open \/hooks inside Codex TUI/i)).not.toBeInTheDocument();
 
     // When: the user selects the Antigravity CLI hooks.
