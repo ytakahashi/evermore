@@ -6,3 +6,4 @@ allowBuilds:
   electron-winstaller: false
   esbuild: true
   node-pty: true
+  unrs-resolver: true
