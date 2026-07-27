@@ -44,24 +44,10 @@ src/
 └── shared/       # Cross-process types, constants, and pure helpers
 ```
 
-Each layer's responsibilities, invariants, and allowed dependencies are described in the Main /
-Preload / Renderer / Shared sections below. Sub-directory and file naming inside each layer is
-conventional (one sub-directory per feature under `main/`, one section per UI area under
-`renderer/src/components/`, etc.) but is not part of the architectural contract — `ls src/<layer>`
-is the source of truth.
-
-Top-level dependency rules:
-
-- `shared/` is pure. It must not import from `main/`, `preload/`, `renderer/`, or any Electron,
-  Node.js, browser, or React API. Only TypeScript standard library and in-tree `shared/` files are
-  allowed.
-- `main/` may use Node.js APIs and Electron's main-process modules. It must not import from
-  `renderer/` or `preload/`.
-- `preload/` may use `electron` (`contextBridge`, `ipcRenderer`). It must not import from `main/` or
-  `renderer/`. It may import from `shared/` for types and IPC channel constants only.
-- `renderer/` may use React, browser APIs, `xterm.js`, and `zustand`. It must not import from
-  `main/`, `preload/` (except the type ambient declaration), or any Node-only module (`node-pty`,
-  `electron-store`, `node:*`). All main-process capabilities must go through `window.api`.
+Each layer's responsibilities and invariants are described in the Main / Preload / Renderer / Shared
+sections below. Sub-directory and file naming inside each layer is conventional (one sub-directory
+per feature under `main/`, one section per UI area under `renderer/src/components/`, etc.) but is
+not part of the architectural contract — `ls src/<layer>` is the source of truth.
 
 ## Dependency Overview
 
@@ -80,9 +66,17 @@ graph TD
     preload -->|ipcRenderer.invoke / on| main
 ```
 
+These arrows are the whole contract: the three process-side layers may depend on `shared/`,
+`shared/` depends on nothing, and the two hops between processes happen at runtime rather than
+through imports.
+
+`eslint.config.mjs` is the executable form of this graph and the source of truth for its details —
+which external packages and runtime globals each layer may use. `pnpm run lint` rejects a violation,
+and `tests/integration/architecture-rules.test.ts` guards the rules themselves.
+
 The renderer never has a static `import` from `preload/` — the only renderer-side reference is the
 ambient `Window['api']` declaration in `src/preload/index.d.ts`, which is included only by the
-renderer-only `tsconfig.web.json`.
+renderer-only `tsconfig.web.json`. This is the one edge in the graph that lint cannot see.
 
 ## TypeScript Project Boundaries
 
@@ -94,13 +88,19 @@ checker:
 - `tsconfig.web.json` includes `src/renderer/src/**`, `src/shared/**`, and `src/preload/*.d.ts`. It
   uses `@electron-toolkit/tsconfig/tsconfig.web.json` and defines the `@renderer/*` path alias.
 
-Both projects must pass under `pnpm run typecheck`. A renderer-side import from `main/` (or vice
-versa) will fail typecheck because each project's `include` list does not pick up the other
-process's source.
+Both projects must pass under `pnpm run typecheck`.
+
+The split makes the boundary visible to the type checker but does not enforce it: TypeScript follows
+an import into a file outside the project's `include` list rather than rejecting it. A renderer-side
+import from `main/` fails typecheck only when the imported module transitively touches Node or
+Electron types that `tsconfig.web.json` does not load. A main module made of pure logic slips
+through. The lint rules referenced under Dependency Overview are what actually close the boundary.
 
 ## Shared Layer
 
 `shared/` is the contract between processes. Its responsibility is:
+
+### Responsibilities
 
 - Define the IPC channel name constants used by both `preload/` and `main/ipc/handlers/*`.
 - Declare the `Api` interface that the preload exposes and the renderer consumes.
@@ -108,7 +108,7 @@ process's source.
   etc.) that round-trip through `structuredClone` / JSON without loss.
 - Hold pure helpers that are safe in any runtime.
 
-Invariants:
+### Invariants
 
 - Every type in `shared/types.ts` is **JSON-serializable**. Anything that crosses the IPC boundary
   must round-trip through `structuredClone`/JSON without loss. Runtime-only fields like `ptyId` and
@@ -116,16 +116,6 @@ Invariants:
   `WorkspaceStore`.
 - Constants exported here (e.g. `TUNNEL_LOG_BUFFER_SIZE`) are the single source of truth used by
   both main and renderer to keep their ring buffer sizes aligned.
-
-Allowed dependencies:
-
-- TypeScript standard language features
-- Other files within `shared/`
-
-Disallowed dependencies:
-
-- `main/`, `preload/`, `renderer/`
-- Node.js APIs, Electron, browser/runtime APIs, React, zustand, xterm
 
 ## Main Layer
 
@@ -177,16 +167,6 @@ handler that bridges it to the renderer.
   `createSilentLogger()`, so they do not need to spy on `console`. The effective level resolves from
   `LOG_LEVEL`, falling back to `debug` in dev and `info` in prod.
 
-### Allowed dependencies
-
-- `shared/`
-- Node.js built-ins, `electron` main-process modules, `node-pty`, `ssh-config`, `electron-store`
-
-### Disallowed dependencies
-
-- `renderer/`, `preload/`
-- Browser runtime APIs, React, xterm
-
 ## Preload Layer
 
 `preload/index.ts` is the only place where `ipcRenderer` is imported. It defines `window.api` and
@@ -211,21 +191,11 @@ typed surface.
 - `window.api` is `satisfies Api`, so any drift between the preload implementation and the `Api`
   interface in `shared/api-types.ts` fails typecheck.
 
-### Allowed dependencies
-
-- `shared/`
-- `electron` (`contextBridge`, `ipcRenderer`)
-
-### Disallowed dependencies
-
-- `main/`, `renderer/`
-- Node-only modules, React, xterm
-
 ## Renderer Layer
 
 The renderer is a single React 19 app rendered into `#root` by `main.tsx` with `StrictMode` enabled.
 
-### Responsibilities and Import Restrictions
+### Responsibilities
 
 - `App.tsx` mounts the layout and wires global event bridges that subscribe to main-process
   notifications and write them into the renderer stores. It is intentionally tiny: routing, business
@@ -274,17 +244,6 @@ The renderer is a single React 19 app rendered into `#root` by `main.tsx` with `
 - **Workspace persistence is debounced** in the renderer (`workspaceStore`) and flushed via
   `getWorkspaceApi().update(workspace)`. Layout / cwd updates set the workspace dirty and share one
   timer; any structural mutation is a flush point.
-
-### Allowed dependencies
-
-- `shared/`
-- React, zustand, xterm.js, lucide-react, tailwind-merge, clsx
-- Browser runtime APIs
-
-### Disallowed dependencies
-
-- `main/`, `preload/` (other than the ambient `Window['api']` type from `src/preload/index.d.ts`)
-- Node-only modules (`node:*`, `node-pty`, `child_process`, `electron-store`, `electron`, `fs`, …)
 
 ## IPC Boundary Contract
 
@@ -335,7 +294,10 @@ registers DOM matchers and React Testing Library cleanup lives in `tests/setup.t
   without mocking the seams between them. They must remain deterministic and host-independent (no
   external process, no network, no host-dependent filesystem reads beyond temp dirs or checked-in
   fixtures). They live in `tests/integration/` so cross-module wiring is visible and is not mistaken
-  for a unit test of either side.
+  for a unit test of either side. Tests that assert on the repository's own configuration — for
+  example running the real ESLint config over fixtures to prove the architecture rules still reject
+  what they claim to — belong in this tier too: they combine real, checked-in inputs and depend on
+  no module in isolation.
 - **End-to-end tests** depend on a runtime external dependency (real subprocess such as zsh / ssh,
   real network socket, etc.). They live in `tests/e2e/` and use `describe.skipIf(...)` to skip when
   that dependency is unavailable on the current host (for example, `existsSync('/bin/zsh')` is

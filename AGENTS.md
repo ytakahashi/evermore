@@ -2,36 +2,29 @@
 
 ## Project Overview
 
-- Evermore is a simple terminal workspace for developers.
-- The application is built with Electron and a React frontend.
+Evermore is a simple terminal workspace for developers, built with Electron and a React frontend.
 
-Refer to [ARCHITECTURE.md](./ARCHITECTURE.md) for details.
+The load-bearing constraints in this repository are the `main` / `preload` / `renderer` process
+boundaries, the layer dependency rules, and the IPC contract. [ARCHITECTURE.md](./ARCHITECTURE.md)
+describes the details — read it before changing anything that crosses those boundaries.
 
-## Coding Style Guidelines
+## Environment Notes
 
-### Editing
+- Use pnpm. `postinstall` runs `electron-builder install-app-deps`. Installing with npm or yarn
+  still typechecks, but PTY creation fails at runtime.
+- `pnpm run dev` opens a GUI window and does not exit. Do not use it to verify a change.
+- The e2e tier skips itself when the host lacks the real dependency it drives. A green
+  `pnpm run test` therefore does not guarantee those suites ran.
 
-- Do not revert or rewrite unrelated user changes.
-- Keep changes scoped to the requested phase or step.
+## Conventions
 
-### TypeScript
+Compiler and linter settings already enforce the mechanical rules. The conventions below are the
+ones no tool checks.
 
-- Strict mode is enabled (`"strict": true`).
-- Use explicit types for function parameters and return values.
-- Use `unknown` (not `any`) in `catch` blocks.
+### Error handling
+
 - If the error is inspected, narrow it with `instanceof Error` before reading error fields.
 - If the error is intentionally ignored, bind it as `_error: unknown` and explain why in a comment.
-
-### Electron / IPC
-
-- Renderer code must not import Node-only APIs or `node-pty` directly.
-- Main-process capabilities should be exposed to the renderer only through preload `window.api`.
-- PTY processes are runtime-only state owned by the main process.
-- `cwd` is a PTY creation input. Do not recreate a running PTY just because a pane cwd prop changes.
-- Renderer-to-main IPC payloads must be accepted as `unknown` and structurally validated in the
-  handlers.
-- Handlers must reconstruct clean objects from validated fields only; do not cast or forward the raw
-  `unknown` payload object, ensuring unknown keys are ignored and never forwarded.
 
 ### Code Comments
 
@@ -43,11 +36,8 @@ Refer to [ARCHITECTURE.md](./ARCHITECTURE.md) for details.
 
 ### Testing
 
-Test tier structure (unit / integration / e2e), directory layout, runner configuration, and
-architectural invariants are documented in [ARCHITECTURE.md](./ARCHITECTURE.md#testing). The
-conventions below apply when writing tests in any tier.
-
-- Tests use explicit imports (`import { describe, it, expect } from 'vitest'`), not globals.
+- Test tier structure (unit / integration / e2e), directory layout, runner configuration, and
+  architectural invariants are documented in [ARCHITECTURE.md](./ARCHITECTURE.md#testing).
 - Use **Given / When / Then** style with explicit comment blocks to structure test cases for better
   readability.
 
