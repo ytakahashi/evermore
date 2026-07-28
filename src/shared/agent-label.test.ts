@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { formatAgentLabel } from './agent-label';
+import { formatAgentActivityDetail, formatAgentLabel } from './agent-label';
 import type { PaneAgentInfo } from './types';
 
 function agent(overrides: Partial<PaneAgentInfo> = {}): PaneAgentInfo {
@@ -72,5 +72,51 @@ describe('formatAgentLabel', () => {
 
     // When / Then: the generic AI agent label is used.
     expect(formatAgentLabel(info)).toBe('AI agent — Run');
+  });
+});
+
+describe('formatAgentActivityDetail', () => {
+  it('prefers message over activityLabel, toolName, and event', () => {
+    // Given: an agent carrying every detail field at once.
+    const info = agent({
+      detail: {
+        message: 'Approve tool use?',
+        activityLabel: 'Edit: src/App.tsx',
+        toolName: 'Edit',
+        event: 'post_tool_use',
+      },
+    });
+
+    // When / Then: the most specific field wins.
+    expect(formatAgentActivityDetail(info)).toBe('Approve tool use?');
+  });
+
+  it('falls through activityLabel, toolName, and event as each becomes unavailable', () => {
+    // Given / When / Then: each fallback step in the documented priority order.
+    expect(
+      formatAgentActivityDetail(
+        agent({ detail: { activityLabel: 'Edit: src/App.tsx', toolName: 'Edit' } }),
+      ),
+    ).toBe('Edit: src/App.tsx');
+    expect(
+      formatAgentActivityDetail(agent({ detail: { toolName: 'Edit', event: 'post_tool_use' } })),
+    ).toBe('Edit');
+    expect(formatAgentActivityDetail(agent({ detail: { event: 'post_tool_use' } }))).toBe(
+      'post_tool_use',
+    );
+  });
+
+  it('returns undefined for a ready agent even when detail is present', () => {
+    // Given: a ready agent still carrying detail from a prior awaiting-input / complete event.
+    const info = agent({ status: 'ready', detail: { message: 'Waiting for approval' } });
+
+    // When / Then: stale activity is not reported once the agent is idle again.
+    expect(formatAgentActivityDetail(info)).toBeUndefined();
+  });
+
+  it('returns undefined when the agent has no detail at all', () => {
+    // Given: an agent detected from the command line, with no hook detail.
+    // When / Then: there is nothing to summarize.
+    expect(formatAgentActivityDetail(agent({ detail: undefined }))).toBeUndefined();
   });
 });

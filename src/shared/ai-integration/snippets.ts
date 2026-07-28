@@ -1,3 +1,9 @@
+import {
+  AGENT_USER_PROMPT_HOOK_MAX_CHARS,
+  OSC_777_PAYLOAD_MAX_BYTES,
+} from '../pane-integration-constants';
+import { AGENT_USER_PROMPT_SUBMIT_EVENT } from '../pane-runtime-signal';
+
 /**
  * Shared shell helper for AI agent hook integrations.
  *
@@ -7,6 +13,19 @@
  *
  * The script intentionally depends on `jq` so quoted paths, session ids, and tool names are parsed
  * and JSON-escaped by a real JSON tool rather than by shell string handling.
+ *
+ * Two invariants shape the structure below and must survive any edit:
+ *
+ *  - **Hook JSON and the assembled payload reach `jq` through stdin, never through `argv`.** Hook
+ *    stdin can contain the user's prompt, and therefore credentials, customer data, or unreleased
+ *    source. Process arguments are world-readable on a shared host, so nothing derived from hook
+ *    input may be passed with `--arg`. The number of `jq` invocations is free to vary; only the
+ *    transport into them is fixed.
+ *  - **A status update always reaches Evermore.** `parseEvermoreAgentEvent()` discards an entire
+ *    OSC 777 event once its payload exceeds `OSC_777_PAYLOAD_MAX_BYTES`, so an oversized optional
+ *    field would take the status indicator down with it. The script measures the assembled payload
+ *    and degrades it — first without the prompt, then to the bare status fields — rather than
+ *    emitting something that will be dropped.
  *
  * When this snippet changes, update the AI integration tests so Settings copy blocks and the shell
  * contract stay in sync.
@@ -21,6 +40,8 @@ TRANSPORT="\${4:-tty}"
 # Keep /dev/tty as the production path; the override lets tests and nonstandard terminal hosts
 # provide an equivalent out-of-band destination without mixing OSC bytes into hook stdout.
 TTY_DEVICE="\${EVERMORE_AGENT_TTY_PATH:-/dev/tty}"
+PAYLOAD_MAX_BYTES=${OSC_777_PAYLOAD_MAX_BYTES}
+PROMPT_MAX_CHARS=${AGENT_USER_PROMPT_HOOK_MAX_CHARS}
 
 case "$AGENT" in
   claude|codex|antigravity|cursor) ;;
@@ -32,6 +53,18 @@ case "$STATUS" in
   *) printf '{}\\n'; exit 0 ;;
 esac
 
+# Debug logging is opt-in and may capture payloads, so the log is created with owner-only
+# permissions instead of inheriting whatever umask (or /tmp default) happens to be in effect.
+log_debug() {
+  [ -n "\${EVERMORE_HOOK_DEBUG:-}" ] || return 0
+  LOG="\${EVERMORE_HOOK_LOG:-/tmp/evermore-agent-hook.log}"
+  if [ ! -f "$LOG" ]; then
+    (umask 077; : > "$LOG") 2>/dev/null || return 0
+  fi
+  chmod 600 "$LOG" 2>/dev/null || true
+  printf '%s %s\\n' "$(date +%T)" "$1" >> "$LOG" || true
+}
+
 if [ -t 0 ]; then
   HOOK_INPUT=""
 else
@@ -39,25 +72,20 @@ else
 fi
 
 if ! command -v jq >/dev/null 2>&1; then
-  if [ -n "\${EVERMORE_HOOK_DEBUG:-}" ]; then
-    LOG="\${EVERMORE_HOOK_LOG:-/tmp/evermore-agent-hook.log}"
-    printf '%s jq not found\\n' "$(date +%T)" >> "$LOG"
-  fi
+  log_debug 'jq not found'
   printf '{}\\n'
   exit 0
 fi
 
-PAYLOAD="$(
-  jq -cn \\
-    --arg hook "$HOOK_INPUT" \\
+# $1 is "true" to include the submitted prompt, "false" to leave it out for the first degradation
+# step. Hook JSON arrives on stdin (-Rs reads it as one raw string) so it never appears in argv.
+build_payload() {
+  printf '%s' "$HOOK_INPUT" | jq -Rsc \\
     --arg agent "$AGENT" \\
     --arg status "$STATUS" \\
-    --arg event "$EVENT" '
-      def parsed_hook:
-        if $hook == "" then {}
-        else try ($hook | fromjson) catch {}
-        end;
-
+    --arg event "$EVENT" \\
+    --argjson withPrompt "$1" \\
+    --argjson promptMaxChars "$PROMPT_MAX_CHARS" '
       def string_field($name; $value):
         if ($value | type) == "string" and ($value | length) > 0
         then {($name): $value}
@@ -106,7 +134,30 @@ PAYLOAD="$(
         else null
         end;
 
-      parsed_hook as $in
+      # Replaces control characters with spaces. Evermore sanitizes the text again for display, so
+      # the point here is purely arithmetic: an escaped control character costs six bytes as \\uXXXX,
+      # which would make the payload size unpredictable from the character count alone.
+      # explode/implode is used rather than a regex because it operates on code points directly and
+      # does not depend on how the regex engine spells a control-character range.
+      def scrub_control_chars:
+        explode | map(if . < 32 or . == 127 then 32 else . end) | implode;
+
+      # Restricted to the prompt-submission event on purpose. Reading any "prompt"-shaped key
+      # wherever one appears would let subagent instructions or tool arguments surface in the UI as
+      # if the user had typed them.
+      def submitted_prompt($h):
+        if $withPrompt and $event == "${AGENT_USER_PROMPT_SUBMIT_EVENT}"
+        then (
+          ($h.prompt // $h.user_prompt // $h.userPrompt // null) as $p
+          | if ($p | type) == "string"
+            then ($p | scrub_control_chars | .[0:$promptMaxChars])
+            else null
+            end
+        )
+        else null
+        end;
+
+      ((try fromjson catch {}) | if type == "object" then . else {} end) as $in
       | {
           v: 1,
           type: "agent-status",
@@ -121,25 +172,53 @@ PAYLOAD="$(
           ))
         + string_field("toolName"; ($in.tool_name // $in.toolName))
         + string_field("activityLabel"; built_activity_label($in))
+        + string_field("userPrompt"; submitted_prompt($in))
     '
-)"
+}
+
+# Only the validated agent/status enums reach argv here; nothing from hook stdin does.
+build_minimal_payload() {
+  jq -cn --arg agent "$AGENT" --arg status "$STATUS" \\
+    '{ v: 1, type: "agent-status", agent: $agent, status: $status }'
+}
+
+payload_byte_length() {
+  printf '%s' "$1" | wc -c | tr -d '[:space:]'
+}
+
+payload_fits() {
+  [ -n "$1" ] && [ "$(payload_byte_length "$1")" -le "$PAYLOAD_MAX_BYTES" ]
+}
+
+# Character limits make an oversized payload unlikely, not impossible: cwd, sessionId and
+# activityLabel are all unbounded here, and activityLabel can carry a whole Bash heredoc. Measuring
+# the real byte count is what turns "status always arrives" into a guarantee.
+PAYLOAD="$(build_payload true || printf '')"
+if ! payload_fits "$PAYLOAD"; then
+  PAYLOAD="$(build_payload false || printf '')"
+  if ! payload_fits "$PAYLOAD"; then
+    PAYLOAD="$(build_minimal_payload)"
+  fi
+fi
 
 if [ -n "\${EVERMORE_HOOK_DEBUG:-}" ]; then
-  LOG="\${EVERMORE_HOOK_LOG:-/tmp/evermore-agent-hook.log}"
-  printf '%s %s emit %s %s\\n' "$(date +%T)" "$AGENT" "$STATUS" "$PAYLOAD" >> "$LOG"
+  LOG_PAYLOAD="$(
+    printf '%s' "$PAYLOAD" \\
+      | jq -c 'if has("userPrompt") then .userPrompt = "[redacted]" else . end' \\
+      || printf ''
+  )"
+  log_debug "$AGENT emit $STATUS $LOG_PAYLOAD"
 fi
 
 case "$TRANSPORT" in
   terminalSequence)
-    jq -cn --arg seq "$(printf '\\033]777;evermore;%s\\a' "$PAYLOAD")" \\
-      '{ terminalSequence: $seq }'
+    printf '%s' "$PAYLOAD" | jq -Rsc '{ terminalSequence: ("\\u001b]777;evermore;" + . + "\\u0007") }'
     ;;
   tty)
     if [ -w "$TTY_DEVICE" ]; then
       printf '\\033]777;evermore;%s\\a' "$PAYLOAD" > "$TTY_DEVICE" || true
-    elif [ -n "\${EVERMORE_HOOK_DEBUG:-}" ]; then
-      LOG="\${EVERMORE_HOOK_LOG:-/tmp/evermore-agent-hook.log}"
-      printf '%s %s not writable\\n' "$(date +%T)" "$TTY_DEVICE" >> "$LOG"
+    else
+      log_debug "$TTY_DEVICE not writable"
     fi
     printf '{}\\n'
     ;;

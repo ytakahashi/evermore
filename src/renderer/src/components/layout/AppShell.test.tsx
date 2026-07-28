@@ -15,6 +15,10 @@ vi.mock('../settings/SettingsView', () => ({
   SettingsView: () => <div data-testid="settings-pane">settings</div>,
 }));
 
+vi.mock('../agents/AgentsView', () => ({
+  AgentsView: () => <div data-testid="agents-pane">agents</div>,
+}));
+
 vi.mock('./Sidebar', () => ({
   Sidebar: () => <div data-testid="sidebar" />,
 }));
@@ -32,16 +36,53 @@ describe('AppShell', () => {
     useUiStore.setState({ activeView: 'workspace', tabSearchOpen: false });
   });
 
-  it('mounts both the workspace and settings panes simultaneously', () => {
+  /** Returns the `display:none` wrapper the shell puts around a main-area subtree. */
+  function paneWrapper(testId: string): HTMLElement {
+    const wrapper = screen.getByTestId(testId).parentElement;
+    if (!wrapper) {
+      throw new Error(`Expected ${testId} to be wrapped by a visibility container`);
+    }
+    return wrapper;
+  }
+
+  it('mounts every main-area subtree simultaneously', () => {
     // Given: the workspace view is active.
 
     // When: the shell renders.
     render(<AppShell />);
 
-    // Then: both subtrees are in the DOM, even though only one is visible. This is the property
-    // that lets PTYs survive open/close transitions.
+    // Then: all subtrees are in the DOM, even though only one is visible. This is the property
+    // that lets PTYs survive view transitions.
     expect(screen.getByTestId('workspace-pane')).toBeInTheDocument();
     expect(screen.getByTestId('settings-pane')).toBeInTheDocument();
+    expect(screen.getByTestId('agents-pane')).toBeInTheDocument();
+  });
+
+  it('shows only the agents subtree while the agents view is active', () => {
+    // Given: the agents view is active.
+    useUiStore.setState({ activeView: 'agents' });
+
+    // When: the shell renders.
+    render(<AppShell />);
+
+    // Then: agents paints and the other two are hidden rather than unmounted, so the terminals
+    // behind the workspace pane keep their PTYs.
+    expect(paneWrapper('agents-pane')).not.toHaveStyle({ display: 'none' });
+    expect(paneWrapper('workspace-pane')).toHaveStyle({ display: 'none' });
+    expect(paneWrapper('settings-pane')).toHaveStyle({ display: 'none' });
+    expect(screen.getByTestId('workspace-pane')).toBeInTheDocument();
+  });
+
+  it('returns to the workspace view when Esc is pressed on the agents view', () => {
+    // Given: the user is on the agents view.
+    useUiStore.setState({ activeView: 'agents' });
+    render(<AppShell />);
+
+    // When: Esc is pressed.
+    fireEvent.keyDown(window, { key: 'Escape' });
+
+    // Then: the active view returns to workspace, matching how Esc behaves in settings.
+    expect(useUiStore.getState().activeView).toBe('workspace');
   });
 
   it('does not handle Cmd+, in the renderer — that is owned by the application menu now', () => {

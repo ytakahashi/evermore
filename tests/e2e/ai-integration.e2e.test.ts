@@ -1,12 +1,16 @@
 // @vitest-environment node
 
-import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import * as nodePty from 'node-pty';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { EVERMORE_AGENT_STATUS_HELPER_SCRIPT } from '../../src/shared/ai-integration/snippets';
+import {
+  AGENT_USER_PROMPT_HOOK_MAX_CHARS,
+  OSC_777_PAYLOAD_MAX_BYTES,
+} from '../../src/shared/pane-integration-constants';
 
 const hasJq = spawnSync('jq', ['--version'], { encoding: 'utf8' }).status === 0;
 const OSC_777_PREFIX = '\x1b]777;evermore;';
@@ -115,13 +119,30 @@ describe('Evermore AI integration helper script', () => {
     event: string,
     hookInput: Record<string, unknown>,
   ): Record<string, unknown> {
+    return runHelperWithByteLength(agentArg, status, event, hookInput).payload;
+  }
+
+  /**
+   * Variant of {@link runHelper} that also reports the UTF-8 size of the emitted JSON payload, so
+   * byte-budget assertions measure exactly what `parseEvermoreAgentEvent()` measures.
+   */
+  function runHelperWithByteLength(
+    agentArg: string,
+    status: string,
+    event: string,
+    hookInput: Record<string, unknown>,
+  ): { payload: Record<string, unknown>; byteLength: number } {
     const result = spawnSync(scriptPath, [agentArg, status, event, 'terminalSequence'], {
       encoding: 'utf8',
       input: JSON.stringify(hookInput),
     });
     expect(result.status).toBe(0);
     const response = JSON.parse(result.stdout) as { terminalSequence: string };
-    return parseEvermoreAgentPayload(response.terminalSequence);
+    const payloadText = extractEvermoreAgentPayloadText(response.terminalSequence);
+    return {
+      payload: JSON.parse(payloadText) as Record<string, unknown>,
+      byteLength: Buffer.byteLength(payloadText, 'utf8'),
+    };
   }
 
   it.skipIf(!hasJq)('builds an activityLabel from tool_input.file_path on PostToolUse', () => {
@@ -290,6 +311,205 @@ describe('Evermore AI integration helper script', () => {
     expect(payload.activityLabel).toBe('apply_patch');
   });
 
+  it.skipIf(!hasJq)('carries the submitted prompt on the prompt-submission event', () => {
+    // Given: a UserPromptSubmit hook whose stdin contains the prompt the user typed.
+    // When: the helper builds the OSC 777 payload.
+    const payload = runHelper('claude', 'running', 'user_prompt_submit', {
+      session_id: 'session-1',
+      prompt: 'Fix the failing tests',
+    });
+
+    // Then: the prompt travels alongside the status fields.
+    expect(payload).toMatchObject({
+      agent: 'claude',
+      event: 'user_prompt_submit',
+      userPrompt: 'Fix the failing tests',
+    });
+  });
+
+  it.skipIf(!hasJq)('accepts user_prompt and userPrompt as compatibility fallbacks', () => {
+    // Given / When: agents that name the field differently submit a prompt.
+    // Then: both spellings are normalized to userPrompt.
+    expect(
+      runHelper('codex', 'running', 'user_prompt_submit', { user_prompt: 'snake case' }).userPrompt,
+    ).toBe('snake case');
+    expect(
+      runHelper('codex', 'running', 'user_prompt_submit', { userPrompt: 'camel case' }).userPrompt,
+    ).toBe('camel case');
+  });
+
+  it.skipIf(!hasJq)('never reads a prompt from an event that does not submit one', () => {
+    // Given: non-prompt events whose payloads happen to carry a prompt-shaped key. Text from these
+    // is agent-authored (subagent instructions, tool arguments) and must not be shown as something
+    // the user typed.
+    // When: the helper builds each OSC 777 payload.
+    const postToolUse = runHelper('claude', 'running', 'post_tool_use', {
+      tool_name: 'Task',
+      prompt: 'agent-authored subagent instruction',
+    });
+    const preInvocation = runHelper('antigravity', 'running', 'pre_invocation', {
+      prompt: 'unconfirmed antigravity payload',
+    });
+    const stop = runHelper('claude', 'complete', 'stop', { prompt: 'leftover' });
+
+    // Then: none of them contribute a userPrompt, while their status fields are unaffected.
+    expect(postToolUse.userPrompt).toBeUndefined();
+    expect(postToolUse.toolName).toBe('Task');
+    expect(preInvocation.userPrompt).toBeUndefined();
+    expect(preInvocation.status).toBe('running');
+    expect(stop.userPrompt).toBeUndefined();
+    expect(stop.status).toBe('complete');
+  });
+
+  it.skipIf(!hasJq)('truncates a long prompt to the hook character limit', () => {
+    // Given: a prompt far longer than the hook limit.
+    // When: the helper builds the OSC 777 payload.
+    const payload = runHelper('claude', 'running', 'user_prompt_submit', {
+      prompt: 'a'.repeat(AGENT_USER_PROMPT_HOOK_MAX_CHARS + 500),
+    });
+
+    // Then: the shell cut lands on the hook limit, leaving the visible ellipsis to Evermore's own
+    // display-side truncation.
+    expect(payload.userPrompt).toBe('a'.repeat(AGENT_USER_PROMPT_HOOK_MAX_CHARS));
+  });
+
+  it.skipIf(!hasJq)('keeps an all-emoji prompt within the OSC 777 byte budget', () => {
+    // Given: 1000 emoji, the worst realistic case at four UTF-8 bytes per code point.
+    const { payload, byteLength } = runHelperWithByteLength(
+      'claude',
+      'running',
+      'user_prompt_submit',
+      { prompt: '\u{1F600}'.repeat(1000) },
+    );
+
+    // When / Then: the character limit is applied per code point, so surrogate pairs stay intact
+    // and the whole payload still fits the budget.
+    expect(Array.from(payload.userPrompt as string)).toHaveLength(AGENT_USER_PROMPT_HOOK_MAX_CHARS);
+    expect(payload.userPrompt).not.toContain('�');
+    expect(byteLength).toBeLessThan(OSC_777_PAYLOAD_MAX_BYTES);
+  });
+
+  it.skipIf(!hasJq)(
+    'replaces control characters instead of letting them inflate the payload',
+    () => {
+      // Given: a prompt containing NUL, BEL, ESC and DEL. Escaped as \uXXXX each would cost six bytes,
+      // making the payload size unpredictable from the character count.
+      const nul = String.fromCharCode(0);
+      const bel = String.fromCharCode(7);
+      const esc = String.fromCharCode(27);
+      const del = String.fromCharCode(127);
+
+      // When: the helper builds the OSC 777 payload.
+      const { payload, byteLength } = runHelperWithByteLength(
+        'claude',
+        'running',
+        'user_prompt_submit',
+        { prompt: `a${nul}b${bel}c${esc}d${del}e${del.repeat(2000)}` },
+      );
+
+      // Then: every control character became a space, and because each cost one byte rather than six
+      // the payload stayed inside the budget after the ordinary character-limit cut.
+      const spaceRun = ' '.repeat(AGENT_USER_PROMPT_HOOK_MAX_CHARS - 'a b c d e'.length);
+      expect(payload.userPrompt).toBe(`a b c d e${spaceRun}`);
+      expect(byteLength).toBeLessThan(OSC_777_PAYLOAD_MAX_BYTES);
+    },
+  );
+
+  it.skipIf(!hasJq)('drops the prompt first when the payload exceeds the byte budget', () => {
+    // Given: a long cwd and session id that leave no room for the prompt.
+    const { payload, byteLength } = runHelperWithByteLength(
+      'claude',
+      'running',
+      'user_prompt_submit',
+      {
+        session_id: 's'.repeat(1000),
+        cwd: `/${'x'.repeat(6000)}`,
+        prompt: '\u{1F600}'.repeat(500),
+      },
+    );
+
+    // When / Then: userPrompt is the field sacrificed, and everything the status indicator needs
+    // still arrives.
+    expect(byteLength).toBeLessThanOrEqual(OSC_777_PAYLOAD_MAX_BYTES);
+    expect(payload.userPrompt).toBeUndefined();
+    expect(payload).toMatchObject({
+      v: 1,
+      type: 'agent-status',
+      agent: 'claude',
+      status: 'running',
+      event: 'user_prompt_submit',
+    });
+    expect(payload.cwd).toBeDefined();
+  });
+
+  it.skipIf(!hasJq)(
+    'degrades to the minimal payload when dropping the prompt is not enough',
+    () => {
+      // Given: a cwd that alone exceeds the byte budget.
+      const { payload, byteLength } = runHelperWithByteLength(
+        'claude',
+        'running',
+        'user_prompt_submit',
+        { cwd: `/${'x'.repeat(9000)}`, prompt: 'short' },
+      );
+
+      // When / Then: the payload collapses to the fields the status indicator depends on.
+      expect(byteLength).toBeLessThanOrEqual(OSC_777_PAYLOAD_MAX_BYTES);
+      expect(payload).toEqual({
+        v: 1,
+        type: 'agent-status',
+        agent: 'claude',
+        status: 'running',
+      });
+    },
+  );
+
+  it.skipIf(!hasJq)('still reports status when a huge activityLabel blows the byte budget', () => {
+    // Given: a Bash call whose command is large enough that activityLabel alone exceeds the budget.
+    // This shape predates prompt capture and used to make the parser discard the entire event.
+    const { payload, byteLength } = runHelperWithByteLength('claude', 'running', 'post_tool_use', {
+      tool_name: 'Bash',
+      tool_input: { command: 'x'.repeat(9000) },
+    });
+
+    // When / Then: the status still arrives instead of the event being dropped downstream.
+    expect(byteLength).toBeLessThanOrEqual(OSC_777_PAYLOAD_MAX_BYTES);
+    expect(payload).toEqual({
+      v: 1,
+      type: 'agent-status',
+      agent: 'claude',
+      status: 'running',
+    });
+  });
+
+  it.skipIf(!hasJq)('redacts the prompt from the debug log and creates it owner-only', () => {
+    // Given: debug logging enabled with a log path that does not exist yet.
+    const logPath = join(testDir, 'debug-redaction.log');
+    rmSync(logPath, { force: true });
+    const secret = 'do not leak this prompt body';
+
+    // When: a prompt-submitting hook runs with debug logging on.
+    const result = spawnSync(
+      scriptPath,
+      ['claude', 'running', 'user_prompt_submit', 'terminalSequence'],
+      {
+        encoding: 'utf8',
+        env: { ...process.env, EVERMORE_HOOK_DEBUG: '1', EVERMORE_HOOK_LOG: logPath },
+        input: JSON.stringify({ prompt: secret }),
+      },
+    );
+
+    // Then: the payload still carries the prompt, but the log holds only a placeholder, and the log
+    // file is readable by its owner alone rather than inheriting the /tmp default.
+    expect(result.status).toBe(0);
+    const response = JSON.parse(result.stdout) as { terminalSequence: string };
+    expect(parseEvermoreAgentPayload(response.terminalSequence).userPrompt).toBe(secret);
+    const log = readFileSync(logPath, 'utf8');
+    expect(log).not.toContain(secret);
+    expect(log).toContain('"userPrompt":"[redacted]"');
+    expect(statSync(logPath).mode & 0o777).toBe(0o600);
+  });
+
   it.skipIf(!hasJq)('writes a Codex OSC 777 payload through the tty transport', () => {
     // Given: Codex captures hook stdio, while the helper's out-of-band tty destination is injected
     // as a temporary file because test sandboxes commonly deny writes to the real /dev/tty.
@@ -337,6 +557,10 @@ function waitForPtyExit(pty: nodePty.IPty, timeoutMs: number): Promise<number> {
 }
 
 function parseEvermoreAgentPayload(output: string): Record<string, unknown> {
+  return JSON.parse(extractEvermoreAgentPayloadText(output)) as Record<string, unknown>;
+}
+
+function extractEvermoreAgentPayloadText(output: string): string {
   const payloadStart = output.indexOf(OSC_777_PREFIX);
   if (payloadStart < 0) {
     throw new Error(`Evermore OSC 777 prefix was not found in ${JSON.stringify(output)}`);
@@ -346,5 +570,5 @@ function parseEvermoreAgentPayload(output: string): Record<string, unknown> {
   if (payloadEnd < 0) {
     throw new Error('Evermore OSC 777 terminator was not found');
   }
-  return JSON.parse(output.slice(jsonStart, payloadEnd)) as Record<string, unknown>;
+  return output.slice(jsonStart, payloadEnd);
 }

@@ -118,6 +118,19 @@ describe('useShortcutBridge', () => {
     expect(useUiStore.getState().activeView).toBe('settings');
   });
 
+  it('opens agents via ui.openAgents regardless of current view', () => {
+    // Given: the Settings view is active, so the workspace-gated actions would be skipped.
+    useUiStore.setState({ activeView: 'settings' });
+    render(<TestBridge />);
+
+    // When: the open-agents action fires.
+    emit('ui.openAgents');
+
+    // Then: the Agents view comes up — like the other chrome actions it is not view-gated, since a
+    // mode switch is exactly what the user is asking for.
+    expect(useUiStore.getState().activeView).toBe('agents');
+  });
+
   it('opens tab search via ui.openTabSearch regardless of current view', () => {
     // Given: the Settings view is active and the tab search palette is closed.
     useUiStore.setState({ activeView: 'settings', tabSearchOpen: false });

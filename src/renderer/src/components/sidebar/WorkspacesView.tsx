@@ -18,6 +18,8 @@ import { useUiStore } from '../../stores/uiStore';
 import { useWorkspaceStore } from '../../stores/workspaceStore';
 import { ContextMenu } from '../common/ContextMenu';
 import { hasActionableItem, type ContextMenuItem } from '../common/contextMenuItems';
+import { getPaneRunningIndicator } from '../common/pane-running-indicator';
+import { SparklesIcon } from '../common/SparklesIcon';
 import {
   resolveDropEdge,
   toInsertIndex,
@@ -25,8 +27,6 @@ import {
   TAB_DND_MIME,
   type DropEdge,
 } from '../common/tabDnd';
-import { getPaneRunningIndicator } from './pane-running-indicator';
-import { SparklesIcon } from './SparklesIcon';
 
 function formatPaneCount(count: number): string {
   return `${count} ${count === 1 ? 'pane' : 'panes'}`;
@@ -165,6 +165,16 @@ function PaneSummary({
             >
               {label}
             </div>
+            {/* Sits above cwd because it says more about what the pane is doing; cwd is the least
+                informative of the three rows. Present only while an agent is detected, since the
+                tracker only emits userPrompt for a matching agent. The narrow sidebar truncates
+                most prompts, so the full text is available on hover. */}
+            {info?.userPrompt && (
+              <div
+                className="mt-1 truncate text-[11px] text-muted italic"
+                title={info.userPrompt}
+              >{`❝ ${info.userPrompt}`}</div>
+            )}
             {pane.cwd && (
               <div className="mt-1 truncate text-[11px] text-muted" title={pane.cwd}>
                 {cwdLabel}
@@ -195,7 +205,7 @@ export function WorkspacesView(): React.JSX.Element {
   const createTabFromPane = useWorkspaceStore((state) => state.createTabFromPane);
   const beginTabDrag = useTabDragStore((state) => state.begin);
   const endTabDrag = useTabDragStore((state) => state.end);
-  const closeSettings = useUiStore((state) => state.closeSettings);
+  const showWorkspaceView = useUiStore((state) => state.showWorkspaceView);
 
   // Holds the right-clicked tab (with its owning workspace) and the click point; null while closed.
   const [tabMenu, setTabMenu] = useState<{
@@ -524,7 +534,7 @@ export function WorkspacesView(): React.JSX.Element {
             : undefined,
         onSelect: () => {
           createTabFromPane(workspaceId, sourceTabId, paneId);
-          closeSettings();
+          showWorkspaceView();
         },
       },
     ];
@@ -940,7 +950,7 @@ export function WorkspacesView(): React.JSX.Element {
                       type="button"
                       onClick={() => {
                         setActiveWorkspace(workspace.id);
-                        closeSettings();
+                        showWorkspaceView();
                       }}
                       onDoubleClick={() => {
                         startRenaming(workspace.id, workspace.name);
@@ -1042,7 +1052,7 @@ export function WorkspacesView(): React.JSX.Element {
                                 draggable
                                 onClick={() => {
                                   selectWorkspaceTab(workspace.id, tab.id);
-                                  closeSettings();
+                                  showWorkspaceView();
                                 }}
                                 onContextMenu={(event) => {
                                   openTabMenu(event, workspace.id, tab.id);
@@ -1113,7 +1123,7 @@ export function WorkspacesView(): React.JSX.Element {
                                 paneIndex={paneIndex}
                                 onClick={() => {
                                   selectWorkspacePane(workspace.id, tab.id, pane.id);
-                                  closeSettings();
+                                  showWorkspaceView();
                                 }}
                                 onContextMenu={(event) => {
                                   openPaneMenu(event, workspace.id, tab.id, pane.id);

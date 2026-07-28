@@ -160,12 +160,12 @@ export function SSHHostsSection(): React.JSX.Element {
   const isLoading = useConnectionsStore((state) => state.isLoading);
   const error = useConnectionsStore((state) => state.error);
   const openSshHostTab = useWorkspaceStore((state) => state.openSshHostTab);
-  const closeSettings = useUiStore((state) => state.closeSettings);
+  const showWorkspaceView = useUiStore((state) => state.showWorkspaceView);
   const { isReloading, reloadConnections } = useReloadConnections();
 
   const handleOpen = (alias: string): void => {
     openSshHostTab(alias);
-    closeSettings();
+    showWorkspaceView();
   };
 
   const [expandedAliases, setExpandedAliases] = useState<Set<string>>(() => new Set());

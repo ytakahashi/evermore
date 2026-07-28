@@ -1,4 +1,5 @@
 import { useEffect } from 'react';
+import { AgentsView } from '../agents/AgentsView';
 import { MainTerminalArea } from '../main-area/MainTerminalArea';
 import { TabSearchPalette } from '../main-area/TabSearchPalette';
 import { SettingsView } from '../settings/SettingsView';
@@ -7,30 +8,30 @@ import { Sidebar } from './Sidebar';
 import { TopBar } from './TopBar';
 
 /**
- * Renders the workspace pane and the settings pane as siblings, toggling visibility via
- * `display:none` instead of unmounting either tree.
+ * Renders the workspace pane and each alternative main-area view as siblings, toggling visibility
+ * via `display:none` instead of unmounting any of them.
  *
- * Why mount both: the settings entry point must preserve any running PTY processes when the user
- * opens / closes the settings view, mirroring how `MainTerminalArea` already keeps non-active
- * workspaces mounted while hidden. Unmounting the workspace tree on settings-open would tear down
- * every xterm container and force a full re-init when returning. The price is one extra subtree in
- * the React commit; both subtrees still own their own state, and only the visible one paints.
+ * Why mount all of them: switching the main area must preserve any running PTY processes, mirroring
+ * how `MainTerminalArea` already keeps non-active workspaces mounted while hidden. Unmounting the
+ * workspace tree when another view opens would tear down every xterm container and force a full
+ * re-init on return. The price is a few extra subtrees in the React commit; each still owns its own
+ * state, and only the visible one paints.
  */
 export function AppShell(): React.JSX.Element {
   const activeView = useUiStore((state) => state.activeView);
-  const closeSettings = useUiStore((state) => state.closeSettings);
+  const showWorkspaceView = useUiStore((state) => state.showWorkspaceView);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent): void => {
-      // Esc closes the settings view. The application menu owns `Cmd+,` (Preferences…) via the
-      // shortcut dispatcher, so opening settings is not handled here. Outside the settings view
-      // Esc must reach the terminal (vim, less, etc.), so we only swallow it while settings is
-      // the active view.
+      // Esc dismisses whichever view has taken over the main area. Opening those views is not
+      // handled here — the application menu owns their accelerators via the shortcut dispatcher.
+      // In the workspace view Esc must reach the terminal (vim, less, etc.), which is exactly what
+      // this condition excludes.
       if (event.key === 'Escape') {
         const currentActiveView = useUiStore.getState().activeView;
-        if (currentActiveView === 'settings') {
+        if (currentActiveView !== 'workspace') {
           event.preventDefault();
-          closeSettings();
+          showWorkspaceView();
         }
       }
     };
@@ -39,7 +40,7 @@ export function AppShell(): React.JSX.Element {
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
     };
-  }, [closeSettings]);
+  }, [showWorkspaceView]);
 
   return (
     <div className="flex h-screen w-screen flex-col overflow-hidden bg-background font-sans text-foreground">
@@ -60,6 +61,13 @@ export function AppShell(): React.JSX.Element {
             style={{ display: activeView === 'settings' ? undefined : 'none' }}
           >
             <SettingsView />
+          </div>
+          <div
+            aria-hidden={activeView !== 'agents'}
+            className="absolute inset-0 flex min-w-0"
+            style={{ display: activeView === 'agents' ? undefined : 'none' }}
+          >
+            <AgentsView />
           </div>
           <TabSearchPalette />
         </div>

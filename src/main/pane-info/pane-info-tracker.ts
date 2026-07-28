@@ -1,7 +1,8 @@
-import type {
-  EvermoreAgentEvent,
-  PaneRuntimeSignal,
-  PaneRuntimeSignalLifecycleSource,
+import {
+  AGENT_USER_PROMPT_SUBMIT_EVENT,
+  type EvermoreAgentEvent,
+  type PaneRuntimeSignal,
+  type PaneRuntimeSignalLifecycleSource,
 } from '../../shared/pane-runtime-signal';
 import type {
   PaneAgentInfo,
@@ -14,6 +15,7 @@ import {
   AGENT_DETAIL_ACTIVITY_LABEL_MAX_CHARS,
   AGENT_DETAIL_MESSAGE_MAX_CHARS,
   AGENT_DETAIL_TOOL_NAME_MAX_CHARS,
+  AGENT_USER_PROMPT_MAX_CHARS,
 } from '../../shared/pane-integration-constants';
 import { sanitizeAgentText } from '../../shared/text/sanitize-agent-text';
 import { createSilentLogger, type Logger } from '../logging/logger';
@@ -285,6 +287,12 @@ export class PaneInfoTracker {
       this.updateFromRows(await this.inspector.listProcesses());
     } catch (error: unknown) {
       this.logger.warn('Failed to inspect pane processes', error);
+      // A prompt received during this poll reserved a one-observation reprieve against it. The poll
+      // produced no observation, so there is nothing left for the reprieve to skip; leaving it set
+      // would spend it on the next poll instead — one that started after the prompt and is
+      // therefore authoritative. That delay is enough for an agent to exit and relaunch unnoticed,
+      // which would resurrect the previous session's prompt.
+      this.releaseUserPromptPollReprieve();
     } finally {
       this.isPolling = false;
     }
@@ -356,7 +364,64 @@ export class PaneInfoTracker {
       // launch either failed or already exited and the flag must release to avoid suppressing
       // future legitimate updates.
       process.sshShellLifecycleActive = false;
+      // Must run before the recompute: the recompute builds the snapshot that gets emitted, so a
+      // discard applied afterwards would still ship the stale prompt and leave it on screen until
+      // some later change happened to trigger another emit.
+      this.reconcileUserPromptWithObservation(process, observed.foregroundArgs);
       this.recomputeInfo(process, { emit: true, observedAt });
+    }
+  }
+
+  /**
+   * Clears the in-flight-poll reprieve on every pane after a poll failed to deliver rows.
+   *
+   * Pairs with the flag set in `captureUserPrompt`: the reprieve is defined against one specific
+   * poll, so it must be released whenever that poll ends without reaching `updateFromRows()`.
+   */
+  private releaseUserPromptPollReprieve(): void {
+    for (const process of this.processes.values()) {
+      if (process.userPrompt?.ignoreInFlightPoll) {
+        process.userPrompt = { ...process.userPrompt, ignoreInFlightPoll: false };
+      }
+    }
+  }
+
+  /**
+   * Drops the retained prompt when the process table no longer shows the agent it was sent to.
+   *
+   * The check reads the raw ps observation rather than `process.agent` on purpose. `computeAgent()`
+   * keeps an `agent-protocol` agent in place regardless of what ps reports, until a shell command
+   * boundary clears it — an intentional rule that makes protocol status outrank command-line
+   * detection. Reusing `process.agent` here would inherit that stickiness and let a prompt survive
+   * both a plain command taking over the pane and a switch to a different agent.
+   *
+   * `detectAgentFromCommand()` accepts a process-table `args` string, so the foreground args pass
+   * through unchanged.
+   */
+  private reconcileUserPromptWithObservation(
+    process: RegisteredPaneProcess,
+    foregroundArgs: string | undefined,
+  ): void {
+    const userPrompt = process.userPrompt;
+    if (!userPrompt) {
+      return;
+    }
+
+    if (userPrompt.ignoreInFlightPoll) {
+      // This observation predates the prompt, so it proves nothing about the agent. Consume the
+      // reprieve — it is worth exactly one observation — and let the next poll decide.
+      //
+      // Pointing at "the one observation to skip" with a boolean is only sound because `poll()`
+      // rejects re-entry while `isPolling` is set and is the sole caller of `updateFromRows()`, so
+      // at most one poll is ever in flight. Allowing concurrent polls would break that and require
+      // a poll sequence number instead.
+      process.userPrompt = { ...userPrompt, ignoreInFlightPoll: false };
+      return;
+    }
+
+    const observedIdentity = toAgentIdentity(detectAgentFromCommand(foregroundArgs));
+    if (observedIdentity !== userPrompt.agentIdentity) {
+      process.userPrompt = undefined;
     }
   }
 
@@ -416,6 +481,43 @@ export class PaneInfoTracker {
             observedAt: now,
           }
         : undefined;
+
+    this.captureUserPrompt(process, event);
+  }
+
+  /**
+   * Records the prompt carried by a prompt-submitting agent event.
+   *
+   * Restricted to `user_prompt_submit` so that only text the user actually typed can reach the UI;
+   * the hook helper enforces the same restriction on its side. Events without a usable prompt leave
+   * the previous one alone rather than clearing it — a `PostToolUse` in the middle of a turn must
+   * not erase the instruction that started that turn.
+   */
+  private captureUserPrompt(process: RegisteredPaneProcess, event: EvermoreAgentEvent): void {
+    if (event.event !== AGENT_USER_PROMPT_SUBMIT_EVENT) {
+      return;
+    }
+
+    const text = sanitizeAgentText(event.userPrompt, AGENT_USER_PROMPT_MAX_CHARS);
+    if (!text) {
+      return;
+    }
+
+    // Run the protocol's agent name through the same mapping the agent slot uses, so the stored
+    // identity is directly comparable with what command-line detection produces later.
+    const agentIdentity = toAgentIdentity(agentInfoFromKind(event.agent));
+    if (!agentIdentity) {
+      return;
+    }
+
+    process.userPrompt = {
+      text,
+      agentIdentity,
+      // A poll that started before this moment may be looking at a process table without the agent
+      // in it. Flag it so `updateFromRows` skips exactly that one observation instead of treating
+      // its stale snapshot as proof that the session already ended.
+      ignoreInFlightPoll: this.isPolling,
+    };
   }
 
   private computeAgentEventObservedAt(
@@ -463,6 +565,9 @@ export class PaneInfoTracker {
   private clearAgentProtocolState(process: RegisteredPaneProcess): void {
     process.agent = undefined;
     process.attention = undefined;
+    // The shell has taken the foreground back, so whatever agent the prompt was addressed to is
+    // gone. This is one of the two explicit transitions allowed to drop the prompt.
+    process.userPrompt = undefined;
   }
 
   private recomputeInfo(
@@ -490,12 +595,20 @@ export class PaneInfoTracker {
       // so the idle/ssh clear lives here.
       process.attention = undefined;
     }
+    if (isInSshShellLifecycle(process)) {
+      // Moving into an ssh session takes the pane out of local agent classification entirely, so
+      // the prompt goes with it. Note this deliberately does not extend to the `idle` case above:
+      // a signal-driven recompute routinely observes `idle` in the window before ps notices the
+      // agent, and dropping the prompt there would lose it for the whole turn.
+      process.userPrompt = undefined;
+    }
     process.agent = this.computeAgent(
       process,
       processActivity,
       foregroundCommand,
       options.observedAt,
     );
+    const userPrompt = resolveEmittableUserPrompt(process);
     const nextInfo: PaneRuntimeInfo = {
       ptyId: process.ptyId,
       processActivity,
@@ -508,6 +621,7 @@ export class PaneInfoTracker {
       ...(process.cwd ? { cwd: process.cwd } : {}),
       ...(process.attention ? { attention: process.attention } : {}),
       ...(process.agent ? { agent: process.agent } : {}),
+      ...(userPrompt ? { userPrompt } : {}),
     };
 
     this.upsertInfo(nextInfo, options.emit);
@@ -660,6 +774,45 @@ function agentDetailFromEvent(event: EvermoreAgentEvent): Partial<Pick<PaneAgent
 }
 
 /**
+ * Returns the retained prompt only when it belongs to the agent the pane currently shows.
+ *
+ * This is the second of the two guards protecting the prompt from being attributed to the wrong
+ * session, and it covers what the process-table check cannot: the interval inside a single poll
+ * period. Leaving `claude` and starting `codex` there produces a protocol event that swaps
+ * `process.agent` immediately, while ps has not yet reported anything — without this comparison the
+ * prompt written for Claude would appear under the Codex card.
+ *
+ * Conversely, while ps has not yet caught up to a freshly launched agent, `process.agent` is
+ * `undefined` and the prompt simply stays unemitted until the agent is confirmed, rather than being
+ * thrown away.
+ */
+function resolveEmittableUserPrompt(process: RegisteredPaneProcess): string | undefined {
+  const userPrompt = process.userPrompt;
+  if (!userPrompt || toAgentIdentity(process.agent) !== userPrompt.agentIdentity) {
+    return undefined;
+  }
+
+  return userPrompt.text;
+}
+
+/**
+ * Reduces an agent to the identity used when deciding whether two observations describe the same
+ * agent session.
+ *
+ * Prefers `known`, the curated vocabulary both the hook protocol and command-line detection map
+ * into, so `cursor` and `cursor-agent` — or `antigravity` and `agy` — are recognized as one agent.
+ * Falls back to the raw `kind` for agents outside that set: those have no shared vocabulary to
+ * appeal to, so two sources agree only when they report the identical string. Returning `undefined`
+ * for a missing agent keeps "nothing observed" distinct from every real identity, rather than
+ * letting two unknowns compare equal.
+ */
+function toAgentIdentity(
+  agent: Pick<PaneAgentInfo, 'known' | 'kind'> | undefined,
+): string | undefined {
+  return agent?.known ?? agent?.kind;
+}
+
+/**
  * Returns whether the pane is currently inside an ssh-bound shell-integration lifecycle.
  *
  * This collapses the two SSH suppression sources — the process-table classification and the
@@ -714,6 +867,9 @@ function areRuntimeInfosEquivalent(left: PaneRuntimeInfo, right: PaneRuntimeInfo
     left.foregroundSession.kind === right.foregroundSession.kind &&
     left.foregroundSession.details === right.foregroundSession.details &&
     left.cwd === right.cwd &&
+    // Without this comparison a turn whose only change is a new prompt would be treated as an
+    // unchanged snapshot, and the emit that carries the prompt to the renderer would be suppressed.
+    left.userPrompt === right.userPrompt &&
     areCommandsEquivalent(left.command, right.command) &&
     areIntegrationsEquivalent(left.integration, right.integration) &&
     JSON.stringify(left.attention) === JSON.stringify(right.attention) &&

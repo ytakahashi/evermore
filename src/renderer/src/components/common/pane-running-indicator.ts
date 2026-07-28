@@ -1,7 +1,11 @@
 import type { PaneRuntimeInfo } from '../../../../shared/types';
 
 /**
- * Visual style for the sidebar's pane running-state dot.
+ * Visual style for a pane's running-state dot.
+ *
+ * Shared rather than sidebar-local so every surface that shows pane status derives it from the same
+ * priority order and palette — the same pane must never read as two different states depending on
+ * where the user happens to be looking.
  */
 export interface PaneRunningIndicator {
   /** Tailwind class string for the dot element. */

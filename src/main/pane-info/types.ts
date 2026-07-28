@@ -30,6 +30,37 @@ export interface RegisteredPaneProcess {
   integration: PaneIntegrationInfo;
   attention?: PaneAttentionInfo;
   agent?: PaneAgentInfo;
+  /**
+   * Latest prompt the user submitted, together with the agent it was submitted to.
+   *
+   * Held as an object rather than the bare string that reaches the renderer because the tracker
+   * needs to know *which* agent session the prompt belongs to before it can decide whether the
+   * prompt is still current.
+   *
+   * Retention differs from every other agent-derived field here: a prompt arrives once per turn and
+   * is never re-sent, so anything that drops it drops it for the rest of the turn. Signal-driven
+   * recomputes therefore never clear this slot — only process-table observations and explicit
+   * transitions out of the agent (shell lifecycle, ssh, PTY teardown) do.
+   */
+  userPrompt?: {
+    text: string;
+    /**
+     * Identity of the agent the prompt was submitted to, compared against the pane's current agent
+     * before the prompt is emitted and against each process-table observation before it is dropped.
+     *
+     * Deliberately not the raw `kind`. The two sources spell the same agent differently — the hook
+     * protocol reports `cursor` / `antigravity` while the process table yields the executable
+     * basenames `cursor-agent` / `agent` / `agy` — so comparing raw kinds would mark every Cursor
+     * and Antigravity session as a mismatch. This holds the normalized form both sides agree on.
+     */
+    agentIdentity: string;
+    /**
+     * Set when a process-table poll was already in flight as the prompt arrived. Such a poll may
+     * have sampled the process table from before the agent existed, so its observation cannot be
+     * used as evidence that the agent is gone. The next observation after this one decides.
+     */
+    ignoreInFlightPoll: boolean;
+  };
   lastForegroundCommand?: string;
   lastForegroundArgs?: string;
   lastProcessActivity: PaneProcessActivity;
