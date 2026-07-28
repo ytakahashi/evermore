@@ -457,6 +457,51 @@ describe('WorkspacesView', () => {
     expect(promptRow).toHaveTextContent(prompt);
   });
 
+  it('keeps a multi-line prompt on a single row', () => {
+    // Given: a pane whose prompt was written as a list, so the sanitizer preserved its breaks.
+    const prompt = 'Fix three things:\n1. lint fights Prettier\n2. two tests fail';
+    usePaneInfoStore.setState({
+      infosByPtyId: {
+        'pty-server': {
+          ptyId: 'pty-server',
+          processActivity: 'running',
+          foregroundCommand: 'claude',
+          foregroundSession: { kind: 'other' },
+          integration: {
+            shell: false,
+            protocols: [],
+            lastSequenceAt: 0,
+            stale: false,
+          },
+          agent: {
+            known: 'claude',
+            kind: 'claude',
+            status: 'running',
+            source: 'agent-protocol',
+            observedAt: 1000,
+            detail: { message: 'Edit: eslint.config.mjs' },
+          },
+          userPrompt: prompt,
+          observedAt: 1000,
+        },
+      },
+      isLoading: false,
+      error: null,
+    });
+
+    // When: the workspace sidebar renders.
+    render(<WorkspacesView />);
+
+    // Then: the row stays single-line. `truncate` carries `white-space: nowrap`, which renders the
+    // breaks as spaces, so the sidebar keeps its three-row layout no matter how the prompt was
+    // written. Only the Agents view opts into showing them, and this is the guard against that
+    // opt-in leaking here. The default matcher normalizes whitespace, which would hide a break
+    // that did render, so the query keeps the string as written.
+    const promptRow = screen.getByTitle(prompt, { normalizer: (value) => value });
+    expect(promptRow).toHaveClass('truncate');
+    expect(promptRow).not.toHaveClass('whitespace-pre-line');
+  });
+
   it('omits the prompt row when the pane has no recorded prompt', () => {
     // Given: a pane running an agent that has not been given a prompt through a hook.
     usePaneInfoStore.setState({

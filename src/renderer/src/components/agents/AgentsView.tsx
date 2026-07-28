@@ -56,8 +56,11 @@ function AgentCard({ session, cardIndex, onSelect }: AgentCardProps): React.JSX.
           so it gets the space. */}
       <div className="flex min-w-0 flex-1 flex-col gap-2">
         {info.userPrompt ? (
+          // `whitespace-pre-line` keeps the line breaks the prompt was written with, so lists and
+          // step-by-step instructions stay legible. The sidebar deliberately does not opt in: its
+          // rows are single-line, where a break renders as a space.
           <p
-            className="line-clamp-3 text-sm leading-relaxed text-foreground"
+            className="line-clamp-3 text-sm leading-relaxed whitespace-pre-line text-foreground"
             title={info.userPrompt}
           >{`❝ ${info.userPrompt}`}</p>
         ) : (

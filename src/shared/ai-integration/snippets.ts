@@ -139,8 +139,17 @@ build_payload() {
       # which would make the payload size unpredictable from the character count alone.
       # explode/implode is used rather than a regex because it operates on code points directly and
       # does not depend on how the regex engine spells a control-character range.
+      #
+      # Line feeds are the exception, kept because prompts are routinely written as lists or
+      # paragraphs and that structure is worth showing. They cost nothing here: JSON has a short
+      # escape for them, so a newline is two bytes rather than six, and the character limit still
+      # bounds the total. Carriage returns are dropped rather than turned into line feeds, so CRLF
+      # input yields one break; mapping them would produce two, since this walks code points
+      # individually and cannot see the pair.
       def scrub_control_chars:
-        explode | map(if . < 32 or . == 127 then 32 else . end) | implode;
+        explode
+        | map(if . == 10 then . elif . == 13 then empty elif . < 32 or . == 127 then 32 else . end)
+        | implode;
 
       # Restricted to the prompt-submission event on purpose. Reading any "prompt"-shaped key
       # wherever one appears would let subagent instructions or tool arguments surface in the UI as

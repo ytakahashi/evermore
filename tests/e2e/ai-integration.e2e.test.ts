@@ -415,6 +415,43 @@ describe('Evermore AI integration helper script', () => {
     },
   );
 
+  it.skipIf(!hasJq)(
+    'preserves line breaks in the prompt while scrubbing other control bytes',
+    () => {
+      // Given: a prompt written as a list, mixing LF and CRLF endings, with stray control bytes.
+      const bel = String.fromCharCode(7);
+      const nul = String.fromCharCode(0);
+      const tab = String.fromCharCode(9);
+
+      // When: the helper builds the OSC 777 payload.
+      const payload = runHelper('claude', 'running', 'user_prompt_submit', {
+        prompt: `Fix three things:\n1. lint${bel} fights Prettier\r\n2.${nul} two${tab}tests fail`,
+      });
+
+      // Then: line structure survives — it is what makes a multi-part instruction readable — while
+      // every other control character still becomes a space. CRLF arrives as one break rather than
+      // two, so it does not read as a blank line downstream.
+      expect(payload.userPrompt).toBe(
+        'Fix three things:\n1. lint  fights Prettier\n2.  two tests fail',
+      );
+    },
+  );
+
+  it.skipIf(!hasJq)('keeps a newline-heavy prompt within the byte budget', () => {
+    // Given: a prompt that is almost entirely line breaks, the worst case for the newline exemption.
+    const { payload, byteLength } = runHelperWithByteLength(
+      'claude',
+      'running',
+      'user_prompt_submit',
+      { prompt: 'a\n'.repeat(2000) },
+    );
+
+    // When / Then: newlines are cut by the same character limit as any other content, and JSON's
+    // short escape keeps each one at two bytes rather than the six an escaped control byte costs.
+    expect(Array.from(payload.userPrompt as string)).toHaveLength(AGENT_USER_PROMPT_HOOK_MAX_CHARS);
+    expect(byteLength).toBeLessThan(OSC_777_PAYLOAD_MAX_BYTES);
+  });
+
   it.skipIf(!hasJq)('drops the prompt first when the payload exceeds the byte budget', () => {
     // Given: a long cwd and session id that leave no room for the prompt.
     const { payload, byteLength } = runHelperWithByteLength(

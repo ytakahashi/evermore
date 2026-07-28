@@ -127,6 +127,27 @@ describe('AgentsView', () => {
     expect(screen.getByText('Default / zsh')).toBeInTheDocument();
   });
 
+  it('renders a multi-line prompt with its line breaks intact', () => {
+    // Given: a prompt written as a list, which the tracker preserves the breaks of.
+    const prompt = 'Fix three things:\n1. lint fights Prettier\n2. two tests fail';
+    usePaneInfoStore.setState({
+      infosByPtyId: { 'pty-1': agentInfo('pty-1', { userPrompt: prompt }) },
+      isLoading: false,
+      error: null,
+    });
+
+    // When: the agents view renders.
+    render(<AgentsView />);
+
+    // Then: the row opts into showing the breaks rather than collapsing the list onto one line.
+    // The sidebar deliberately does not, since its rows are single-line by design.
+    // The default matcher normalizes whitespace, which would erase the very thing under test, so
+    // the query keeps the string as written.
+    const promptRow = screen.getByTitle(prompt, { normalizer: (value) => value });
+    expect(promptRow).toHaveClass('whitespace-pre-line');
+    expect(promptRow.textContent).toBe(`❝ ${prompt}`);
+  });
+
   it('says so explicitly when a session has no prompt recorded', () => {
     // Given: an agent detected without a prompt — an Antigravity session, or one whose hook is not
     // configured to report prompts.

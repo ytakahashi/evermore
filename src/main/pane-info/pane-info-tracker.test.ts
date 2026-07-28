@@ -1700,6 +1700,25 @@ describe('PaneInfoTracker', () => {
       expect(tracker.list()[0]?.userPrompt).toBe('Fix the failing tests');
     });
 
+    it('carries the prompt line structure through to the runtime info', async () => {
+      // Given: a running agent receiving a prompt written as a list.
+      await registerAndSettle();
+      rows = agentRows('claude');
+      now = 1002;
+      await tracker.poll();
+
+      // When: the prompt spans several lines, with a blank line between paragraphs.
+      now = 1003;
+      submitPrompt('claude', 'Fix three things:\n\n1. lint fights Prettier\n2. two tests fail');
+
+      // Then: the breaks survive so the instruction stays readable, while the blank line is closed
+      // up — it adds nothing a single break does not, and costs a line of the clamped height the
+      // prompt is displayed in.
+      expect(tracker.list()[0]?.userPrompt).toBe(
+        'Fix three things:\n1. lint fights Prettier\n2. two tests fail',
+      );
+    });
+
     it('truncates a prompt past the display limit and marks the cut', async () => {
       // Given: an agent is running and submits an over-long prompt.
       await registerAndSettle();

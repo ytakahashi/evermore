@@ -17,7 +17,7 @@ import {
   AGENT_DETAIL_TOOL_NAME_MAX_CHARS,
   AGENT_USER_PROMPT_MAX_CHARS,
 } from '../../shared/pane-integration-constants';
-import { sanitizeAgentText } from '../../shared/text/sanitize-agent-text';
+import { sanitizeAgentText, sanitizeUserPromptText } from '../../shared/text/sanitize-agent-text';
 import { createSilentLogger, type Logger } from '../logging/logger';
 import { detectAgentFromCommand } from './agent-detection';
 import { classifyForegroundSession } from './foreground-session';
@@ -518,7 +518,7 @@ export class PaneInfoTracker {
       return;
     }
 
-    const text = sanitizeAgentText(event.userPrompt, AGENT_USER_PROMPT_MAX_CHARS);
+    const text = sanitizeUserPromptText(event.userPrompt, AGENT_USER_PROMPT_MAX_CHARS);
     if (!text) {
       return;
     }
