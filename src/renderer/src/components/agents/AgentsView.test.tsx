@@ -127,6 +127,23 @@ describe('AgentsView', () => {
     expect(screen.getByText('Default / zsh')).toBeInTheDocument();
   });
 
+  it('says so explicitly when a session has no prompt recorded', () => {
+    // Given: an agent detected without a prompt — an Antigravity session, or one whose hook is not
+    // configured to report prompts.
+    usePaneInfoStore.setState({
+      infosByPtyId: { 'pty-1': agentInfo('pty-1') },
+      isLoading: false,
+      error: null,
+    });
+
+    // When: the agents view renders.
+    render(<AgentsView />);
+
+    // Then: the row states the absence rather than leaving a blank space, which would read as a
+    // rendering glitch in a list where neighbouring rows do show a prompt.
+    expect(screen.getByText('No prompt captured for this session')).toBeInTheDocument();
+  });
+
   it('labels the status badge exactly as the Workspaces sidebar does', () => {
     // Given: one agent awaiting input and one processing a turn.
     usePaneInfoStore.setState({

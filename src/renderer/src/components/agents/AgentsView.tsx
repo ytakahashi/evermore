@@ -25,40 +25,52 @@ function AgentCard({ session, cardIndex, onSelect }: AgentCardProps): React.JSX.
 
   return (
     <button
-      className="flex w-full flex-col gap-2 rounded-lg border border-border bg-panel p-3 text-left hover:border-border-strong hover:bg-raised/50"
+      className="flex w-full gap-4 rounded-lg border border-border bg-panel px-4 py-3 text-left hover:border-border-strong hover:bg-raised/50"
       type="button"
       onClick={onSelect}
     >
-      <div className="flex min-w-0 items-center gap-2">
-        <SparklesIcon agent={info.agent?.known} paneIndex={cardIndex} size={15} />
-        <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">{name}</span>
+      {/* Identity column, fixed-width so agent names and locations line up down the list and the
+          eye can scan one column instead of re-finding it on every row. */}
+      <div className="flex w-56 shrink-0 flex-col gap-1.5">
+        <div className="flex min-w-0 items-center gap-2">
+          <SparklesIcon agent={info.agent?.known} paneIndex={cardIndex} size={16} />
+          <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">
+            {name}
+          </span>
+        </div>
         {indicator && (
-          <span className="flex shrink-0 items-center gap-1.5">
+          <span className="flex items-center gap-1.5">
             <span aria-hidden="true" className={indicator.className} />
-            <span className="text-[11px] text-muted">{indicator.label}</span>
+            <span className="text-xs text-muted">{indicator.label}</span>
           </span>
         )}
+        <div className="mt-0.5 flex min-w-0 flex-col gap-0.5 text-xs text-muted">
+          <span className="truncate">{`${session.workspaceName} / ${session.tabName}`}</span>
+          <span className="truncate font-mono text-[11px]" title={session.cwd}>
+            {getTruncatedPathLabel(session.cwd)}
+          </span>
+        </div>
       </div>
 
-      {summary && (
-        <p className="line-clamp-2 text-xs text-muted" title={summary}>
-          {summary}
-        </p>
-      )}
-
-      {info.userPrompt && (
-        <p
-          className="line-clamp-3 border-t border-border pt-2 text-xs text-foreground/80 italic"
-          title={info.userPrompt}
-        >{`❝ ${info.userPrompt}`}</p>
-      )}
-
-      <div className="flex min-w-0 items-center gap-1.5 text-[11px] text-subtle">
-        <span className="truncate">{`${session.workspaceName} / ${session.tabName}`}</span>
-        <span aria-hidden="true">·</span>
-        <span className="truncate" title={session.cwd}>
-          {getTruncatedPathLabel(session.cwd)}
-        </span>
+      {/* Content column takes the rest of the width — this pairing is what the sidebar cannot show,
+          so it gets the space. */}
+      <div className="flex min-w-0 flex-1 flex-col gap-2">
+        {info.userPrompt ? (
+          <p
+            className="line-clamp-3 text-sm leading-relaxed text-foreground"
+            title={info.userPrompt}
+          >{`❝ ${info.userPrompt}`}</p>
+        ) : (
+          <p className="text-sm text-subtle italic">No prompt captured for this session</p>
+        )}
+        {summary && (
+          <p
+            className="line-clamp-2 border-t border-border pt-2 text-xs text-muted"
+            title={summary}
+          >
+            {summary}
+          </p>
+        )}
       </div>
     </button>
   );
@@ -94,8 +106,11 @@ function EmptyState(): React.JSX.Element {
  * the sidebar cannot show side by side at its width. Visibility is owned by `AppShell` (a
  * `display:none` toggle), so this component does not gate its own rendering on `activeView`.
  *
- * Column count comes from a CSS `auto-fill` grid rather than a JS breakpoint, so the layout follows
- * the sidebar being resized without this component observing anything.
+ * Sessions are stacked as full-width rows rather than tiled into a grid. Tiling divides the width
+ * among however many agents happen to be running, so the prompt — the longest and most valuable
+ * field, and the one thing this view exists to show — gets squeezed hardest exactly when the most
+ * sessions are in flight. A row gives every prompt the full width and costs only vertical space,
+ * which this view has to spare.
  */
 export function AgentsView(): React.JSX.Element {
   const workspaces = useWorkspaceStore((state) => state.workspaces);
@@ -117,7 +132,7 @@ export function AgentsView(): React.JSX.Element {
         {sessions.length === 0 ? (
           <EmptyState />
         ) : (
-          <div className="grid grid-cols-[repeat(auto-fill,minmax(15rem,1fr))] gap-3">
+          <div className="flex flex-col gap-2">
             {sessions.map((session, cardIndex) => (
               <AgentCard
                 key={session.paneId}

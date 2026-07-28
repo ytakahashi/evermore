@@ -1649,9 +1649,15 @@ describe('PaneInfoTracker', () => {
   });
 
   describe('submitted user prompts', () => {
-    function agentRows(args: string): ProcessTableRow[] {
+    /**
+     * Builds a process table where `args` occupies the pane's foreground.
+     *
+     * `pgid` defaults to a single shared value so most cases read as one continuous session; pass a
+     * different one to model a genuinely separate job (a relaunch, or another command taking over).
+     */
+    function agentRows(args: string, pgid = 456): ProcessTableRow[] {
       const [command = ''] = args.split(' ');
-      return [shellRow(456), { pid: 456, ppid: 123, pgid: 456, tpgid: 456, command, args }];
+      return [shellRow(pgid), { pid: pgid, ppid: 123, pgid, tpgid: pgid, command, args }];
     }
 
     function submitPrompt(agent: string, userPrompt: string): void {
@@ -1802,7 +1808,7 @@ describe('PaneInfoTracker', () => {
       onChanged.mockClear();
 
       // When: claude exits and an ordinary command takes over without a shell-prompt boundary.
-      rows = agentRows('pnpm run typecheck');
+      rows = agentRows('pnpm run typecheck', 789);
       now = 1004;
       await tracker.poll();
 
@@ -1825,7 +1831,7 @@ describe('PaneInfoTracker', () => {
       submitPrompt('claude', 'Ask claude');
 
       // When: the user switches to codex without an intervening shell prompt.
-      rows = agentRows('codex');
+      rows = agentRows('codex', 789);
       now = 1004;
       await tracker.poll();
 
@@ -1861,44 +1867,105 @@ describe('PaneInfoTracker', () => {
       { protocolAgent: 'cursor', executable: 'agent' },
       { protocolAgent: 'antigravity', executable: 'agy' },
     ])(
-      'keeps a $protocolAgent prompt when ps observes it as $executable',
+      'emits a $protocolAgent prompt once ps identifies the agent as $executable',
       async ({ protocolAgent, executable }) => {
-        // Given: an agent whose hook protocol name differs from its executable basename. The two
-        // detection paths use different vocabularies, so a raw kind comparison would call this a
-        // different agent and drop the prompt on the very next poll.
+        // Given: an agent whose hook protocol name differs from its executable basename, launched
+        // in one shot so the prompt arrives before ps has observed anything. The idle recompute
+        // drops the protocol agent, so the agent slot is rebuilt from the command line on the next
+        // poll — and the two paths spell the same agent differently.
         await registerAndSettle();
-        rows = agentRows(executable);
         now = 1002;
-        await tracker.poll();
-        now = 1003;
         submitPrompt(protocolAgent, 'Ask the agent');
-        expect(tracker.list()[0]?.userPrompt).toBe('Ask the agent');
 
-        // When: the next process-table observation arrives for the same session.
-        now = 1004;
+        // When: the first poll to catch the pane running identifies it by executable name.
+        rows = agentRows(executable);
+        now = 1003;
         await tracker.poll();
 
-        // Then: the prompt survives, because both names normalize to the same agent.
+        // Then: the prompt is attributed to that agent, because both names normalize to one
+        // identity. Comparing raw kinds would leave it permanently unemitted.
+        expect(tracker.list()[0]?.agent).toMatchObject({ known: protocolAgent });
         expect(tracker.list()[0]?.userPrompt).toBe('Ask the agent');
       },
     );
 
-    it('still discards across an alias boundary between two different agents', async () => {
-      // Given: a prompt held for cursor, whose ps-observed executable is `cursor-agent`.
+    it('attaches the prompt to the agent job, not to the command ps saw before it', async () => {
+      // Given: ps last observed an ordinary command, which then exits and is replaced by an agent
+      // in a new process group before the next poll runs. A one-shot launch such as
+      // `codex "do the thing"` submits its prompt at that moment, so no observation of the agent
+      // exists yet and no poll is in flight to earn a reprieve.
       await registerAndSettle();
-      rows = agentRows('cursor-agent');
+      rows = agentRows('pnpm run typecheck', 456);
       now = 1002;
       await tracker.poll();
       now = 1003;
-      submitPrompt('cursor', 'Ask cursor');
+      submitPrompt('codex', 'Tidy up the lint rules');
 
-      // When: an antigravity binary takes the foreground.
-      rows = agentRows('agy');
+      // When: the first poll after the launch observes the agent in its own process group.
+      rows = agentRows('codex', 789);
       now = 1004;
       await tracker.poll();
 
-      // Then: normalizing the two vocabularies does not blur distinct agents together.
+      // Then: the prompt is attributed to that group. Adopting the previous command's group at
+      // capture time would have made this observation look like a session change and discarded it.
+      expect(tracker.list()[0]?.userPrompt).toBe('Tidy up the lint rules');
+
+      // And: the binding is real, not merely deferred — a later switch to another job still clears
+      // the prompt.
+      rows = agentRows('pnpm test', 987);
+      now = 1005;
+      await tracker.poll();
       expect(tracker.list()[0]?.userPrompt).toBeUndefined();
+    });
+
+    it('does not bind to a process group that shell integration has already superseded', async () => {
+      // Given: ps observed an agent, and shell integration then reports a new command starting —
+      // so the recorded process group is known to be stale even though no poll has run since.
+      await registerAndSettle();
+      rows = agentRows('claude', 456);
+      now = 1002;
+      await tracker.poll();
+      now = 1003;
+      tracker.applySignal('pty-1', {
+        type: 'shell-command-line',
+        command: 'claude',
+        source: 'osc633',
+      });
+      tracker.applySignal('pty-1', { type: 'shell-command-started', source: 'osc133' });
+
+      // When: the relaunched agent submits a prompt and the next poll finds it in a new group.
+      now = 1004;
+      submitPrompt('claude', 'Ask claude again');
+      rows = agentRows('claude', 789);
+      now = 1005;
+      await tracker.poll();
+
+      // Then: the prompt survives into the new session rather than being pinned to the old group.
+      expect(tracker.list()[0]?.userPrompt).toBe('Ask claude again');
+    });
+
+    it('keeps the prompt for an agent ps cannot name, such as one launched through node', async () => {
+      // Given: the pane is running an agent installed behind a launcher, which is how a real Codex
+      // install commonly appears in the process table.
+      const codexUnderNode = 'node /Users/tester/.local/share/mise/bin/codex --add-dir /tmp';
+      await registerAndSettle();
+      rows = agentRows(codexUnderNode);
+      now = 1002;
+      await tracker.poll();
+      now = 1003;
+      submitPrompt('codex', 'Tidy up the lint rules');
+      expect(tracker.list()[0]?.userPrompt).toBe('Tidy up the lint rules');
+
+      // When: further observations arrive for the same still-running session.
+      now = 1004;
+      await tracker.poll();
+      now = 1005;
+      await tracker.poll();
+
+      // Then: the prompt survives. `detectAgentFromCommand` reads this command line as `node` and
+      // reports no agent at all, so a rule that re-identified the agent by name would conclude the
+      // session had ended while it is plainly still running.
+      expect(tracker.list()[0]?.userPrompt).toBe('Tidy up the lint rules');
     });
 
     it('does not resurrect the previous prompt when the same agent is restarted', async () => {
@@ -1915,7 +1982,7 @@ describe('PaneInfoTracker', () => {
       rows = [shellRow(123)];
       now = 1004;
       await tracker.poll();
-      rows = agentRows('claude');
+      rows = agentRows('claude', 789);
       now = 1005;
       await tracker.poll();
 
@@ -2025,7 +2092,7 @@ describe('PaneInfoTracker', () => {
         // When: claude is relaunched without submitting a prompt.
         now = 1004;
         const pollC = tracker.poll();
-        await completePendingPoll(agentRows('claude'));
+        await completePendingPoll(agentRows('claude', 789));
         await pollC;
 
         // Then: the previous session's prompt stays gone. Had the reprieve survived the failure,

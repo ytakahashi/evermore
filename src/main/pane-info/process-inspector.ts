@@ -81,6 +81,9 @@ export function observePaneActivity(
     activity: 'running',
     foregroundCommand,
     foregroundArgs,
+    // The shell's tpgid is the foreground process group by definition, so this does not depend on
+    // which row was picked as the leader above.
+    foregroundPgid: shellRow.tpgid,
   };
 }
 

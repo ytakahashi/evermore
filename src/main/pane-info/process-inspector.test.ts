@@ -77,11 +77,13 @@ describe('process-inspector', () => {
     // When: pane activity is observed.
     const activity = observePaneActivity(rows, 123);
 
-    // Then: the foreground process is surfaced as running.
+    // Then: the foreground process is surfaced as running, identified by the shell's tpgid so
+    // callers can tell one foreground job from the next without parsing the command line.
     expect(activity).toEqual({
       activity: 'running',
       foregroundCommand: 'node /Users/tester/project/server.js',
       foregroundArgs: 'node /Users/tester/project/server.js',
+      foregroundPgid: 456,
     });
   });
 });

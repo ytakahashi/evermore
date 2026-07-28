@@ -25,6 +25,7 @@ import { isIntegrationStale } from './integration-staleness';
 import { observePaneActivity, ProcessInspector } from './process-inspector';
 import {
   DEFAULT_PS_POLL_INTERVAL_MS,
+  type ObservedPaneActivity,
   type PaneInfoTrackerCallbacks,
   type ProcessTableRow,
   type RegisteredPaneProcess,
@@ -122,6 +123,7 @@ export class PaneInfoTracker {
         if (!isInSshShellLifecycle(process)) {
           this.finishCurrentCommand(process, now);
           this.clearAgentProtocolState(process);
+          this.forgetForegroundObservation(process);
         }
         break;
 
@@ -133,6 +135,7 @@ export class PaneInfoTracker {
         this.applyLifecycleProtocol(process, signal.source, now);
         if (!isInSshShellLifecycle(process)) {
           this.clearAgentProtocolState(process);
+          this.forgetForegroundObservation(process);
           process.currentCommand = {
             line: process.shellIntegrationCommandLine ?? '',
             startedAt: now,
@@ -364,10 +367,11 @@ export class PaneInfoTracker {
       // launch either failed or already exited and the flag must release to avoid suppressing
       // future legitimate updates.
       process.sshShellLifecycleActive = false;
+      process.lastForegroundPgid = observed.foregroundPgid;
       // Must run before the recompute: the recompute builds the snapshot that gets emitted, so a
       // discard applied afterwards would still ship the stale prompt and leave it on screen until
       // some later change happened to trigger another emit.
-      this.reconcileUserPromptWithObservation(process, observed.foregroundArgs);
+      this.reconcileUserPromptWithObservation(process, observed);
       this.recomputeInfo(process, { emit: true, observedAt });
     }
   }
@@ -387,20 +391,24 @@ export class PaneInfoTracker {
   }
 
   /**
-   * Drops the retained prompt when the process table no longer shows the agent it was sent to.
+   * Drops the retained prompt once the process table shows the agent session has ended.
    *
-   * The check reads the raw ps observation rather than `process.agent` on purpose. `computeAgent()`
-   * keeps an `agent-protocol` agent in place regardless of what ps reports, until a shell command
-   * boundary clears it — an intentional rule that makes protocol status outrank command-line
-   * detection. Reusing `process.agent` here would inherit that stickiness and let a prompt survive
-   * both a plain command taking over the pane and a switch to a different agent.
+   * Identity is the foreground process group, not the agent binary. Re-detecting the agent from the
+   * foreground command line looks equivalent but is not: an agent installed through a launcher
+   * appears as `node /path/to/codex`, which `detectAgentFromCommand()` reads as `node`. Under a
+   * name-based rule every such session would look like "the agent is gone" on the first poll after
+   * the prompt, and the prompt would vanish for agents that are plainly still running. The process
+   * group needs no interpretation and changes exactly when the pane moves to a different job —
+   * including a relaunch of the same agent, which a name-based rule cannot see at all.
    *
-   * `detectAgentFromCommand()` accepts a process-table `args` string, so the foreground args pass
-   * through unchanged.
+   * The observation is read directly rather than through `process.agent`. `computeAgent()` keeps an
+   * `agent-protocol` agent in place regardless of what ps reports until a shell command boundary
+   * clears it — an intentional rule that makes protocol status outrank command-line detection —
+   * so reusing it here would inherit that stickiness and never notice the session ending.
    */
   private reconcileUserPromptWithObservation(
     process: RegisteredPaneProcess,
-    foregroundArgs: string | undefined,
+    observed: ObservedPaneActivity,
   ): void {
     const userPrompt = process.userPrompt;
     if (!userPrompt) {
@@ -419,8 +427,20 @@ export class PaneInfoTracker {
       return;
     }
 
-    const observedIdentity = toAgentIdentity(detectAgentFromCommand(foregroundArgs));
-    if (observedIdentity !== userPrompt.agentIdentity) {
+    if (observed.foregroundPgid === undefined) {
+      // The pane is back at its shell prompt, so whatever ran the turn has exited.
+      process.userPrompt = undefined;
+      return;
+    }
+
+    if (userPrompt.foregroundPgid === undefined) {
+      // First observation to catch the pane running since the prompt arrived: this is the job the
+      // prompt was submitted into, so adopt it as the session's identity.
+      process.userPrompt = { ...userPrompt, foregroundPgid: observed.foregroundPgid };
+      return;
+    }
+
+    if (observed.foregroundPgid !== userPrompt.foregroundPgid) {
       process.userPrompt = undefined;
     }
   }
@@ -510,9 +530,11 @@ export class PaneInfoTracker {
       return;
     }
 
+    const foregroundPgid = resolveInitialForegroundPgid(process, agentIdentity);
     process.userPrompt = {
       text,
       agentIdentity,
+      ...(foregroundPgid === undefined ? {} : { foregroundPgid }),
       // A poll that started before this moment may be looking at a process table without the agent
       // in it. Flag it so `updateFromRows` skips exactly that one observation instead of treating
       // its stale snapshot as proof that the session already ended.
@@ -560,6 +582,18 @@ export class PaneInfoTracker {
     // The OSC 633;E command line is tied to the command lifecycle that has just ended. The next
     // command's 633;E repopulates this before its 133;C arrives.
     process.shellIntegrationCommandLine = undefined;
+  }
+
+  /**
+   * Drops the recorded foreground process group after shell integration reports that the pane's
+   * foreground has changed.
+   *
+   * Shell lifecycle signals arrive well before the next process-table poll, so between the two the
+   * recorded group belongs to a job that has already ended. Keeping it would let a prompt submitted
+   * in that gap bind to the previous job instead of the agent that is actually running.
+   */
+  private forgetForegroundObservation(process: RegisteredPaneProcess): void {
+    process.lastForegroundPgid = undefined;
   }
 
   private clearAgentProtocolState(process: RegisteredPaneProcess): void {
@@ -793,6 +827,42 @@ function resolveEmittableUserPrompt(process: RegisteredPaneProcess): string | un
   }
 
   return userPrompt.text;
+}
+
+/**
+ * Decides which foreground process group a freshly submitted prompt should start out attached to.
+ *
+ * Adopting the last observed group unconditionally is wrong, because that observation can predate
+ * the agent. A one-shot launch (`codex "do the thing"`) submits its prompt the instant it starts,
+ * so the newest thing ps saw is routinely whatever ran *before* the agent — and binding to that job
+ * makes the very next poll, which finally sees the agent's own group, read as a session change and
+ * throw the prompt away for the rest of the turn.
+ *
+ * So the group is only adopted when the last observation showed this same agent, meaning the prompt
+ * is a follow-up turn inside a session ps has already confirmed. That is the one case worth binding
+ * eagerly for: it closes the window in which the session could end and another job take its place
+ * before the next poll. In every other case the answer is "not known yet", and the first
+ * observation after the prompt supplies it.
+ *
+ * Known limitation: restarting the same agent without shell integration, and submitting a prompt to
+ * the new session, all within a single poll interval. The last observation still names that agent,
+ * so the prompt binds to the previous session's group and the next poll discards it. With shell
+ * integration the lifecycle signals invalidate the recorded group first, so this needs the exact
+ * combination of no shell integration, the same agent, and both events landing between two polls.
+ * The cost is bounded to that one turn — the following poll records the new group, so the next
+ * prompt binds correctly — and closing it would mean tracking process groups per launch rather than
+ * per observation, which is not worth carrying for a window this narrow.
+ */
+function resolveInitialForegroundPgid(
+  process: RegisteredPaneProcess,
+  agentIdentity: string,
+): number | undefined {
+  if (process.lastForegroundPgid === undefined) {
+    return undefined;
+  }
+
+  const lastObservedIdentity = toAgentIdentity(detectAgentFromCommand(process.lastForegroundArgs));
+  return lastObservedIdentity === agentIdentity ? process.lastForegroundPgid : undefined;
 }
 
 /**

@@ -55,6 +55,15 @@ export interface RegisteredPaneProcess {
      */
     agentIdentity: string;
     /**
+     * Foreground process group the prompt was submitted into, once one has been observed.
+     *
+     * This is what decides whether the agent session is still alive. It is left unset when the
+     * process table has not yet caught up to a freshly launched agent, and bound on the first
+     * observation that finds the pane running; from then on a different process group means a
+     * different job, and the prompt is dropped.
+     */
+    foregroundPgid?: number;
+    /**
      * Set when a process-table poll was already in flight as the prompt arrived. Such a poll may
      * have sampled the process table from before the agent existed, so its observation cannot be
      * used as evidence that the agent is gone. The next observation after this one decides.
@@ -63,6 +72,8 @@ export interface RegisteredPaneProcess {
   };
   lastForegroundCommand?: string;
   lastForegroundArgs?: string;
+  /** Foreground process group from the latest observation; unset while the pane is idle. */
+  lastForegroundPgid?: number;
   lastProcessActivity: PaneProcessActivity;
   missedPsCommandStarts: number;
   /**
@@ -88,4 +99,12 @@ export interface ObservedPaneActivity {
   activity: PaneProcessActivity;
   foregroundCommand?: string;
   foregroundArgs?: string;
+  /**
+   * Process group id currently holding the terminal foreground, present only while running.
+   *
+   * Identifies the foreground job without interpreting what it is. Command lines cannot do that
+   * reliably — the same agent appears as `codex` or as `node .../bin/codex` depending on how it was
+   * installed — whereas the process group changes exactly when the pane moves to a different job.
+   */
+  foregroundPgid?: number;
 }
