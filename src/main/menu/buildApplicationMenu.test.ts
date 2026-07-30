@@ -133,6 +133,27 @@ describe('buildApplicationMenu', () => {
     expect(windowToggle?.accelerator).toBe('Command+Control+F');
   });
 
+  it('exposes the Agents view under View and dispatches it on click', () => {
+    // Given: a template whose dispatchers record which action fired.
+    const { dispatchers, calls } = createDispatchers();
+    const template = buildApplicationMenu(defaultOptions({ dispatchers }));
+
+    // When: the Agents item is located and clicked.
+    const agents = findItemByLabel(template, 'Agents');
+    type ClickHandler = NonNullable<MenuItemConstructorOptions['click']>;
+    (agents?.click as ClickHandler)(
+      // @ts-expect-error click args are not used by the handler
+      undefined,
+      undefined,
+      undefined,
+    );
+
+    // Then: the mode-switching view is reachable from the menu bar with its accelerator, which is
+    // what makes it discoverable at all.
+    expect(agents?.accelerator).toBe(DEFAULT_KEYBINDINGS['ui.openAgents']);
+    expect(calls).toEqual(['ui.openAgents']);
+  });
+
   it('omits the DevTools entry in production builds', () => {
     // Given: a production-mode template.
     const template = buildApplicationMenu(defaultOptions({ isDev: false }));

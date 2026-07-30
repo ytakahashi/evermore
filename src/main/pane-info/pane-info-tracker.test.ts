@@ -3,6 +3,7 @@ import {
   AGENT_DETAIL_ACTIVITY_LABEL_MAX_CHARS,
   AGENT_DETAIL_MESSAGE_MAX_CHARS,
   AGENT_DETAIL_TOOL_NAME_MAX_CHARS,
+  AGENT_USER_PROMPT_MAX_CHARS,
 } from '../../shared/pane-integration-constants';
 import type { PaneRuntimeInfo } from '../../shared/types';
 import { createLogger, type LogRecord, type LogTransport } from '../logging/logger';
@@ -1645,6 +1646,498 @@ describe('PaneInfoTracker', () => {
     expect(info?.agent).toBeUndefined();
     expect(info?.attention).toBeUndefined();
     expect(info?.integration.protocols).toEqual(['osc777', 'evermore']);
+  });
+
+  describe('submitted user prompts', () => {
+    /**
+     * Builds a process table where `args` occupies the pane's foreground.
+     *
+     * `pgid` defaults to a single shared value so most cases read as one continuous session; pass a
+     * different one to model a genuinely separate job (a relaunch, or another command taking over).
+     */
+    function agentRows(args: string, pgid = 456): ProcessTableRow[] {
+      const [command = ''] = args.split(' ');
+      return [shellRow(pgid), { pid: pgid, ppid: 123, pgid, tpgid: pgid, command, args }];
+    }
+
+    function submitPrompt(agent: string, userPrompt: string): void {
+      tracker.applySignal('pty-1', {
+        type: 'agent-event',
+        source: 'evermore-osc777',
+        event: {
+          v: 1,
+          type: 'agent-status',
+          agent,
+          status: 'running',
+          event: 'user_prompt_submit',
+          userPrompt,
+        },
+      });
+    }
+
+    /** Registers the pane and lets the automatic first poll settle against the idle default rows. */
+    async function registerAndSettle(): Promise<void> {
+      tracker.register('pty-1', 123, '/tmp');
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+
+    it('withholds the prompt until ps confirms the agent, then emits it', async () => {
+      // Given: an agent submits a prompt before the process table has noticed it running, which is
+      // what a one-shot launch such as `claude "do the thing"` produces.
+      await registerAndSettle();
+      now = 1002;
+      submitPrompt('claude', 'Fix the failing tests');
+
+      // Then: nothing is emitted yet, because the pane has no agent to attribute the prompt to.
+      expect(tracker.list()[0]?.userPrompt).toBeUndefined();
+
+      // When: the next poll observes the agent.
+      rows = agentRows('claude');
+      now = 1003;
+      await tracker.poll();
+
+      // Then: the prompt appears rather than having been discarded by the intervening recompute.
+      expect(tracker.list()[0]?.userPrompt).toBe('Fix the failing tests');
+    });
+
+    it('carries the prompt line structure through to the runtime info', async () => {
+      // Given: a running agent receiving a prompt written as a list.
+      await registerAndSettle();
+      rows = agentRows('claude');
+      now = 1002;
+      await tracker.poll();
+
+      // When: the prompt spans several lines, with a blank line between paragraphs.
+      now = 1003;
+      submitPrompt('claude', 'Fix three things:\n\n1. lint fights Prettier\n2. two tests fail');
+
+      // Then: the breaks survive so the instruction stays readable, while the blank line is closed
+      // up — it adds nothing a single break does not, and costs a line of the clamped height the
+      // prompt is displayed in.
+      expect(tracker.list()[0]?.userPrompt).toBe(
+        'Fix three things:\n1. lint fights Prettier\n2. two tests fail',
+      );
+    });
+
+    it('truncates a prompt past the display limit and marks the cut', async () => {
+      // Given: an agent is running and submits an over-long prompt.
+      await registerAndSettle();
+      rows = agentRows('claude');
+      now = 1002;
+      await tracker.poll();
+
+      // When: the prompt exceeds the display limit.
+      now = 1003;
+      submitPrompt('claude', 'a'.repeat(AGENT_USER_PROMPT_MAX_CHARS + 50));
+
+      // Then: it is cut at the limit with an ellipsis, so the truncation is visible to the user.
+      expect(tracker.list()[0]?.userPrompt).toBe(`${'a'.repeat(AGENT_USER_PROMPT_MAX_CHARS)}…`);
+    });
+
+    it('keeps the prompt after the turn completes and replaces it on the next one', async () => {
+      // Given: a prompt was submitted while the agent was running.
+      await registerAndSettle();
+      rows = agentRows('claude');
+      now = 1002;
+      await tracker.poll();
+      now = 1003;
+      submitPrompt('claude', 'First request');
+
+      // When: the turn finishes.
+      now = 1004;
+      tracker.applySignal('pty-1', {
+        type: 'agent-event',
+        source: 'evermore-osc777',
+        event: { v: 1, type: 'agent-status', agent: 'claude', status: 'complete', event: 'stop' },
+      });
+
+      // Then: the prompt survives — reading back what a finished session was asked to do is the
+      // whole point of retaining it.
+      expect(tracker.list()[0]?.agent).toMatchObject({ status: 'ready' });
+      expect(tracker.list()[0]?.userPrompt).toBe('First request');
+
+      // When: the user starts another turn.
+      now = 1005;
+      submitPrompt('claude', 'Second request');
+
+      // Then: the newer instruction replaces the older one.
+      expect(tracker.list()[0]?.userPrompt).toBe('Second request');
+    });
+
+    it('emits when the prompt is the only thing that changed', async () => {
+      // Given: a prompt has already been emitted for a running agent.
+      await registerAndSettle();
+      rows = agentRows('claude');
+      now = 1002;
+      await tracker.poll();
+      now = 1003;
+      submitPrompt('claude', 'First request');
+      onChanged.mockClear();
+
+      // When: a second prompt arrives with every other field identical.
+      submitPrompt('claude', 'Second request');
+
+      // Then: the snapshot is not mistaken for an unchanged one and the emit goes out.
+      expect(onChanged).toHaveBeenCalledTimes(1);
+      expect(onChanged.mock.calls.at(-1)?.[0].info.userPrompt).toBe('Second request');
+    });
+
+    it('drops the prompt when the shell takes the foreground back', async () => {
+      // Given: a prompt is held for a running agent.
+      await registerAndSettle();
+      rows = agentRows('claude');
+      now = 1002;
+      await tracker.poll();
+      now = 1003;
+      submitPrompt('claude', 'First request');
+
+      // When: the agent exits and shell integration reports a new prompt.
+      now = 1004;
+      tracker.applySignal('pty-1', { type: 'shell-prompt-start', source: 'osc133' });
+
+      // Then: the prompt goes with the agent it belonged to.
+      expect(tracker.list()[0]?.userPrompt).toBeUndefined();
+    });
+
+    it('ignores prompts carried by remote agent events during an ssh session', async () => {
+      // Given: ps classifies the foreground session as ssh.
+      await registerAndSettle();
+      rows = agentRows('/usr/bin/ssh host');
+      now = 1002;
+      await tracker.poll();
+
+      // When: the remote shell emits a prompt-submitting agent event.
+      now = 1003;
+      submitPrompt('claude', 'Remote request');
+
+      // Then: nothing is taken in — remote agents are outside this pane's classification.
+      expect(tracker.list()[0]?.foregroundSession.kind).toBe('ssh');
+      expect(tracker.list()[0]?.userPrompt).toBeUndefined();
+    });
+
+    it('discards the prompt on the ps observation rather than on the sticky protocol agent', async () => {
+      // Given: a protocol agent event has pinned the agent slot to claude, with a prompt held.
+      await registerAndSettle();
+      rows = agentRows('claude');
+      now = 1002;
+      await tracker.poll();
+      now = 1003;
+      submitPrompt('claude', 'First request');
+      expect(tracker.list()[0]?.userPrompt).toBe('First request');
+      onChanged.mockClear();
+
+      // When: claude exits and an ordinary command takes over without a shell-prompt boundary.
+      rows = agentRows('pnpm run typecheck', 789);
+      now = 1004;
+      await tracker.poll();
+
+      // Then: the prompt is gone even though `agent` still reads claude — protocol status
+      // deliberately outranks command-line detection, so it cannot be the discard signal. The emit
+      // from this very poll must already be clean, otherwise the stale prompt would stay on screen
+      // until some unrelated change triggered the next one.
+      expect(tracker.list()[0]?.agent).toMatchObject({ kind: 'claude', source: 'agent-protocol' });
+      expect(tracker.list()[0]?.userPrompt).toBeUndefined();
+      expect(onChanged.mock.calls.at(-1)?.[0].info.userPrompt).toBeUndefined();
+    });
+
+    it('discards the prompt when ps observes a different agent', async () => {
+      // Given: a prompt held for claude.
+      await registerAndSettle();
+      rows = agentRows('claude');
+      now = 1002;
+      await tracker.poll();
+      now = 1003;
+      submitPrompt('claude', 'Ask claude');
+
+      // When: the user switches to codex without an intervening shell prompt.
+      rows = agentRows('codex', 789);
+      now = 1004;
+      await tracker.poll();
+
+      // Then: claude's instruction does not follow the pane into the codex session.
+      expect(tracker.list()[0]?.userPrompt).toBeUndefined();
+    });
+
+    it('does not show a claude prompt on a codex agent inside one poll interval', async () => {
+      // Given: a prompt held for claude, confirmed by ps.
+      await registerAndSettle();
+      rows = agentRows('claude');
+      now = 1002;
+      await tracker.poll();
+      now = 1003;
+      submitPrompt('claude', 'Ask claude');
+
+      // When: codex emits a protocol event before ps has had a chance to observe the switch, so the
+      // ps-driven discard has not run yet.
+      now = 1004;
+      tracker.applySignal('pty-1', {
+        type: 'agent-event',
+        source: 'evermore-osc777',
+        event: { v: 1, type: 'agent-status', agent: 'codex', status: 'running' },
+      });
+
+      // Then: the agent-kind comparison keeps claude's prompt off the codex session.
+      expect(tracker.list()[0]?.agent).toMatchObject({ kind: 'codex' });
+      expect(tracker.list()[0]?.userPrompt).toBeUndefined();
+    });
+
+    it.each([
+      { protocolAgent: 'cursor', executable: 'cursor-agent' },
+      { protocolAgent: 'cursor', executable: 'agent' },
+      { protocolAgent: 'antigravity', executable: 'agy' },
+    ])(
+      'emits a $protocolAgent prompt once ps identifies the agent as $executable',
+      async ({ protocolAgent, executable }) => {
+        // Given: an agent whose hook protocol name differs from its executable basename, launched
+        // in one shot so the prompt arrives before ps has observed anything. The idle recompute
+        // drops the protocol agent, so the agent slot is rebuilt from the command line on the next
+        // poll — and the two paths spell the same agent differently.
+        await registerAndSettle();
+        now = 1002;
+        submitPrompt(protocolAgent, 'Ask the agent');
+
+        // When: the first poll to catch the pane running identifies it by executable name.
+        rows = agentRows(executable);
+        now = 1003;
+        await tracker.poll();
+
+        // Then: the prompt is attributed to that agent, because both names normalize to one
+        // identity. Comparing raw kinds would leave it permanently unemitted.
+        expect(tracker.list()[0]?.agent).toMatchObject({ known: protocolAgent });
+        expect(tracker.list()[0]?.userPrompt).toBe('Ask the agent');
+      },
+    );
+
+    it('attaches the prompt to the agent job, not to the command ps saw before it', async () => {
+      // Given: ps last observed an ordinary command, which then exits and is replaced by an agent
+      // in a new process group before the next poll runs. A one-shot launch such as
+      // `codex "do the thing"` submits its prompt at that moment, so no observation of the agent
+      // exists yet and no poll is in flight to earn a reprieve.
+      await registerAndSettle();
+      rows = agentRows('pnpm run typecheck', 456);
+      now = 1002;
+      await tracker.poll();
+      now = 1003;
+      submitPrompt('codex', 'Tidy up the lint rules');
+
+      // When: the first poll after the launch observes the agent in its own process group.
+      rows = agentRows('codex', 789);
+      now = 1004;
+      await tracker.poll();
+
+      // Then: the prompt is attributed to that group. Adopting the previous command's group at
+      // capture time would have made this observation look like a session change and discarded it.
+      expect(tracker.list()[0]?.userPrompt).toBe('Tidy up the lint rules');
+
+      // And: the binding is real, not merely deferred — a later switch to another job still clears
+      // the prompt.
+      rows = agentRows('pnpm test', 987);
+      now = 1005;
+      await tracker.poll();
+      expect(tracker.list()[0]?.userPrompt).toBeUndefined();
+    });
+
+    it('does not bind to a process group that shell integration has already superseded', async () => {
+      // Given: ps observed an agent, and shell integration then reports a new command starting —
+      // so the recorded process group is known to be stale even though no poll has run since.
+      await registerAndSettle();
+      rows = agentRows('claude', 456);
+      now = 1002;
+      await tracker.poll();
+      now = 1003;
+      tracker.applySignal('pty-1', {
+        type: 'shell-command-line',
+        command: 'claude',
+        source: 'osc633',
+      });
+      tracker.applySignal('pty-1', { type: 'shell-command-started', source: 'osc133' });
+
+      // When: the relaunched agent submits a prompt and the next poll finds it in a new group.
+      now = 1004;
+      submitPrompt('claude', 'Ask claude again');
+      rows = agentRows('claude', 789);
+      now = 1005;
+      await tracker.poll();
+
+      // Then: the prompt survives into the new session rather than being pinned to the old group.
+      expect(tracker.list()[0]?.userPrompt).toBe('Ask claude again');
+    });
+
+    it('keeps the prompt for an agent ps cannot name, such as one launched through node', async () => {
+      // Given: the pane is running an agent installed behind a launcher, which is how a real Codex
+      // install commonly appears in the process table.
+      const codexUnderNode = 'node /Users/tester/.local/share/mise/bin/codex --add-dir /tmp';
+      await registerAndSettle();
+      rows = agentRows(codexUnderNode);
+      now = 1002;
+      await tracker.poll();
+      now = 1003;
+      submitPrompt('codex', 'Tidy up the lint rules');
+      expect(tracker.list()[0]?.userPrompt).toBe('Tidy up the lint rules');
+
+      // When: further observations arrive for the same still-running session.
+      now = 1004;
+      await tracker.poll();
+      now = 1005;
+      await tracker.poll();
+
+      // Then: the prompt survives. `detectAgentFromCommand` reads this command line as `node` and
+      // reports no agent at all, so a rule that re-identified the agent by name would conclude the
+      // session had ended while it is plainly still running.
+      expect(tracker.list()[0]?.userPrompt).toBe('Tidy up the lint rules');
+    });
+
+    it('does not resurrect the previous prompt when the same agent is restarted', async () => {
+      // Given: a prompt held for claude.
+      await registerAndSettle();
+      rows = agentRows('claude');
+      now = 1002;
+      await tracker.poll();
+      now = 1003;
+      submitPrompt('claude', 'Ask claude');
+
+      // When: claude exits (observed by ps) and is launched again without shell integration, so no
+      // lifecycle signal marks the boundary.
+      rows = [shellRow(123)];
+      now = 1004;
+      await tracker.poll();
+      rows = agentRows('claude', 789);
+      now = 1005;
+      await tracker.poll();
+
+      // Then: the new session starts empty instead of inheriting the previous session's prompt.
+      expect(tracker.list()[0]?.agent).toMatchObject({ kind: 'claude' });
+      expect(tracker.list()[0]?.userPrompt).toBeUndefined();
+    });
+
+    describe('with a poll in flight', () => {
+      let pendingPoll: {
+        promise: Promise<ProcessTableRow[]>;
+        resolve: (rows: ProcessTableRow[]) => void;
+        reject: (error: Error) => void;
+      };
+
+      beforeEach(() => {
+        // Replace the inspector with one whose promise the test settles by hand, so a prompt can
+        // be injected into the window between a poll starting and its process table arriving.
+        tracker = new PaneInfoTracker({
+          callbacks: { onChanged },
+          inspector: {
+            listProcesses: vi.fn(() => {
+              let resolve!: (value: ProcessTableRow[]) => void;
+              let reject!: (error: Error) => void;
+              const promise = new Promise<ProcessTableRow[]>((resolvePromise, rejectPromise) => {
+                resolve = resolvePromise;
+                reject = rejectPromise;
+              });
+              pendingPoll = { promise, resolve, reject };
+              return promise;
+            }),
+          },
+          now: () => now,
+          pollIntervalMs: 0,
+        });
+      });
+
+      async function completePendingPoll(nextRows: ProcessTableRow[]): Promise<void> {
+        pendingPoll.resolve(nextRows);
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      }
+
+      async function failPendingPoll(): Promise<void> {
+        pendingPoll.reject(new Error('ps failed'));
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      }
+
+      it('keeps a prompt that arrived while a stale process table was already being fetched', async () => {
+        // Given: registration started a poll that has not returned yet.
+        tracker.register('pty-1', 123, '/tmp');
+
+        // When: the agent launches and submits its prompt inside that window, and the in-flight poll
+        // then completes with the snapshot it took before the agent existed.
+        now = 1002;
+        submitPrompt('claude', 'Fix the failing tests');
+        await completePendingPoll([shellRow(123)]);
+
+        // Then: that observation is not treated as evidence the agent is gone.
+        expect(tracker.list()[0]?.userPrompt).toBeUndefined();
+
+        // When: a poll that started after the prompt observes the agent.
+        now = 1003;
+        const poll = tracker.poll();
+        await completePendingPoll(agentRows('claude'));
+        await poll;
+
+        // Then: the prompt is emitted instead of having been lost for the rest of the turn.
+        expect(tracker.list()[0]?.userPrompt).toBe('Fix the failing tests');
+      });
+
+      it('grants the reprieve to one observation only', async () => {
+        // Given: a prompt submitted while the first poll was in flight, which that poll skipped.
+        tracker.register('pty-1', 123, '/tmp');
+        now = 1002;
+        submitPrompt('claude', 'Fix the failing tests');
+        await completePendingPoll([shellRow(123)]);
+
+        // When: the next poll also fails to find the agent.
+        now = 1003;
+        const poll = tracker.poll();
+        await completePendingPoll([shellRow(123)]);
+        await poll;
+
+        // Then: this observation is authoritative and the prompt is discarded.
+        expect(tracker.list()[0]?.userPrompt).toBeUndefined();
+      });
+
+      it('does not carry the reprieve over to the next poll when the in-flight one fails', async () => {
+        // Given: a prompt submitted while the first poll was in flight, and that poll then fails
+        // instead of returning rows — so it never delivers the observation the reprieve was
+        // reserved against.
+        tracker.register('pty-1', 123, '/tmp');
+        now = 1002;
+        submitPrompt('claude', 'Fix the failing tests');
+        await failPendingPoll();
+
+        // When: the next poll — which started after the prompt and is therefore authoritative —
+        // finds no agent.
+        now = 1003;
+        const pollB = tracker.poll();
+        await completePendingPoll([shellRow(123)]);
+        await pollB;
+
+        // Then: it discards immediately rather than being spent as the skipped observation.
+        expect(tracker.list()[0]?.userPrompt).toBeUndefined();
+
+        // When: claude is relaunched without submitting a prompt.
+        now = 1004;
+        const pollC = tracker.poll();
+        await completePendingPoll(agentRows('claude', 789));
+        await pollC;
+
+        // Then: the previous session's prompt stays gone. Had the reprieve survived the failure,
+        // poll B would have been skipped and this relaunch would have resurrected it.
+        expect(tracker.list()[0]?.agent).toMatchObject({ kind: 'claude' });
+        expect(tracker.list()[0]?.userPrompt).toBeUndefined();
+      });
+
+      it('judges normally when no poll was in flight as the prompt arrived', async () => {
+        // Given: a settled tracker with an agent confirmed by ps.
+        tracker.register('pty-1', 123, '/tmp');
+        await completePendingPoll(agentRows('claude'));
+
+        // When: a prompt arrives with no poll running, and the next poll no longer sees the agent.
+        now = 1002;
+        submitPrompt('claude', 'Fix the failing tests');
+        expect(tracker.list()[0]?.userPrompt).toBe('Fix the failing tests');
+        now = 1003;
+        const poll = tracker.poll();
+        await completePendingPoll([shellRow(123)]);
+        await poll;
+
+        // Then: no reprieve is spent and the very first observation discards the prompt.
+        expect(tracker.list()[0]?.userPrompt).toBeUndefined();
+      });
+    });
   });
 
   it('disables recurring polling when pollIntervalMs is non-positive', async () => {

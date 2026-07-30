@@ -19,7 +19,8 @@ import { selectActivePane, useWorkspaceStore } from '../stores/workspaceStore';
  *    mutate underneath the focused pane.
  *  - `pane.toggleFullscreen` runs in either fullscreen state (that is the toggle), but is still
  *    gated to the workspace view so it does not silently affect a hidden tab.
- *  - `ui.toggleSidebar` and `ui.openSettings` are always allowed — they only affect chrome.
+ *  - `ui.toggleSidebar`, `ui.openSettings` and `ui.openAgents` are always allowed — they only
+ *    affect chrome.
  */
 export function useShortcutBridge(): void {
   useEffect(() => {
@@ -104,6 +105,9 @@ function handleShortcut(actionId: KeyboardShortcutActionId): void {
       return;
     case 'ui.openSettings':
       uiState.openSettings();
+      return;
+    case 'ui.openAgents':
+      uiState.openAgents();
       return;
     default: {
       const _exhaustive: never = actionId;

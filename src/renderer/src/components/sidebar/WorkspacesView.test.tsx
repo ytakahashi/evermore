@@ -415,6 +415,129 @@ describe('WorkspacesView', () => {
     expect(screen.queryByText('claude')).not.toBeInTheDocument();
   });
 
+  it('shows the submitted prompt on its own row with the full text on hover', () => {
+    // Given: a pane whose agent has a prompt recorded for the current session.
+    const prompt = 'Reorganize the lint rules so the config stops fighting Prettier';
+    usePaneInfoStore.setState({
+      infosByPtyId: {
+        'pty-server': {
+          ptyId: 'pty-server',
+          processActivity: 'running',
+          foregroundCommand: 'claude',
+          foregroundSession: { kind: 'other' },
+          integration: {
+            shell: false,
+            protocols: [],
+            lastSequenceAt: 0,
+            stale: false,
+          },
+          agent: {
+            known: 'claude',
+            kind: 'claude',
+            status: 'running',
+            source: 'agent-protocol',
+            observedAt: 1000,
+            detail: { message: 'Edit: eslint.config.mjs' },
+          },
+          userPrompt: prompt,
+          observedAt: 1000,
+        },
+      },
+      isLoading: false,
+      error: null,
+    });
+
+    // When: the workspace sidebar renders.
+    render(<WorkspacesView />);
+
+    // Then: the prompt sits alongside the activity summary rather than replacing it, and the full
+    // text is reachable via `title` since the sidebar width truncates most prompts.
+    expect(screen.getByText('Claude Code — Edit: eslint.config.mjs')).toBeInTheDocument();
+    const promptRow = screen.getByTitle(prompt);
+    expect(promptRow).toHaveTextContent(prompt);
+  });
+
+  it('keeps a multi-line prompt on a single row', () => {
+    // Given: a pane whose prompt was written as a list, so the sanitizer preserved its breaks.
+    const prompt = 'Fix three things:\n1. lint fights Prettier\n2. two tests fail';
+    usePaneInfoStore.setState({
+      infosByPtyId: {
+        'pty-server': {
+          ptyId: 'pty-server',
+          processActivity: 'running',
+          foregroundCommand: 'claude',
+          foregroundSession: { kind: 'other' },
+          integration: {
+            shell: false,
+            protocols: [],
+            lastSequenceAt: 0,
+            stale: false,
+          },
+          agent: {
+            known: 'claude',
+            kind: 'claude',
+            status: 'running',
+            source: 'agent-protocol',
+            observedAt: 1000,
+            detail: { message: 'Edit: eslint.config.mjs' },
+          },
+          userPrompt: prompt,
+          observedAt: 1000,
+        },
+      },
+      isLoading: false,
+      error: null,
+    });
+
+    // When: the workspace sidebar renders.
+    render(<WorkspacesView />);
+
+    // Then: the row stays single-line. `truncate` carries `white-space: nowrap`, which renders the
+    // breaks as spaces, so the sidebar keeps its three-row layout no matter how the prompt was
+    // written. Only the Agents view opts into showing them, and this is the guard against that
+    // opt-in leaking here. The default matcher normalizes whitespace, which would hide a break
+    // that did render, so the query keeps the string as written.
+    const promptRow = screen.getByTitle(prompt, { normalizer: (value) => value });
+    expect(promptRow).toHaveClass('truncate');
+    expect(promptRow).not.toHaveClass('whitespace-pre-line');
+  });
+
+  it('omits the prompt row when the pane has no recorded prompt', () => {
+    // Given: a pane running an agent that has not been given a prompt through a hook.
+    usePaneInfoStore.setState({
+      infosByPtyId: {
+        'pty-server': {
+          ptyId: 'pty-server',
+          processActivity: 'running',
+          foregroundCommand: 'claude',
+          foregroundSession: { kind: 'other' },
+          integration: {
+            shell: false,
+            protocols: [],
+            lastSequenceAt: 0,
+            stale: false,
+          },
+          agent: {
+            known: 'claude',
+            kind: 'claude',
+            status: 'ready',
+            source: 'command-line',
+            observedAt: 1000,
+          },
+          observedAt: 1000,
+        },
+      },
+      isLoading: false,
+      error: null,
+    });
+
+    // When: the workspace sidebar renders.
+    render(<WorkspacesView />);
+
+    // Then: no quote marker is rendered, so the row collapses instead of showing an empty quote.
+    expect(screen.queryByText(/❝/)).not.toBeInTheDocument();
+  });
+
   it('shows the working dot when the agent reports it is processing a turn', () => {
     // Given: a pane has a runtime info snapshot where the agent status is `running`.
     usePaneInfoStore.setState({
@@ -1395,7 +1518,7 @@ describe('WorkspacesView', () => {
 
       // Then: the main pane returns to the workspace view.
       expect(useUiStore.getState().activeView).toBe('workspace');
-      useUiStore.getState().closeSettings();
+      useUiStore.getState().showWorkspaceView();
     });
 
     it('closes an open pane menu when the tab menu is opened', () => {

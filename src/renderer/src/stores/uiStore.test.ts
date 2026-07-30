@@ -44,9 +44,62 @@ describe('useUiStore', () => {
     expect(useUiStore.getState().activeView).toBe('settings');
 
     // When: settings is closed.
-    useUiStore.getState().closeSettings();
+    useUiStore.getState().showWorkspaceView();
 
     // Then: the active view returns to workspace.
+    expect(useUiStore.getState().activeView).toBe('workspace');
+  });
+
+  it('opens and leaves the agents view through dedicated actions', () => {
+    // Given: the workspace view is active by default.
+
+    // When: the agents view is opened.
+    useUiStore.getState().openAgents();
+
+    // Then: the active view flips to agents.
+    expect(useUiStore.getState().activeView).toBe('agents');
+
+    // When: openAgents is called again while already on agents.
+    useUiStore.getState().openAgents();
+
+    // Then: it remains a no-op, matching how openSettings behaves.
+    expect(useUiStore.getState().activeView).toBe('agents');
+
+    // When: the user returns to the workspace, twice.
+    useUiStore.getState().showWorkspaceView();
+    useUiStore.getState().showWorkspaceView();
+
+    // Then: the active view is workspace and the repeat call changes nothing.
+    expect(useUiStore.getState().activeView).toBe('workspace');
+  });
+
+  it('switches directly between the settings and agents views', () => {
+    // Given: the user is on the settings view.
+    useUiStore.getState().openSettings();
+
+    // When: the agents view is opened without returning to the workspace first.
+    useUiStore.getState().openAgents();
+
+    // Then: the main area swaps straight over.
+    expect(useUiStore.getState().activeView).toBe('agents');
+
+    // When: settings is opened again from the agents view.
+    useUiStore.getState().openSettings();
+
+    // Then: the reverse transition works the same way.
+    expect(useUiStore.getState().activeView).toBe('settings');
+  });
+
+  it('returns to workspace when the user clicks a sidebar view while agents is active', () => {
+    // Given: the user is on the AgentsView.
+    useUiStore.getState().openAgents();
+
+    // When: the user clicks a sidebar view button.
+    useUiStore.getState().setSidebarView('workspaces');
+
+    // Then: the main area follows the click. Without this the button would appear to do nothing,
+    // since only the sidebar would change while Agents stayed in the main area.
+    expect(useUiStore.getState().sidebarView).toBe('workspaces');
     expect(useUiStore.getState().activeView).toBe('workspace');
   });
 

@@ -49,7 +49,7 @@ const SECTIONS: readonly SectionDefinition[] = [
  * rendering on `activeView`.
  */
 export function SettingsView(): React.JSX.Element {
-  const closeSettings = useUiStore((state) => state.closeSettings);
+  const showWorkspaceView = useUiStore((state) => state.showWorkspaceView);
   const [activeSection, setActiveSection] = useState<SettingsSectionId>('terminal');
   const ActiveComponent =
     SECTIONS.find((section) => section.id === activeSection)?.Component ?? TerminalSection;
@@ -65,7 +65,7 @@ export function SettingsView(): React.JSX.Element {
           aria-label="Close settings"
           className="rounded p-1.5 text-muted hover:bg-raised hover:text-foreground"
           onClick={() => {
-            closeSettings();
+            showWorkspaceView();
           }}
           type="button"
         >

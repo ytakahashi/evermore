@@ -1,4 +1,4 @@
-import { Folders, Settings, Zap } from 'lucide-react';
+import { Folders, Settings, Sparkles, Zap } from 'lucide-react';
 import { useUiStore, type SidebarView } from '../../stores/uiStore';
 
 function getButtonClassName(isActive: boolean): string {
@@ -17,9 +17,9 @@ function SidebarViewButton({ label, view, children }: SidebarViewButtonProps): R
   const sidebarView = useUiStore((state) => state.sidebarView);
   const activeView = useUiStore((state) => state.activeView);
   const setSidebarView = useUiStore((state) => state.setSidebarView);
-  // The Workspaces / Connections tabs are "active" only when the workspace pane is showing — when
-  // SettingsView is open we render them as inactive so the user can see at a glance that clicking
-  // either will return them to the workspace context.
+  // The Workspaces / Connections tabs are "active" only when the workspace pane is showing — while
+  // any other view occupies the main area we render them as inactive so the user can see at a
+  // glance that clicking either will return them to the workspace context.
   const isActive = sidebarView === view && activeView === 'workspace';
 
   return (
@@ -39,12 +39,18 @@ function SidebarViewButton({ label, view, children }: SidebarViewButtonProps): R
 
 /**
  * Bottom-navigation strip wired to {@link useUiStore} for switching the sidebar between Workspaces
- * and Connections, and for toggling the SettingsView (Mac standard: clicking the gear opens
- * settings, clicking it again is a no-op so it does not behave differently from Cmd+,).
+ * and Connections, and for opening the main-area views (Agents, Settings).
+ *
+ * The Agents and Settings buttons belong to a different family than the two on the left: they swap
+ * `activeView` rather than `sidebarView`. Both are open-only rather than toggles (Mac standard:
+ * clicking the gear opens settings, clicking it again is a no-op so it does not behave differently
+ * from Cmd+,); the way back is a sidebar view button, Esc, or the shortcut.
  */
 export function SidebarBottomNav(): React.JSX.Element {
   const activeView = useUiStore((state) => state.activeView);
+  const openAgents = useUiStore((state) => state.openAgents);
   const openSettings = useUiStore((state) => state.openSettings);
+  const isAgentsActive = activeView === 'agents';
   const isSettingsActive = activeView === 'settings';
 
   return (
@@ -55,6 +61,17 @@ export function SidebarBottomNav(): React.JSX.Element {
       <SidebarViewButton label="Connections" view="connections">
         <Zap size={18} />
       </SidebarViewButton>
+      <button
+        aria-current={isAgentsActive ? 'page' : undefined}
+        aria-label="Agents"
+        className={getButtonClassName(isAgentsActive)}
+        onClick={() => {
+          openAgents();
+        }}
+        type="button"
+      >
+        <Sparkles size={18} />
+      </button>
       <button
         aria-current={isSettingsActive ? 'page' : undefined}
         aria-label="Settings"

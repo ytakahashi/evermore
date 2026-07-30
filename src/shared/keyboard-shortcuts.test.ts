@@ -23,6 +23,19 @@ describe('keyboard-shortcuts', () => {
     expect(Object.keys(ACTION_LABELS).sort()).toEqual([...ids].sort());
   });
 
+  it('assigns every action a default accelerator that nothing else already claims', () => {
+    // Given: the default accelerators for every Evermore action.
+    const accelerators = Object.values(DEFAULT_KEYBINDINGS);
+
+    // When / Then: no two actions share one, and none collides with a standard macOS role binding.
+    // Either kind of collision silently shadows one of the two bindings at runtime, which is not
+    // visible from reading the table by hand.
+    expect(new Set(accelerators).size).toBe(accelerators.length);
+    for (const accelerator of accelerators) {
+      expect(STANDARD_ROLE_ACCELERATOR_SET.has(accelerator)).toBe(false);
+    }
+  });
+
   it('classifies unknown ids as non-actions', () => {
     expect(isKeyboardShortcutActionId('workspace.newTab')).toBe(true);
     expect(isKeyboardShortcutActionId('workspace.unknown')).toBe(false);

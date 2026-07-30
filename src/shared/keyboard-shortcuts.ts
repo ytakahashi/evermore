@@ -24,7 +24,8 @@ export type KeyboardShortcutActionId =
   | 'pane.toggleFullscreen'
   | 'ui.openTabSearch'
   | 'ui.toggleSidebar'
-  | 'ui.openSettings';
+  | 'ui.openSettings'
+  | 'ui.openAgents';
 
 export const KEYBOARD_SHORTCUT_ACTION_IDS: readonly KeyboardShortcutActionId[] = [
   'workspace.newTab',
@@ -43,6 +44,7 @@ export const KEYBOARD_SHORTCUT_ACTION_IDS: readonly KeyboardShortcutActionId[] =
   'ui.openTabSearch',
   'ui.toggleSidebar',
   'ui.openSettings',
+  'ui.openAgents',
 ] as const;
 
 export const KEYBOARD_SHORTCUT_ACTION_ID_SET: ReadonlySet<KeyboardShortcutActionId> = new Set(
@@ -77,6 +79,7 @@ export const DEFAULT_KEYBINDINGS: Record<KeyboardShortcutActionId, string> = {
   'ui.openTabSearch': 'Command+P',
   'ui.toggleSidebar': 'Command+B',
   'ui.openSettings': 'Command+,',
+  'ui.openAgents': 'Command+Shift+A',
 };
 
 export const ACTION_LABELS: Record<KeyboardShortcutActionId, string> = {
@@ -96,6 +99,7 @@ export const ACTION_LABELS: Record<KeyboardShortcutActionId, string> = {
   'ui.openTabSearch': 'Search Tabs…',
   'ui.toggleSidebar': 'Toggle Sidebar',
   'ui.openSettings': 'Preferences…',
+  'ui.openAgents': 'Agents',
 };
 
 /**

@@ -125,6 +125,19 @@ export interface PaneRuntimeInfo {
   agent?: PaneAgentInfo;
   cwd?: string;
   integration: PaneIntegrationInfo;
+  /**
+   * Most recent prompt the user submitted to the agent currently occupying this pane.
+   *
+   * Deliberately a sibling of `agent` rather than part of `agent.detail`: `formatAgentLabel()`
+   * drops `detail` once the agent is `ready`, but the prompt is most useful exactly then — after a
+   * turn finishes, when the question "what did I ask this session to do?" is the one being asked.
+   *
+   * Only present while the pane's agent matches the agent the prompt was submitted to, so a prompt
+   * never carries over to a different agent or to a later session of the same agent. The main
+   * process holds the prompt slightly longer than it emits it; see `RegisteredPaneProcess` for the
+   * retention rules.
+   */
+  userPrompt?: string;
   /** Unix timestamp in milliseconds for the latest observation. */
   observedAt: number;
 }

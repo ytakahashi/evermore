@@ -133,6 +133,7 @@ export function buildApplicationMenu(
     actionItem('pane.toggleFullscreen', options),
     { type: 'separator' },
     actionItem('ui.toggleSidebar', options),
+    actionItem('ui.openAgents', options),
     { type: 'separator' },
     // Override the localized "Enter/Exit Full Screen" label so the window-level toggle is
     // unambiguously labeled relative to `pane.toggleFullscreen` above. macOS still injects its

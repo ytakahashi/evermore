@@ -33,8 +33,23 @@ export interface EvermoreAgentEvent {
   toolName?: string;
   /** Sidebar-only, machine-generated activity summary (for example `Edit: src/App.tsx`). */
   activityLabel?: string;
+  /**
+   * Body of the prompt the user just submitted. Only prompt-submitting hook events carry this: the
+   * helper script refuses to read a `prompt`-shaped key from any other event so agent-authored text
+   * (subagent instructions, tool arguments) can never be presented as something the user typed.
+   */
+  userPrompt?: string;
   toolInput?: unknown;
 }
+
+/**
+ * `EvermoreAgentEvent.event` value the hook snippets use for prompt submission.
+ *
+ * Shared between the helper script (which only extracts a prompt for this event) and
+ * `PaneInfoTracker` (which only accepts one for this event), so the two ends of the restriction
+ * cannot drift apart.
+ */
+export const AGENT_USER_PROMPT_SUBMIT_EVENT = 'user_prompt_submit';
 
 /**
  * Known sources for cwd-bearing terminal runtime signals.
