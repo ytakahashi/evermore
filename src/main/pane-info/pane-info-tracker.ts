@@ -184,25 +184,6 @@ export class PaneInfoTracker {
   }
 
   /**
-   * Stores the latest command submitted from the terminal input stream for sidebar display.
-   *
-   * This does not claim to identify the currently executing process. It preserves the user's
-   * submitted command line so wrappers and shims (for example `pnpm` resolving to `node .../pnpm`)
-   * do not leak into the sidebar label. More accurate shell-history, completion, and cursor-editing
-   * support is intentionally left to a future shell integration layer such as OSC 133.
-   */
-  public notifyCommand(ptyId: string, command: string): void {
-    const process = this.processes.get(ptyId);
-    const trimmedCommand = command.trim();
-    if (!process || !trimmedCommand) {
-      return;
-    }
-
-    process.fallbackSubmittedCommand = trimmedCommand;
-    this.recomputeInfo(process, { emit: true, observedAt: this.now() });
-  }
-
-  /**
    * Observes renderer-originated input written to a PTY.
    *
    * User input means an explicit approval/input prompt has been answered. The answer may have been
@@ -736,19 +717,13 @@ export class PaneInfoTracker {
       return undefined;
     }
 
+    // A stale integration means the shell lifecycle state the tracker keeps can no longer be
+    // trusted, so the directly observed process table takes over as the primary source.
     if (integrationStale) {
-      return (
-        process.fallbackSubmittedCommand ??
-        process.lastForegroundCommand ??
-        process.shellIntegrationCommandLine
-      );
+      return process.lastForegroundCommand ?? process.shellIntegrationCommandLine;
     }
 
-    return (
-      process.shellIntegrationCommandLine ??
-      process.fallbackSubmittedCommand ??
-      process.lastForegroundCommand
-    );
+    return process.shellIntegrationCommandLine ?? process.lastForegroundCommand;
   }
 
   private upsertInfo(nextInfo: PaneRuntimeInfo, emit: boolean): void {

@@ -110,8 +110,6 @@ const api = {
   },
   paneInfo: {
     list: (): Promise<PaneRuntimeInfo[]> => ipcRenderer.invoke(IPC.PANE_INFO_LIST),
-    notifyCommand: (ptyId: string, command: string): Promise<void> =>
-      ipcRenderer.invoke(IPC.PANE_INFO_NOTIFY_COMMAND, { ptyId, command }),
     onChanged: (cb: (info: PaneRuntimeInfo) => void): (() => void) => {
       const token = Symbol();
       paneInfoChangedSubscribers.set(token, cb);

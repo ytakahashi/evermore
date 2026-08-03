@@ -172,7 +172,6 @@ function TestTerminal({
 
 describe('useTerminal', () => {
   let ptyApi: PtyApiMock;
-  let paneInfoApi: Pick<Window['api']['paneInfo'], 'notifyCommand'>;
   let dataCleanup: Mock<() => void>;
   let exitCleanup: Mock<() => void>;
   let exitListener: ((id: string, code: number) => void) | null;
@@ -229,13 +228,9 @@ describe('useTerminal', () => {
         return exitCleanup;
       }),
     };
-    paneInfoApi = {
-      notifyCommand: vi.fn(() => Promise.resolve()),
-    };
-
     Object.defineProperty(window, 'api', {
       configurable: true,
-      value: { paneInfo: paneInfoApi, pty: ptyApi },
+      value: { pty: ptyApi },
     });
 
     class MockResizeObserver implements ResizeObserver {
@@ -505,41 +500,25 @@ describe('useTerminal', () => {
 
     // Then: the command is injected once for that PTY.
     expect(ptyApi.write).toHaveBeenCalledTimes(1);
-    expect(paneInfoApi.notifyCommand).toHaveBeenCalledWith('pty-1', "ssh 'dev'");
   });
 
-  it('reports the submitted terminal command before writing Enter to the PTY', async () => {
+  it('forwards terminal input to the PTY only', async () => {
     // Given: a terminal pane has an active PTY.
     render(<TestTerminal />);
     await waitFor(() => {
       expect(ptyApi.create).toHaveBeenCalled();
     });
 
-    // When: the user types a command and presses Enter.
+    // When: the user types into the terminal and presses Enter.
     xtermMock.terminalInstances[0]?.emitInput('pnpm run dev');
     xtermMock.terminalInstances[0]?.emitInput('\r');
 
-    // Then: the command text the user submitted is sent to pane info.
-    expect(paneInfoApi.notifyCommand).toHaveBeenCalledWith('pty-1', 'pnpm run dev');
-    expect(ptyApi.write).toHaveBeenCalledWith('pty-1', 'pnpm run dev');
-    expect(ptyApi.write).toHaveBeenCalledWith('pty-1', '\r');
-  });
-
-  it('handles simple command editing before reporting submitted input', async () => {
-    // Given: a terminal pane has an active PTY.
-    render(<TestTerminal />);
-    await waitFor(() => {
-      expect(ptyApi.create).toHaveBeenCalled();
-    });
-
-    // When: the user corrects input with backspace and submits it.
-    xtermMock.terminalInstances[0]?.emitInput('pnpm run deX');
-    xtermMock.terminalInstances[0]?.emitInput('\x7f');
-    xtermMock.terminalInstances[0]?.emitInput('v');
-    xtermMock.terminalInstances[0]?.emitInput('\r');
-
-    // Then: the edited command is reported.
-    expect(paneInfoApi.notifyCommand).toHaveBeenCalledWith('pty-1', 'pnpm run dev');
+    // Then: the input reaches the PTY unchanged and nothing else consumes it. A no-echo prompt is
+    // indistinguishable from a command line here, so keystrokes must not be interpreted or
+    // reported anywhere the UI could display them.
+    expect(ptyApi.write).toHaveBeenCalledTimes(2);
+    expect(ptyApi.write).toHaveBeenNthCalledWith(1, 'pty-1', 'pnpm run dev');
+    expect(ptyApi.write).toHaveBeenNthCalledWith(2, 'pty-1', '\r');
   });
 
   it('does not write the initial command if PTY creation resolves after unmount', async () => {

@@ -30,14 +30,6 @@ export interface Api {
   };
   paneInfo: {
     list: () => Promise<PaneRuntimeInfo[]>;
-    /**
-     * Reports the command text submitted in the terminal UI for display purposes.
-     *
-     * This is intentionally separate from foreground process inspection: `ps` may see resolved
-     * runtime executables such as `node .../pnpm.cjs`, while the sidebar should show the command
-     * the user actually ran, such as `pnpm run dev`.
-     */
-    notifyCommand: (ptyId: string, command: string) => Promise<void>;
     onChanged: (cb: (info: PaneRuntimeInfo) => void) => () => void;
   };
   workspace: {
