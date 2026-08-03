@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, type MutableRefObject } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import { FitAddon } from '@xterm/addon-fit';
 import { Unicode11Addon } from '@xterm/addon-unicode11';
 import { WebLinksAddon } from '@xterm/addon-web-links';
@@ -9,11 +9,6 @@ import { useSettingsStore } from '../../stores/settingsStore';
 import { createTerminalCommandCopyDecoration } from './command-copy-decoration';
 import { TerminalCommandHistory, type TerminalCommandHistoryEntry } from './command-history';
 import { terminalTheme } from './theme';
-
-const BACKSPACE = '\x7f';
-const CTRL_C = '\x03';
-const CTRL_U = '\x15';
-const ENTER = '\r';
 
 export type PtyIdChangeReason = 'created' | 'exit' | 'unmount';
 
@@ -34,9 +29,8 @@ interface UseTerminalResult {
  *
  * The hook owns the renderer-only terminal lifecycle: xterm/addon setup, fit/resize updates,
  * settings application, PTY creation/disposal, PTY data forwarding, focus handling, and optional
- * initial command injection. Pane runtime state itself is owned by the main process. The hook
- * reports the PTY id to the caller and forwards user-submitted command text as a fallback for
- * sidebar display until shell integration sequences cover every pane.
+ * initial command injection. Pane runtime state itself is owned by the main process; the hook only
+ * reports the PTY id to the caller and never interprets the terminal input stream.
  */
 export function useTerminal(options: UseTerminalOptions): UseTerminalResult {
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -45,7 +39,6 @@ export function useTerminal(options: UseTerminalOptions): UseTerminalResult {
   const ptyIdRef = useRef<string | null>(null);
   const initialOptionsRef = useRef(options);
   const initialCommandWrittenPtyIdsRef = useRef(new Set<string>());
-  const pendingCommandRef = useRef('');
   const isActiveRef = useRef(options.isActive ?? false);
   const onPtyIdChangeRef = useRef(options.onPtyIdChange);
   const cursorStyle = useSettingsStore(
@@ -251,19 +244,13 @@ export function useTerminal(options: UseTerminalOptions): UseTerminalResult {
         onPtyIdChangeRef.current?.(null, 'exit');
       }
     });
+    // Keystrokes are forwarded to the PTY and nowhere else. Pane runtime state is derived in the
+    // main process from shell integration sequences and the process table, so no interpretation of
+    // the input stream happens here: a no-echo prompt (sudo, ssh passphrases) is indistinguishable
+    // from a command line at this layer, and treating one as the other put secrets on screen.
     const inputDisposable = terminal.onData((data) => {
       const ptyId = ptyIdRef.current;
       if (ptyId) {
-        // Capture the plain command line submitted by the terminal UI for sidebar display. This is
-        // intentionally lightweight and only tracks ASCII printable input appended at the cursor,
-        // Enter, Backspace, Ctrl-C, and Ctrl-U. Unicode input such as Japanese text and edits made
-        // after cursor movement can drift from the real shell buffer. That limitation is accepted
-        // until a future shell integration layer, such as OSC 133, can report the submitted command
-        // with shell-level accuracy.
-        const submittedCommand = updatePendingCommand(pendingCommandRef, data);
-        if (submittedCommand) {
-          void window.api?.paneInfo?.notifyCommand(ptyId, submittedCommand);
-        }
         void ptyApi.write(ptyId, data);
       }
     });
@@ -293,7 +280,6 @@ export function useTerminal(options: UseTerminalOptions): UseTerminalResult {
         const initialCommand = initialOptions.initialCommand;
         if (initialCommand && !initialCommandWrittenPtyIdsRef.current.has(id)) {
           initialCommandWrittenPtyIdsRef.current.add(id);
-          void window.api?.paneInfo?.notifyCommand(id, initialCommand);
           // Fire-and-forget: IPC failures here surface through subsequent terminal silence;
           // retrying would risk replaying the command twice if the PTY is still alive.
           void ptyApi.write(id, `${initialCommand}\r`);
@@ -350,35 +336,4 @@ export function useTerminal(options: UseTerminalOptions): UseTerminalResult {
   }, [focusIfActive, options.isActive]);
 
   return { containerRef };
-}
-
-function updatePendingCommand(
-  pendingCommandRef: MutableRefObject<string>,
-  data: string,
-): string | null {
-  if (data === ENTER) {
-    const submittedCommand = pendingCommandRef.current.trim();
-    pendingCommandRef.current = '';
-    return submittedCommand || null;
-  }
-
-  if (data === BACKSPACE) {
-    pendingCommandRef.current = pendingCommandRef.current.slice(0, -1);
-    return null;
-  }
-
-  if (data === CTRL_C || data === CTRL_U) {
-    pendingCommandRef.current = '';
-    return null;
-  }
-
-  if (isPrintableInput(data)) {
-    pendingCommandRef.current += data;
-  }
-
-  return null;
-}
-
-function isPrintableInput(data: string): boolean {
-  return /^[\x20-\x7e]+$/.test(data);
 }

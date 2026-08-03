@@ -75,7 +75,6 @@ describe('usePaneInfoBridge', () => {
       value: {
         paneInfo: {
           list: vi.fn(() => listPromise),
-          notifyCommand: vi.fn(() => Promise.resolve()),
           onChanged: vi.fn((cb) => {
             changedCallback = cb;
             return unsubscribeChanged;

@@ -158,11 +158,10 @@ describe('PaneInfoTracker', () => {
     });
   });
 
-  it('prefers the submitted terminal command while a process is running', async () => {
-    // Given: a pane has a user-submitted command before ps observes its child process.
+  it('falls back to the observed process arguments without shell integration', async () => {
+    // Given: a pane without shell integration signals.
     tracker.register('pty-1', 123, '/tmp');
     await new Promise((resolve) => setTimeout(resolve, 0));
-    tracker.notifyCommand('pty-1', 'pnpm run dev');
     onChanged.mockClear();
 
     // When: ps reports the foreground process as the resolved node executable.
@@ -180,12 +179,14 @@ describe('PaneInfoTracker', () => {
     now = 1002;
     await tracker.poll();
 
-    // Then: the sidebar-facing info keeps the command the user actually submitted.
+    // Then: the resolved argv is surfaced as-is. It is more verbose than the command the user
+    // typed, but it is the only observation the tracker can make without shell integration.
     expect(onChanged).toHaveBeenCalledWith({
       info: expectedInfo({
         ptyId: 'pty-1',
         processActivity: 'running',
-        foregroundCommand: 'pnpm run dev',
+        foregroundCommand:
+          'node /Users/tester/.local/share/mise/installs/node/24.11.0/bin/pnpm.cjs run dev',
         observedAt: 1002,
       }),
     });
@@ -772,8 +773,8 @@ describe('PaneInfoTracker', () => {
     expect(tracker.list()[0]?.integration.stale).toBe(false);
   });
 
-  it('swaps foregroundCommand priority between OSC and fallback when integration toggles stale and recovers', async () => {
-    // Given: shell integration is active with both a fallback submitted command and a 633;E line.
+  it('swaps foregroundCommand priority between OSC and ps observation when integration toggles stale and recovers', async () => {
+    // Given: shell integration is active and has reported a 633;E command line.
     tracker.register('pty-1', 123, '/tmp');
     await new Promise((resolve) => setTimeout(resolve, 0));
     rows = [
@@ -795,7 +796,6 @@ describe('PaneInfoTracker', () => {
       source: 'osc633',
     });
     tracker.applySignal('pty-1', { type: 'shell-command-started', source: 'osc133' });
-    tracker.notifyCommand('pty-1', 'pnpm run dev');
 
     // Then (sanity): while integration is fresh, the OSC command line wins.
     expect(tracker.list()[0]?.foregroundCommand).toBe('pnpm dev');
@@ -835,11 +835,11 @@ describe('PaneInfoTracker', () => {
     now = 1006;
     await tracker.poll();
 
-    // Then: integration goes stale and the priority order flips so the user-submitted command
+    // Then: integration goes stale and the priority order flips so the directly observed process
     // wins over the now-suspect OSC command line.
     const staleInfo = tracker.list()[0];
     expect(staleInfo?.integration.stale).toBe(true);
-    expect(staleInfo?.foregroundCommand).toBe('pnpm run dev');
+    expect(staleInfo?.foregroundCommand).toBe('make test');
 
     // When: a fresh shell-command-started signal arrives and resets missedPsCommandStarts.
     now = 1007;

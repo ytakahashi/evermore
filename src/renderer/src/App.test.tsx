@@ -47,7 +47,6 @@ describe('App', () => {
         pty: {},
         paneInfo: {
           list: vi.fn(() => Promise.resolve([])),
-          notifyCommand: vi.fn(() => Promise.resolve()),
           onChanged: vi.fn(() => vi.fn()),
         },
         workspace: {

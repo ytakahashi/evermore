@@ -22,7 +22,6 @@ export interface RegisteredPaneProcess {
   ptyId: string;
   shellPid: number;
   cwd?: string;
-  fallbackSubmittedCommand?: string;
   shellIntegrationCommandLine?: string;
   currentCommand?: PaneCommandInfo;
   lastCommand?: PaneCommandInfo;
