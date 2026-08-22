@@ -181,11 +181,18 @@ describe('MainTerminalArea', () => {
               ...workspace.tabs[0]!,
               layout: {
                 type: 'leaf',
-                paneId: 'pane-2',
+                paneId: 'pane-3',
               },
-              activePaneId: 'pane-2',
+              activePaneId: 'pane-3',
             },
             workspace.tabs[1]!,
+          ],
+          panes: [
+            workspace.panes[1]!,
+            {
+              id: 'pane-3',
+              cwd: '/Users/tester/other',
+            },
           ],
         },
       ],
