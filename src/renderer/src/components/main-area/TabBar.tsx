@@ -9,6 +9,7 @@ import {
 import { Plus, X } from 'lucide-react';
 import { useTabDragStore } from '../../stores/tabDragStore';
 import { selectActiveWorkspace, useWorkspaceStore } from '../../stores/workspaceStore';
+import { requestTabClose } from '../../tab-close/tabClose';
 import { ContextMenu } from '../common/ContextMenu';
 import { hasActionableItem, type ContextMenuItem } from '../common/contextMenuItems';
 import { resolveDropEdge, toReorderIndex, TAB_DND_MIME, type DropEdge } from '../common/tabDnd';
@@ -17,7 +18,6 @@ export function TabBar(): React.JSX.Element {
   const activeWorkspace = useWorkspaceStore(selectActiveWorkspace);
   const workspaces = useWorkspaceStore((state) => state.workspaces);
   const addTab = useWorkspaceStore((state) => state.addTab);
-  const closeTab = useWorkspaceStore((state) => state.closeTab);
   const renameTab = useWorkspaceStore((state) => state.renameTab);
   const selectTab = useWorkspaceStore((state) => state.selectTab);
   const reorderWorkspaceTab = useWorkspaceStore((state) => state.reorderWorkspaceTab);
@@ -284,7 +284,9 @@ export function TabBar(): React.JSX.Element {
                 title={canCloseTabs ? `Close ${tab.name}` : 'At least one tab is required'}
                 type="button"
                 onClick={() => {
-                  closeTab(tab.id);
+                  if (activeWorkspace) {
+                    void requestTabClose(activeWorkspace.id, tab.id);
+                  }
                 }}
               >
                 <X size={13} />

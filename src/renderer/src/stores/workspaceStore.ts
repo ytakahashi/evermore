@@ -1,5 +1,10 @@
 import { create, type StoreApi, type UseBoundStore } from 'zustand';
-import { countPaneLeaves, flattenLayout, type PaneRect } from '../../../shared/pane-layout';
+import {
+  collectPaneIds,
+  countPaneLeaves,
+  flattenLayout,
+  type PaneRect,
+} from '../../../shared/pane-layout';
 import { MAX_SPLIT_RATIO, MIN_SPLIT_RATIO } from '../../../shared/pane-layout-constants';
 import { getPathBasename } from '../../../shared/path-label';
 import type { Pane, PaneLayout, Tab, Workspace } from '../../../shared/types';
@@ -47,7 +52,6 @@ export interface WorkspaceStoreState {
   selectWorkspacePane: (workspaceId: string, tabId: string, paneId: string) => void;
   selectWorkspaceTab: (workspaceId: string, tabId: string) => void;
   selectTab: (tabId: string) => void;
-  closeTab: (tabId: string) => void;
   closeWorkspaceTab: (workspaceId: string, tabId: string) => void;
   /**
    * Reorders a tab within its workspace by moving it to `toIndex` (clamped to the valid range).
@@ -123,12 +127,6 @@ export interface WorkspaceStoreState {
   focusAdjacentPane: (direction: PaneFocusDirection) => void;
   closePane: (paneId: string) => void;
   /**
-   * Closes the active workspace's active tab. No-op when there is no active workspace, no active
-   * tab, or only one tab remains (mirrors {@link closeWorkspaceTab}). Used by the menu-driven
-   * shortcut dispatcher.
-   */
-  closeActiveTab: () => void;
-  /**
    * Closes a pane in response to its PTY exiting. Behaves like {@link closePane} when the tab has
    * more than one pane. When the exiting pane is the last one in its tab, the tab is closed via
    * {@link closeWorkspaceTab}, unless it is the only tab in the workspace — in that case the pane
@@ -180,14 +178,6 @@ function replaceWorkspace(workspaces: Workspace[], workspace: Workspace): Worksp
 
 function createId(): string {
   return globalThis.crypto.randomUUID();
-}
-
-function collectPaneIds(layout: PaneLayout): string[] {
-  if (layout.type === 'leaf') {
-    return [layout.paneId];
-  }
-
-  return [...collectPaneIds(layout.children[0]), ...collectPaneIds(layout.children[1])];
 }
 
 function stripRuntimePaneFieldsForWorkspaceUpdate(pane: Pane): Pane {
@@ -928,14 +918,6 @@ export function createWorkspaceStore(
 
         get().selectWorkspaceTab(workspace.id, tabId);
       },
-      closeTab: (tabId: string): void => {
-        const workspace = selectActiveWorkspace(get());
-        if (!workspace) {
-          return;
-        }
-
-        get().closeWorkspaceTab(workspace.id, tabId);
-      },
       closeWorkspaceTab: (workspaceId: string, tabId: string): void => {
         const workspace = get().workspaces.find(
           (currentWorkspace) => currentWorkspace.id === workspaceId,
@@ -1284,14 +1266,6 @@ export function createWorkspaceStore(
         }
 
         get().setActivePane(targetPaneId);
-      },
-      closeActiveTab: (): void => {
-        const workspace = selectActiveWorkspace(get());
-        if (!workspace || !workspace.activeTabId) {
-          return;
-        }
-
-        get().closeWorkspaceTab(workspace.id, workspace.activeTabId);
       },
       splitPane: (paneId: string, direction: SplitDirection): void => {
         const workspace = selectActiveWorkspace(get());

@@ -1,6 +1,7 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Workspace } from '../../../../shared/types';
+import { usePaneInfoStore } from '../../stores/paneInfoStore';
 import { useTabDragStore } from '../../stores/tabDragStore';
 import { useWorkspaceStore } from '../../stores/workspaceStore';
 import { TAB_DND_MIME } from '../common/tabDnd';
@@ -56,14 +57,17 @@ const workspace: Workspace = {
 };
 
 describe('TabBar', () => {
+  let confirmCloseTab: ReturnType<typeof vi.fn<() => Promise<boolean>>>;
   let workspaceUpdate: ReturnType<typeof vi.fn<() => Promise<void>>>;
 
   beforeEach(() => {
     vi.useFakeTimers();
+    confirmCloseTab = vi.fn(() => Promise.resolve(false));
     workspaceUpdate = vi.fn(() => Promise.resolve());
     Object.defineProperty(window, 'api', {
       configurable: true,
       value: {
+        window: { confirmCloseTab },
         workspace: {
           update: workspaceUpdate,
           setActiveWorkspaceId: vi.fn(() => Promise.resolve()),
@@ -76,6 +80,7 @@ describe('TabBar', () => {
       isLoading: false,
       error: null,
     });
+    usePaneInfoStore.setState({ infosByPtyId: {}, isLoading: false, error: null });
   });
 
   afterEach(() => {
@@ -85,6 +90,7 @@ describe('TabBar', () => {
       isLoading: false,
       error: null,
     });
+    usePaneInfoStore.setState({ infosByPtyId: {}, isLoading: false, error: null });
     useTabDragStore.getState().end();
     Reflect.deleteProperty(window, 'api');
     vi.useRealTimers();
@@ -173,6 +179,41 @@ describe('TabBar', () => {
     expect(screen.queryByRole('button', { name: 'build' })).not.toBeInTheDocument();
     expect(useWorkspaceStore.getState().workspaces[0]?.activeTabId).toBe('tab-1');
     expect(screen.getByRole('button', { name: 'Close zsh' })).toBeDisabled();
+  });
+
+  it('requests native confirmation before closing a tab with a running process', async () => {
+    // Given: the second tab owns a PTY currently reported as running.
+    useWorkspaceStore.setState({
+      workspaces: [
+        {
+          ...twoTabWorkspace,
+          panes: twoTabWorkspace.panes.map((pane) =>
+            pane.id === 'pane-2' ? { ...pane, ptyId: 'pty-2' } : pane,
+          ),
+        },
+      ],
+    });
+    usePaneInfoStore.setState({
+      infosByPtyId: {
+        'pty-2': {
+          ptyId: 'pty-2',
+          processActivity: 'running',
+          foregroundSession: { kind: 'other' },
+          integration: { shell: false, protocols: [], lastSequenceAt: 0, stale: false },
+          observedAt: 1,
+        },
+      },
+    });
+    render(<TabBar />);
+
+    // When: the running tab's close button is clicked and the dialog cancels.
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Close build' }));
+    });
+
+    // Then: the native requester receives activity context and the tab remains open.
+    expect(confirmCloseTab).toHaveBeenCalledWith({ runningProcesses: true });
+    expect(useWorkspaceStore.getState().workspaces[0]?.tabs).toHaveLength(2);
   });
 
   it('renames a tab with Enter and persists the new name', async () => {

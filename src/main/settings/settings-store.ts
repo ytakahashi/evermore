@@ -4,7 +4,7 @@ import Store from 'electron-store';
 import type { SettingsUpdate } from '../../shared/api-types';
 import { isKeyboardShortcutActionId } from '../../shared/keyboard-shortcuts';
 import { cloneDefaultSettings, DEFAULT_APP_SETTINGS } from '../../shared/settings-defaults';
-import type { AppSettings, FontWeight } from '../../shared/types';
+import type { AppSettings, ConfirmMode, FontWeight } from '../../shared/types';
 import { createSilentLogger, type Logger } from '../logging/logger';
 import type { PersistedSettings, SettingsStorageAdapter, SettingsStoreOptions } from './types';
 
@@ -50,10 +50,8 @@ class ElectronSettingsStorageAdapter implements SettingsStorageAdapter {
 }
 
 type CursorStyle = AppSettings['terminal']['cursorStyle'];
-type QuitConfirm = AppSettings['app']['quitConfirm'];
-
 const CURSOR_STYLES: readonly CursorStyle[] = ['block', 'bar', 'underline'];
-const QUIT_CONFIRM_VALUES: readonly QuitConfirm[] = ['always', 'never', 'running-only'];
+const CONFIRM_MODE_VALUES: readonly ConfirmMode[] = ['always', 'never', 'running-only'];
 export const MAX_SETTINGS_STRING_LENGTH = 4_096;
 export const MAX_ACCELERATOR_LENGTH = 1_024;
 
@@ -65,8 +63,8 @@ function pickCursorStyle(value: unknown, fallback: CursorStyle): CursorStyle {
   return CURSOR_STYLES.includes(value as CursorStyle) ? (value as CursorStyle) : fallback;
 }
 
-function pickQuitConfirm(value: unknown, fallback: QuitConfirm): QuitConfirm {
-  return QUIT_CONFIRM_VALUES.includes(value as QuitConfirm) ? (value as QuitConfirm) : fallback;
+function pickConfirmMode(value: unknown, fallback: ConfirmMode): ConfirmMode {
+  return CONFIRM_MODE_VALUES.includes(value as ConfirmMode) ? (value as ConfirmMode) : fallback;
 }
 
 function pickBoolean(value: unknown, fallback: boolean): boolean {
@@ -228,7 +226,8 @@ function readCurrentSettings(raw: unknown): AppSettings {
       },
     },
     app: {
-      quitConfirm: pickQuitConfirm(appRaw.quitConfirm, defaults.app.quitConfirm),
+      quitConfirm: pickConfirmMode(appRaw.quitConfirm, defaults.app.quitConfirm),
+      tabCloseConfirm: pickConfirmMode(appRaw.tabCloseConfirm, defaults.app.tabCloseConfirm),
     },
     shellIntegration: {
       autoInject: pickBoolean(shellIntegrationRaw.autoInject, defaults.shellIntegration.autoInject),

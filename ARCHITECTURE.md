@@ -244,6 +244,10 @@ The renderer is a single React 19 app rendered into `#root` by `main.tsx` with `
 - **Workspace persistence is debounced** in the renderer (`workspaceStore`) and flushed via
   `getWorkspaceApi().update(workspace)`. Layout / cwd updates set the workspace dirty and share one
   timer; any structural mutation is a flush point.
+- **User-initiated tab closes go through `tab-close/tabClose.ts`.** The requester combines the
+  latest workspace layout, pane-runtime mirror, and confirmation setting before it calls the
+  workspace store's close primitive. Automatic closes caused by PTY exit deliberately bypass the
+  requester because the process has already stopped and there is nothing left to confirm.
 
 ## IPC Boundary Contract
 
@@ -258,6 +262,9 @@ The IPC surface is the most important boundary in the app and follows a strict s
   which always return an unsubscribe function.
 - Payloads are objects, not positional arguments, so handlers can accept additions without breaking
   older callers (e.g. `{ id, data }` instead of `(id, data)`).
+- Native confirmation dialogs use purpose-built IPC methods whose payloads contain only validated
+  state needed to select main-owned copy. Renderer-provided strings must not flow into native dialog
+  titles, messages, or details.
 - The `Api` type in `shared/api-types.ts` and the `satisfies Api` annotation in
   `src/preload/index.ts` keep the renderer-visible surface in sync with the preload implementation.
   Adding a new IPC method requires touching all three layers (channel name → handler → preload → Api

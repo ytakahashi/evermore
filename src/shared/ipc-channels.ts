@@ -43,6 +43,7 @@ export const IPC = {
 
   // Window
   WINDOW_IS_FULLSCREEN: 'window:is-fullscreen',
+  WINDOW_CONFIRM_CLOSE_TAB: 'window:confirm-close-tab',
   WINDOW_FULLSCREEN_CHANGED: 'window:fullscreen-changed', // main -> renderer
 
   // Shortcuts (main -> renderer: dispatched from the application menu)

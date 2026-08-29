@@ -977,7 +977,7 @@ describe('workspaceStore', () => {
     useStore.getState().addTab();
 
     // When: the active tab is closed.
-    useStore.getState().closeTab('tab-2');
+    useStore.getState().closeWorkspaceTab('workspace-1', 'tab-2');
 
     // Then: the previous tab becomes active and the closed tab's pane is removed.
     let updatedWorkspace = selectActiveWorkspace(useStore.getState());
@@ -987,7 +987,7 @@ describe('workspaceStore', () => {
     expect(updatedWorkspace?.panes.map((pane) => pane.id)).toEqual(['workspace-1-pane-1']);
 
     // When: callers try to close the only remaining tab.
-    useStore.getState().closeTab('workspace-1-tab-1');
+    useStore.getState().closeWorkspaceTab('workspace-1', 'workspace-1-tab-1');
 
     // Then: the store keeps one tab available.
     updatedWorkspace = selectActiveWorkspace(useStore.getState());
@@ -1029,7 +1029,7 @@ describe('workspaceStore', () => {
     await useStore.getState().loadWorkspaces();
 
     // When: the inactive tab is closed.
-    useStore.getState().closeTab('tab-2');
+    useStore.getState().closeWorkspaceTab('workspace-1', 'tab-2');
 
     // Then: the original active tab remains active while the inactive pane is removed.
     const updatedWorkspace = selectActiveWorkspace(useStore.getState());
@@ -2033,60 +2033,6 @@ describe('workspaceStore', () => {
           { type: 'leaf', paneId: 'pane-2' },
         ],
       });
-    });
-
-    it('closeActiveTab is a no-op when only one tab remains', async () => {
-      // Given: the default single-tab workspace.
-      const useStore = createWorkspaceStore({ workspaceApi });
-      await useStore.getState().loadWorkspaces();
-      const beforeTabCount = selectActiveWorkspace(useStore.getState())?.tabs.length ?? 0;
-
-      // When: shortcut-dispatched close-tab fires.
-      useStore.getState().closeActiveTab();
-
-      // Then: the workspace keeps its tab.
-      expect(selectActiveWorkspace(useStore.getState())?.tabs.length).toBe(beforeTabCount);
-    });
-
-    it('closeActiveTab closes the active tab when more than one exists', async () => {
-      // Given: a two-tab workspace with the second tab active.
-      const twoTabWorkspace: Workspace = {
-        ...workspace,
-        tabs: [
-          {
-            id: 'tab-a',
-            name: 'a',
-            isCustomName: false,
-            layout: { type: 'leaf', paneId: 'pane-a' },
-            activePaneId: 'pane-a',
-          },
-          {
-            id: 'tab-b',
-            name: 'b',
-            isCustomName: false,
-            layout: { type: 'leaf', paneId: 'pane-b' },
-            activePaneId: 'pane-b',
-          },
-        ],
-        panes: [
-          { id: 'pane-a', cwd: '/a' },
-          { id: 'pane-b', cwd: '/b' },
-        ],
-        activeTabId: 'tab-b',
-      };
-      workspaceApi.list = vi.fn(() =>
-        Promise.resolve({ workspaces: [twoTabWorkspace], activeWorkspaceId: 'workspace-1' }),
-      );
-      const useStore = createWorkspaceStore({ workspaceApi });
-      await useStore.getState().loadWorkspaces();
-
-      // When: shortcut-dispatched close-tab fires.
-      useStore.getState().closeActiveTab();
-
-      // Then: only tab-a remains, and the active tab id falls back to it.
-      const updated = selectActiveWorkspace(useStore.getState());
-      expect(updated?.tabs.map((tab) => tab.id)).toEqual(['tab-a']);
-      expect(updated?.activeTabId).toBe('tab-a');
     });
 
     it('focusAdjacentPane moves to the directly adjacent pane after a vertical split', async () => {

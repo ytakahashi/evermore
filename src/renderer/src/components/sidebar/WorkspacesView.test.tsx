@@ -154,18 +154,21 @@ const newWorkspace: Workspace = {
 };
 
 describe('WorkspacesView', () => {
+  let confirmCloseTab: ReturnType<typeof vi.fn<() => Promise<boolean>>>;
   let workspaceCreate: ReturnType<typeof vi.fn<() => Promise<Workspace>>>;
   let workspaceDelete: ReturnType<typeof vi.fn<() => Promise<void>>>;
   let workspaceUpdate: ReturnType<typeof vi.fn<() => Promise<void>>>;
 
   beforeEach(() => {
     vi.useFakeTimers();
+    confirmCloseTab = vi.fn(() => Promise.resolve(false));
     workspaceCreate = vi.fn(() => Promise.resolve(newWorkspace));
     workspaceDelete = vi.fn(() => Promise.resolve());
     workspaceUpdate = vi.fn(() => Promise.resolve());
     Object.defineProperty(window, 'api', {
       configurable: true,
       value: {
+        window: { confirmCloseTab },
         workspace: {
           create: workspaceCreate,
           delete: workspaceDelete,
@@ -872,6 +875,34 @@ describe('WorkspacesView', () => {
         tabs: [expect.objectContaining({ id: 'workspace-2-tab-1' })],
       }),
     );
+  });
+
+  it('requests native confirmation for a running tab closed from the sidebar', async () => {
+    // Given: the server tab owns a PTY whose foreground process is running.
+    usePaneInfoStore.setState({
+      infosByPtyId: {
+        'pty-server': {
+          ptyId: 'pty-server',
+          processActivity: 'running',
+          foregroundSession: { kind: 'other' },
+          integration: { shell: false, protocols: [], lastSequenceAt: 0, stale: false },
+          observedAt: 1,
+        },
+      },
+    });
+    render(<WorkspacesView />);
+
+    // When: the server tab's sidebar close action is cancelled in the native dialog.
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Close server' }));
+    });
+
+    // Then: the requester receives running-process context and preserves the tab.
+    expect(confirmCloseTab).toHaveBeenCalledWith({ runningProcesses: true });
+    expect(
+      useWorkspaceStore.getState().workspaces.find((workspace) => workspace.id === 'workspace-2')
+        ?.tabs,
+    ).toHaveLength(2);
   });
 
   it('creates a workspace from the inline input and calls the API', async () => {
