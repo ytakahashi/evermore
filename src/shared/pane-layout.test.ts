@@ -1,6 +1,35 @@
 import { describe, expect, it } from 'vitest';
 import type { PaneLayout } from './types';
-import { countPaneLeaves, flattenLayout } from './pane-layout';
+import { collectPaneIds, countPaneLeaves, flattenLayout } from './pane-layout';
+
+describe('collectPaneIds', () => {
+  it('returns pane ids in depth-first layout order', () => {
+    // Given: a nested layout with leaves at different depths.
+    const layout: PaneLayout = {
+      type: 'split',
+      direction: 'vertical',
+      ratio: 0.5,
+      children: [
+        { type: 'leaf', paneId: 'pane-1' },
+        {
+          type: 'split',
+          direction: 'horizontal',
+          ratio: 0.5,
+          children: [
+            { type: 'leaf', paneId: 'pane-2' },
+            { type: 'leaf', paneId: 'pane-3' },
+          ],
+        },
+      ],
+    };
+
+    // When: pane ids are collected.
+    const paneIds = collectPaneIds(layout);
+
+    // Then: every leaf appears once in tree order.
+    expect(paneIds).toEqual(['pane-1', 'pane-2', 'pane-3']);
+  });
+});
 
 describe('countPaneLeaves', () => {
   it('counts a single leaf layout as one pane', () => {

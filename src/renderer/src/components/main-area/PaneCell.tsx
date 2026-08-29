@@ -189,6 +189,12 @@ export function PaneCell({
             >
               <Rows2 size={13} />
             </button>
+            {/*
+              Manual pane closes deliberately bypass tab-close confirmation. This control is
+              available only when another pane remains in the tab. PTY-exit cleanup uses
+              `closePaneOnExit` separately, after the process has already terminated and there is
+              nothing left to confirm.
+            */}
             <button
               aria-label="Close pane"
               className="flex size-6 items-center justify-center rounded text-subtle hover:bg-raised hover:text-foreground disabled:cursor-default disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-subtle"

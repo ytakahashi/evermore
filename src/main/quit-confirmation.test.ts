@@ -56,7 +56,10 @@ describe('QuitConfirmationController', () => {
   let preventDefault: ReturnType<typeof vi.fn<() => void>>;
 
   beforeEach(() => {
-    settings = { ...DEFAULT_APP_SETTINGS, app: { quitConfirm: 'running-only' } };
+    settings = {
+      ...DEFAULT_APP_SETTINGS,
+      app: { ...DEFAULT_APP_SETTINGS.app, quitConfirm: 'running-only' },
+    };
     panes = [runningPane];
     cleanup = vi.fn();
     hasActiveTunnelForQuitConfirm = vi.fn(() => false);
@@ -79,7 +82,7 @@ describe('QuitConfirmationController', () => {
 
   it('allows quit immediately when no confirmation is needed', () => {
     // Given: quit confirmation is disabled.
-    settings = { ...settings, app: { quitConfirm: 'never' } };
+    settings = { ...settings, app: { ...settings.app, quitConfirm: 'never' } };
     const controller = createController();
 
     // When: Electron emits before-quit.
@@ -164,7 +167,7 @@ describe('QuitConfirmationController', () => {
 
   it('uses generic dialog copy in always mode', async () => {
     // Given: always mode prompts even when no pane or tunnel is active.
-    settings = { ...settings, app: { quitConfirm: 'always' } };
+    settings = { ...settings, app: { ...settings.app, quitConfirm: 'always' } };
     panes = [idlePane];
     hasActiveTunnelForQuitConfirm = vi.fn(() => false);
     const listPaneInfo = vi.fn(() => panes);

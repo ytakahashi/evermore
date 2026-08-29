@@ -12,6 +12,17 @@ export function countPaneLeaves(layout: PaneLayout): number {
 }
 
 /**
+ * Returns pane ids in depth-first layout order.
+ */
+export function collectPaneIds(layout: PaneLayout): string[] {
+  if (layout.type === 'leaf') {
+    return [layout.paneId];
+  }
+
+  return [...collectPaneIds(layout.children[0]), ...collectPaneIds(layout.children[1])];
+}
+
+/**
  * Absolute placement (in container percentage units) of a single terminal pane leaf.
  */
 export interface PaneRect {

@@ -63,6 +63,22 @@ describe('SettingsStore', () => {
     expect(storage.payload).toEqual({ terminal: { cursorStyle: 'underline' } });
   });
 
+  it('normalizes and sparsely persists the tab-close confirmation mode', () => {
+    // Given: the default tab-close policy asks only for running processes.
+    expect(store.get().app.tabCloseConfirm).toBe('running-only');
+
+    // When: the renderer changes the policy and storage is later hand-edited with an invalid value.
+    const updated = store.update({ app: { tabCloseConfirm: 'always' } });
+    expect(updated.app.tabCloseConfirm).toBe('always');
+    expect(storage.payload).toEqual({ app: { tabCloseConfirm: 'always' } });
+    storage.payload = { app: { tabCloseConfirm: 'sometimes' } };
+    const reloaded = store.reload();
+
+    // Then: invalid persisted values fall back to the default and disappear from sparse storage.
+    expect(reloaded.app.tabCloseConfirm).toBe('running-only');
+    expect(storage.payload).toEqual({});
+  });
+
   it('normalizes invalid update values and keeps the file empty when no field actually changed', () => {
     // Given: a malformed value reaches the store through an IPC boundary or future UI bug.
 

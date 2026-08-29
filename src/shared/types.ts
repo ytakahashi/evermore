@@ -176,6 +176,8 @@ export interface ForwardEntry {
 
 export type FontWeight = '100' | '200' | '300' | '400' | '500' | '600' | '700' | '800' | '900';
 
+export type ConfirmMode = 'always' | 'never' | 'running-only';
+
 /**
  * Application-wide user preferences persisted by the main process.
  *
@@ -227,7 +229,9 @@ export interface AppSettings {
     keybindings: Record<string, string>;
   };
   app: {
-    quitConfirm: 'always' | 'never' | 'running-only';
+    quitConfirm: ConfirmMode;
+    /** Confirmation policy for user-initiated tab closes. */
+    tabCloseConfirm: ConfirmMode;
   };
   shellIntegration: {
     /**

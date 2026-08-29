@@ -1,7 +1,12 @@
 import { useEffect } from 'react';
 import type { KeyboardShortcutActionId } from '../../../shared/keyboard-shortcuts';
 import { useUiStore } from '../stores/uiStore';
-import { selectActivePane, useWorkspaceStore } from '../stores/workspaceStore';
+import { requestTabClose } from '../tab-close/tabClose';
+import {
+  selectActivePane,
+  selectActiveWorkspace,
+  useWorkspaceStore,
+} from '../stores/workspaceStore';
 
 /**
  * Subscribes to shortcut invocations dispatched from the main-process application menu and
@@ -42,10 +47,13 @@ function handleShortcut(actionId: KeyboardShortcutActionId): void {
       if (!isWorkspaceView) return;
       workspace.addTab();
       return;
-    case 'workspace.closeTab':
+    case 'workspace.closeTab': {
       if (!isWorkspaceView) return;
-      workspace.closeActiveTab();
+      const activeWorkspace = selectActiveWorkspace(workspace);
+      if (!activeWorkspace?.activeTabId) return;
+      void requestTabClose(activeWorkspace.id, activeWorkspace.activeTabId);
       return;
+    }
     case 'workspace.nextTab':
       if (!isWorkspaceView) return;
       workspace.selectAdjacentTab('next');

@@ -181,7 +181,7 @@ describe('createSettingsStore', () => {
     });
     state.current = {
       ...state.current,
-      app: { quitConfirm: 'never' },
+      app: { ...state.current.app, quitConfirm: 'never' },
     };
 
     // When: the user reloads from disk before the debounce flushes.

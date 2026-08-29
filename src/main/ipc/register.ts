@@ -1,4 +1,11 @@
-import { app, Menu, shell, type BrowserWindow, type MenuItemConstructorOptions } from 'electron';
+import {
+  app,
+  dialog,
+  Menu,
+  shell,
+  type BrowserWindow,
+  type MenuItemConstructorOptions,
+} from 'electron';
 import { IPC } from '../../shared/ipc-channels';
 import type { AppSettings } from '../../shared/types';
 import { HotkeyManager } from '../hotkey/hotkey-manager';
@@ -195,6 +202,7 @@ export function registerIpcHandlers(options: RegisterIpcHandlersOptions): Regist
   });
   const disposeWindowHandlers = registerWindowHandlers({
     getWindow: options.getWindow,
+    showMessageBox: (window, dialogOptions) => dialog.showMessageBox(window, dialogOptions),
   });
 
   return {

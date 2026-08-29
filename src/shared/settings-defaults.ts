@@ -16,6 +16,8 @@ import type { AppSettings } from './types';
  *    section ships.
  *  - `app.quitConfirm` of `'running-only'` asks only when terminal activity or an SSH tunnel is
  *    active, matching the Application section copy.
+ *  - `app.tabCloseConfirm` of `'running-only'` asks only when the tab owns a running terminal
+ *    process.
  */
 export const DEFAULT_APP_SETTINGS: AppSettings = {
   terminal: {
@@ -38,6 +40,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   },
   app: {
     quitConfirm: 'running-only',
+    tabCloseConfirm: 'running-only',
   },
   shellIntegration: {
     autoInject: true,

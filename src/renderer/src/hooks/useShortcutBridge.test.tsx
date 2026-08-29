@@ -59,6 +59,57 @@ describe('useShortcutBridge', () => {
     useWorkspaceStore.setState({ addTab: previousAddTab });
   });
 
+  it('routes workspace.closeTab through the active workspace tab requester', () => {
+    // Given: an active workspace with two idle tabs and an observable close primitive.
+    const closeWorkspaceTab = vi.fn();
+    const previousState = useWorkspaceStore.getState();
+    const workspace: Workspace = {
+      id: 'workspace-close',
+      name: 'Close',
+      rootPath: '/tmp',
+      tabs: [
+        {
+          id: 'tab-active',
+          name: 'active',
+          isCustomName: false,
+          layout: { type: 'leaf', paneId: 'pane-active' },
+          activePaneId: 'pane-active',
+        },
+        {
+          id: 'tab-other',
+          name: 'other',
+          isCustomName: false,
+          layout: { type: 'leaf', paneId: 'pane-other' },
+          activePaneId: 'pane-other',
+        },
+      ],
+      panes: [
+        { id: 'pane-active', cwd: '/tmp' },
+        { id: 'pane-other', cwd: '/tmp' },
+      ],
+      activeTabId: 'tab-active',
+      createdAt: 1,
+      updatedAt: 1,
+    };
+    useWorkspaceStore.setState({
+      workspaces: [workspace],
+      activeWorkspaceId: workspace.id,
+      closeWorkspaceTab,
+    });
+    render(<TestBridge />);
+
+    // When: the menu dispatches Cmd+W's action.
+    emit('workspace.closeTab');
+
+    // Then: the requester resolves and closes the active tab through the primitive.
+    expect(closeWorkspaceTab).toHaveBeenCalledWith('workspace-close', 'tab-active');
+    useWorkspaceStore.setState({
+      workspaces: previousState.workspaces,
+      activeWorkspaceId: previousState.activeWorkspaceId,
+      closeWorkspaceTab: previousState.closeWorkspaceTab,
+    });
+  });
+
   it('toggles the sidebar even while the Settings view is active', () => {
     // Given: the Settings view is open and the sidebar is currently open.
     useUiStore.setState({ activeView: 'settings', sidebarOpen: true });

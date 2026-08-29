@@ -76,6 +76,8 @@ export interface Api {
   };
   window: {
     isFullScreen: () => Promise<boolean>;
+    /** Shows the native tab-close sheet and resolves to whether the user confirmed the close. */
+    confirmCloseTab: (payload: { runningProcesses: boolean }) => Promise<boolean>;
     onFullScreenChanged: (cb: (isFullScreen: boolean) => void) => () => void;
   };
   shortcuts: {

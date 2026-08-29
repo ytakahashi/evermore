@@ -16,6 +16,7 @@ import { usePaneInfoStore } from '../../stores/paneInfoStore';
 import { useTabDragStore, type TabDragDescriptor } from '../../stores/tabDragStore';
 import { useUiStore } from '../../stores/uiStore';
 import { useWorkspaceStore } from '../../stores/workspaceStore';
+import { requestTabClose } from '../../tab-close/tabClose';
 import { ContextMenu } from '../common/ContextMenu';
 import { hasActionableItem, type ContextMenuItem } from '../common/contextMenuItems';
 import { getPaneRunningIndicator } from '../common/pane-running-indicator';
@@ -192,7 +193,6 @@ export function WorkspacesView(): React.JSX.Element {
   const paneInfosByPtyId = usePaneInfoStore((state) => state.infosByPtyId);
   const activeWorkspaceId = useWorkspaceStore((state) => state.activeWorkspaceId);
   const addWorkspaceTab = useWorkspaceStore((state) => state.addWorkspaceTab);
-  const closeWorkspaceTab = useWorkspaceStore((state) => state.closeWorkspaceTab);
   const createWorkspace = useWorkspaceStore((state) => state.createWorkspace);
   const deleteWorkspace = useWorkspaceStore((state) => state.deleteWorkspace);
   const renameWorkspace = useWorkspaceStore((state) => state.renameWorkspace);
@@ -1075,9 +1075,8 @@ export function WorkspacesView(): React.JSX.Element {
                             <button
                               aria-label={`Close ${tab.name}`}
                               className="invisible flex size-5 shrink-0 items-center justify-center rounded text-subtle hover:bg-raised hover:text-danger disabled:cursor-default disabled:opacity-40 group-hover:visible"
-                              // `closeWorkspaceTab` is the single source of truth for the
-                              // "at least one tab" invariant; this disabled guard is a UI hint to
-                              // avoid showing a clickable button that would silently no-op.
+                              // The requester and store primitive both enforce the "at least one
+                              // tab" invariant; this guard keeps the disabled state visible in UI.
                               disabled={workspace.tabs.length <= 1 || isEditingTab}
                               title={
                                 workspace.tabs.length > 1
@@ -1086,7 +1085,7 @@ export function WorkspacesView(): React.JSX.Element {
                               }
                               type="button"
                               onClick={() => {
-                                closeWorkspaceTab(workspace.id, tab.id);
+                                void requestTabClose(workspace.id, tab.id);
                               }}
                             >
                               <X size={12} />
