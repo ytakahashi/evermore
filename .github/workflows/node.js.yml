@@ -3,7 +3,7 @@ name: Node.js CI
 on:
   push:
     branches:
-      - "main"
+      - 'main'
   pull_request:
 
 jobs:
@@ -77,8 +77,3 @@ jobs:
           pty_node=dist/mac-arm64/Evermore.app/Contents/Resources/app.asar.unpacked/node_modules/node-pty/build/Release/pty.node
           test -f "$pty_node"
           file "$pty_node"
-      - uses: actions/upload-artifact@v7
-        with:
-          name: Evermore-mac-unsigned
-          path: dist/mac-arm64/Evermore.app
-          retention-days: 7
