@@ -1,6 +1,3 @@
-# This workflow will do a clean installation of node dependencies, cache/restore them, build the source code and run tests across different versions of node
-# For more information see: https://docs.github.com/en/actions/automating-builds-and-tests/building-and-testing-nodejs
-
 name: Node.js CI
 
 on:
@@ -9,23 +6,78 @@ on:
       - '**'
 
 jobs:
-  build:
+  # OS-independent static checks run once.
+  check:
     runs-on: ubuntu-latest
 
-    strategy:
-      matrix:
-        node-version:
-          - 24.x
-          # See supported Node.js release schedule at https://nodejs.org/en/about/releases/
-
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - uses: pnpm/action-setup@v6
-      - run: pnpm install
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24.x
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
 
       - run: pnpm run format
       - run: pnpm run lint
       - run: pnpm run typecheck
+
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - macos-latest
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24.x
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
       - run: pnpm run test
+        env:
+          # macOS runners ship zsh and jq, so e2e suites must fail rather than silently skip there.
+          EVERMORE_REQUIRE_E2E: ${{ runner.os == 'macOS' && '1' || '' }}
       - run: pnpm run build
+
+  package-mac:
+    needs: test
+    runs-on: macos-latest
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24.x
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      # Unsigned --dir build: verifies electron-builder packaging and native module (node-pty)
+      # bundling without signing / notarization secrets.
+      - run: pnpm run build:mac:dev
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      # node-pty must be unpacked from asar (asarUnpack in electron-builder.yml) or PTY creation
+      # fails at runtime even though packaging succeeds.
+      - name: Verify node-pty native module is unpacked
+        run: |
+          pty_node=dist/mac-arm64/Evermore.app/Contents/Resources/app.asar.unpacked/node_modules/node-pty/build/Release/pty.node
+          test -f "$pty_node"
+          file "$pty_node"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: Evermore-mac-unsigned
+          path: dist/mac-arm64/Evermore.app
+          retention-days: 7

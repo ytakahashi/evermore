@@ -23,9 +23,10 @@ import { PaneInfoTracker } from '../../src/main/pane-info/pane-info-tracker';
 import { TerminalSignalParser } from '../../src/main/pty/terminal-signal-parser';
 import type { PaneRuntimeSignal } from '../../src/shared/pane-runtime-signal';
 import { EVERMORE_ZSH_SHELL_INTEGRATION_SNIPPET } from '../../src/shared/shell-integration/zsh-snippet';
+import { resolveHostDependency } from './host-dependency';
 
 const ZSH_PATH = '/bin/zsh';
-const hasZsh = existsSync(ZSH_PATH);
+const hasZsh = resolveHostDependency('zsh', existsSync(ZSH_PATH));
 
 /** Per-command timeout. Real zsh -i -d startup takes <100ms locally; 5s is a generous ceiling. */
 const PROMPT_TIMEOUT_MS = 5000;

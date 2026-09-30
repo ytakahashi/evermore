@@ -313,8 +313,10 @@ registers DOM matchers and React Testing Library cleanup lives in `tests/setup.t
 - **End-to-end tests** depend on a runtime external dependency (real subprocess such as zsh / ssh,
   real network socket, etc.). They live in `tests/e2e/` and use `describe.skipIf(...)` to skip when
   that dependency is unavailable on the current host (for example, `existsSync('/bin/zsh')` is
-  false). CI does not install these dependencies, so the affected suites skip there; developers must
-  run `pnpm test` on a host that satisfies the dependency when changing covered code.
+  false). Probe results go through `resolveHostDependency` (`tests/e2e/host-dependency.ts`), which
+  throws instead of skipping when `EVERMORE_REQUIRE_E2E=1`. CI sets it on the macOS runner, which
+  ships every current dependency, so the e2e tier cannot silently become a no-op there; other
+  runners may still skip suites.
 
 ### Invariants
 
