@@ -268,4 +268,53 @@ describe('QuitConfirmationController', () => {
     controller.handleBeforeQuit({ preventDefault });
     expect(showMessageBox).toHaveBeenCalledTimes(2);
   });
+
+  describe('isQuitting', () => {
+    it('is false before any quit attempt', () => {
+      // Given/When: a freshly created controller.
+      const controller = createController();
+
+      // Then: window closes are not treated as part of a quit.
+      expect(controller.isQuitting()).toBe(false);
+    });
+
+    it('becomes true when before-quit is allowed without a prompt', () => {
+      // Given: no confirmation is required.
+      settings = { ...settings, app: { ...settings.app, quitConfirm: 'never' } };
+      const controller = createController();
+
+      // When: Electron emits before-quit.
+      controller.handleBeforeQuit({ preventDefault });
+
+      // Then: the quit is committed before Electron starts closing windows.
+      expect(controller.isQuitting()).toBe(true);
+    });
+
+    it('stays false while the prompt is open and after it is cancelled', async () => {
+      // Given: confirmation is required and the user will choose Cancel.
+      const controller = createController();
+
+      // When: Electron emits before-quit and the prompt resolves.
+      controller.handleBeforeQuit({ preventDefault });
+      expect(controller.isQuitting()).toBe(false);
+      await Promise.resolve();
+
+      // Then: a cancelled quit keeps intercepting window closes.
+      expect(controller.isQuitting()).toBe(false);
+    });
+
+    it('becomes true on the before-quit re-emitted after confirmation', async () => {
+      // Given: the user accepts the confirmation prompt.
+      showMessageBox = vi.fn(() => Promise.resolve({ response: 0 }));
+      const controller = createController();
+      controller.handleBeforeQuit({ preventDefault });
+      await Promise.resolve();
+
+      // When: Electron emits the second before-quit produced by app.quit().
+      controller.handleBeforeQuit({ preventDefault });
+
+      // Then: the quit is committed.
+      expect(controller.isQuitting()).toBe(true);
+    });
+  });
 });

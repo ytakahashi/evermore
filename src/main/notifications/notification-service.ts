@@ -15,6 +15,7 @@ const DEFAULT_COOLDOWN_MS = 10_000;
  */
 export class NotificationService {
   private readonly getWindow: () => Electron.BrowserWindow | null;
+  private readonly onWindowReveal: (() => void) | undefined;
   private readonly isSupported: () => boolean;
   private readonly createNotification: (
     options: NotificationConstructorOptions,
@@ -28,6 +29,7 @@ export class NotificationService {
 
   public constructor(options: NotificationServiceOptions) {
     this.getWindow = options.getWindow;
+    this.onWindowReveal = options.onWindowReveal;
     this.isSupported = options.isSupported ?? (() => Notification.isSupported());
     this.createNotification =
       options.createNotification ??
@@ -112,6 +114,7 @@ export class NotificationService {
     if (window.isMinimized()) {
       window.restore();
     }
+    this.onWindowReveal?.();
     window.show();
     window.focus();
   }

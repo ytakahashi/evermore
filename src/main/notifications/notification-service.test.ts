@@ -97,6 +97,7 @@ function setupService(
     cooldownMs?: number;
     window?: FakeWindow | null;
     logger?: ReturnType<typeof createLogger>;
+    onWindowReveal?: () => void;
   } = {},
 ): ServiceHarness {
   const nowValues = options.nowValues ?? [0];
@@ -111,6 +112,7 @@ function setupService(
   const window = options.window === undefined ? createFakeWindow() : options.window;
   const service = new NotificationService({
     getWindow: () => (window as unknown as BrowserWindow) ?? null,
+    onWindowReveal: options.onWindowReveal,
     isSupported: options.isSupported ?? ((): boolean => true),
     createNotification: (notificationOptions) => {
       const fake = createFakeNotification(notificationOptions);
@@ -266,6 +268,23 @@ describe('NotificationService', () => {
     // Then: the window is restored before being focused.
     expect(minimizedWindow.restore).toHaveBeenCalledOnce();
     expect(minimizedWindow.focus).toHaveBeenCalledOnce();
+  });
+
+  it('cancels a pending fullscreen hide before showing a clicked notification window', () => {
+    // Given: a notification and a window reveal callback.
+    const onWindowReveal = vi.fn();
+    const window = createFakeWindow();
+    const { service, created } = setupService({ window, onWindowReveal });
+    service.show(payload({ id: 'pane:1' }));
+
+    // When: the user clicks the notification.
+    created[0]?.emit('click');
+
+    // Then: the deferred hide is cancelled before the window is shown.
+    expect(onWindowReveal).toHaveBeenCalledOnce();
+    expect(onWindowReveal.mock.invocationCallOrder[0]).toBeLessThan(
+      window.show.mock.invocationCallOrder[0] ?? Infinity,
+    );
   });
 
   it('does not call focus when the window has been destroyed', () => {

@@ -2,6 +2,7 @@ import { globalShortcut, type BrowserWindow } from 'electron';
 
 interface HotkeyManagerOptions {
   getWindow: () => BrowserWindow | null;
+  onWindowReveal?: () => void;
   register?: (accelerator: string, callback: () => void) => boolean;
   unregister?: (accelerator: string) => void;
 }
@@ -11,12 +12,14 @@ interface HotkeyManagerOptions {
  */
 export class HotkeyManager {
   private readonly getWindow: () => BrowserWindow | null;
+  private readonly onWindowReveal: (() => void) | undefined;
   private readonly registerShortcut: (accelerator: string, callback: () => void) => boolean;
   private readonly unregisterShortcut: (accelerator: string) => void;
   private currentAccelerator: string | null = null;
 
   public constructor(options: HotkeyManagerOptions) {
     this.getWindow = options.getWindow;
+    this.onWindowReveal = options.onWindowReveal;
     this.registerShortcut = options.register ?? globalShortcut.register.bind(globalShortcut);
     this.unregisterShortcut = options.unregister ?? globalShortcut.unregister.bind(globalShortcut);
   }
@@ -82,6 +85,7 @@ export class HotkeyManager {
     if (window.isMinimized()) {
       window.restore();
     }
+    this.onWindowReveal?.();
     window.show();
     window.focus();
   }

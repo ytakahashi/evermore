@@ -15,12 +15,14 @@ import {
   openSafeExternalUrl,
   registerSecurityHandlers,
 } from './web-contents-security';
+import { attachHideOnClose, type HideOnCloseHandle } from './window-close-behavior';
 import { createMainWindowOptions } from './window-options';
 import { attachWindowShortcuts } from './window-shortcuts';
 
 const _filename = fileURLToPath(import.meta.url);
 const _dirname = dirname(_filename);
 let mainWindow: BrowserWindow | null = null;
+let mainWindowHideOnClose: HideOnCloseHandle | null = null;
 let ipcRuntime: RegisteredIpcHandlers | null = null;
 let settingsStore: SettingsStore | null = null;
 let quitConfirmationController: QuitConfirmationController | null = null;
@@ -63,7 +65,20 @@ function createWindow(): void {
 
   window.on('closed', () => {
     mainWindow = null;
+    mainWindowHideOnClose = null;
   });
+
+  // macOS keeps the app running without windows, so a closed window would later be recreated on
+  // reopen and spawn a second set of PTYs while the first set stays orphaned in main. Hide instead
+  // and let only a committed quit close the window. Other platforms quit on `window-all-closed`
+  // and have no Dock icon to reopen a hidden window from, so they keep the default close.
+  if (process.platform === 'darwin') {
+    mainWindowHideOnClose = attachHideOnClose(window, {
+      // The controller is created before the first window, so `null` only occurs if that order
+      // changes; allowing the close then is safer than trapping the window open.
+      isQuitting: () => quitConfirmationController?.isQuitting() ?? true,
+    });
+  }
 
   window.webContents.setWindowOpenHandler((details) => {
     openSafeExternalUrl(details.url);
@@ -115,6 +130,7 @@ app.whenReady().then(() => {
   settingsStore = new SettingsStore({ logger: rootLogger.child('settings') });
   ipcRuntime = registerIpcHandlers({
     getWindow: () => mainWindow,
+    onWindowReveal: () => mainWindowHideOnClose?.cancelPendingHide(),
     settingsStore,
     isDev: is.dev,
     logger: rootLogger,
@@ -131,7 +147,9 @@ app.whenReady().then(() => {
       app.quit();
     },
     showMessageBox: (window, options: MessageBoxOptions) => {
-      if (window && !window.isDestroyed()) {
+      // A sheet attached to a hidden window is invisible, which would leave Cmd+Q stuck behind an
+      // unanswerable prompt. Fall back to an app-modal dialog whenever the window is not shown.
+      if (window && !window.isDestroyed() && window.isVisible()) {
         return dialog.showMessageBox(window, options);
       }
 
@@ -142,8 +160,11 @@ app.whenReady().then(() => {
   createWindow();
 
   app.on('activate', function () {
-    // On macOS it's common to re-create a window in the app when the
-    // dock icon is clicked and there are no other windows open.
+    // Clicking the Dock icon reveals the window hidden by `attachHideOnClose`. Recreating is only
+    // a fallback for platforms or states where no window exists at all.
+    if (mainWindowHideOnClose?.revealIfHidden()) {
+      return;
+    }
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
 });

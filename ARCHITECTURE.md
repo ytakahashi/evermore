@@ -151,6 +151,11 @@ handler that bridges it to the renderer.
 - **PTY callbacks can outlive a `BrowserWindow`.** Every IPC handler that forwards an event to the
   renderer first checks `!window.isDestroyed()` and silently drops late events. Crashing the app on
   a stale callback is unacceptable.
+- **On macOS, closing the main window hides it instead of destroying it.** The renderer owns the
+  pane ↔ PTY mapping, so destroying it without a React unmount would orphan every PTY in main, and a
+  window recreated on reopen would spawn a second set. Only a quit that `QuitConfirmationController`
+  has let through (`isQuitting()`) closes the window; Dock reopen reveals the hidden window instead
+  of recreating it.
 - **Manager constructors take callbacks and a clock/spawn factory** so unit tests can inject fakes
   (`spawn`, `now`, `getHomeDirectory`, storage adapter, etc.) and must not require a real Electron
   window, real PTY, or real filesystem.
