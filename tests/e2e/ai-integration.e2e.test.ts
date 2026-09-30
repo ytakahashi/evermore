@@ -11,8 +11,12 @@ import {
   AGENT_USER_PROMPT_HOOK_MAX_CHARS,
   OSC_777_PAYLOAD_MAX_BYTES,
 } from '../../src/shared/pane-integration-constants';
+import { resolveHostDependency } from './host-dependency';
 
-const hasJq = spawnSync('jq', ['--version'], { encoding: 'utf8' }).status === 0;
+const hasJq = resolveHostDependency(
+  'jq',
+  spawnSync('jq', ['--version'], { encoding: 'utf8' }).status === 0,
+);
 const OSC_777_PREFIX = '\x1b]777;evermore;';
 
 describe('Evermore AI integration helper script', () => {
