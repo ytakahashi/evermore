@@ -3,7 +3,8 @@ name: Node.js CI
 on:
   push:
     branches:
-      - '**'
+      - "main"
+  pull_request:
 
 jobs:
   # OS-independent static checks run once.
