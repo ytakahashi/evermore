@@ -17,12 +17,14 @@ describe('HotkeyManager', () => {
     // Given: global shortcut registration succeeds.
     const window = createWindow();
     const callbacks: Array<() => void> = [];
+    const onWindowReveal = vi.fn();
     const register = vi.fn((_accelerator: string, nextCallback: () => void) => {
       callbacks.push(nextCallback);
       return true;
     });
     const manager = new HotkeyManager({
       getWindow: () => window,
+      onWindowReveal,
       register,
       unregister: vi.fn(),
     });
@@ -35,6 +37,10 @@ describe('HotkeyManager', () => {
     expect(accepted).toBe('Command+Shift+,');
     expect(window.show).toHaveBeenCalledOnce();
     expect(window.focus).toHaveBeenCalledOnce();
+    expect(onWindowReveal).toHaveBeenCalledOnce();
+    expect(onWindowReveal.mock.invocationCallOrder[0]).toBeLessThan(
+      (window.show as ReturnType<typeof vi.fn>).mock.invocationCallOrder[0] ?? Infinity,
+    );
   });
 
   it('keeps the previous accelerator when the requested one fails to register', () => {

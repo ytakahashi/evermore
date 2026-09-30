@@ -23,6 +23,8 @@ export interface NotificationLike {
 export interface NotificationServiceOptions {
   /** Returns the current `BrowserWindow`. Used by the click handler to focus the app. */
   getWindow: () => BrowserWindow | null;
+  /** Called before focusing the window so a pending fullscreen close cannot hide it afterward. */
+  onWindowReveal?: () => void;
   /** Returns whether the host can display notifications. Defaults to Electron `Notification.isSupported()`. */
   isSupported?: () => boolean;
   /**

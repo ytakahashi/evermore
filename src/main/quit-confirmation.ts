@@ -91,6 +91,7 @@ export class QuitConfirmationController {
   ) => Promise<{ response: number }>;
   private confirmedQuit = false;
   private promptOpen = false;
+  private quitting = false;
 
   public constructor(options: QuitConfirmationControllerOptions) {
     this.cleanup = options.cleanup;
@@ -103,11 +104,21 @@ export class QuitConfirmationController {
   }
 
   /**
+   * Returns whether a `before-quit` has been allowed to continue.
+   *
+   * Electron emits `before-quit` before it starts closing windows, so window `close` handlers can
+   * consult this to let a committed quit through instead of intercepting it.
+   */
+  public isQuitting(): boolean {
+    return this.quitting;
+  }
+
+  /**
    * Handles Electron's `before-quit` event. Cleanup runs only once the quit is allowed to continue.
    */
   public handleBeforeQuit(event: BeforeQuitEvent): void {
     if (this.confirmedQuit) {
-      this.cleanup();
+      this.allowQuit();
       return;
     }
 
@@ -122,14 +133,14 @@ export class QuitConfirmationController {
     if (settings.app.quitConfirm === 'always') {
       dialogOptions = createGenericDialogOptions();
     } else if (settings.app.quitConfirm === 'never') {
-      this.cleanup();
+      this.allowQuit();
       return;
     } else {
       const paneInfo = this.listPaneInfo();
       const tunnelActiveForQuit = this.hasActiveTunnelForQuitConfirm();
 
       if (!isRunningOnlyConditionMet(paneInfo, tunnelActiveForQuit)) {
-        this.cleanup();
+        this.allowQuit();
         return;
       }
 
@@ -153,5 +164,10 @@ export class QuitConfirmationController {
         // Treat dialog failures as a cancelled quit so the next before-quit can retry the prompt.
         this.promptOpen = false;
       });
+  }
+
+  private allowQuit(): void {
+    this.quitting = true;
+    this.cleanup();
   }
 }

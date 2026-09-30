@@ -31,6 +31,8 @@ import { SshHostResolver } from '../ssh-config/host-resolver';
 
 interface RegisterIpcHandlersOptions {
   getWindow: () => BrowserWindow | null;
+  /** Clears a deferred hide when an app action brings the window back to the foreground. */
+  onWindowReveal?: () => void;
   settingsStore?: SettingsStore;
   /**
    * Optional override for the shell-integration injector. Production constructs one rooted at
@@ -79,9 +81,13 @@ export function registerIpcHandlers(options: RegisterIpcHandlersOptions): Regist
       initialAutoInject: settingsStore.get().shellIntegration.autoInject,
       logger: logger.child('shell-integration'),
     });
-  const hotkeyManager = new HotkeyManager({ getWindow: options.getWindow });
+  const hotkeyManager = new HotkeyManager({
+    getWindow: options.getWindow,
+    onWindowReveal: options.onWindowReveal,
+  });
   const notificationService = new NotificationService({
     getWindow: options.getWindow,
+    onWindowReveal: options.onWindowReveal,
     logger: logger.child('notifications'),
   });
   const aiAgentNotifier = new AiAgentNotifier({
