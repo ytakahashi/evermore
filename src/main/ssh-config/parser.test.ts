@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vite-plus/test';
 import { parseSshConfig } from './parser';
 import type { IncludedSshConfig, SshConfigIncludeContext } from './types';
 

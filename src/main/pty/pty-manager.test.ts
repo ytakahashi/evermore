@@ -1,5 +1,5 @@
-import type { IPty, IPtyForkOptions, IDisposable } from 'node-pty';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { IPty, IPtyForkOptions } from 'node-pty';
+import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vite-plus/test';
 import { createLogger, type LogRecord, type LogTransport } from '../logging/logger';
 import type { ShellIntegrationInjector } from '../shell-integration/injector';
 import { PtyManager } from './pty-manager';
@@ -13,19 +13,24 @@ import type {
   PtySpawn,
 } from './types';
 
+// Asserted members are redeclared as `Mock` properties: `IPty` declares them as methods, and
+// `typescript/unbound-method` rejects passing a method reference to `expect`.
 interface FakePty extends IPty {
+  write: Mock<IPty['write']>;
+  resize: Mock<IPty['resize']>;
+  kill: Mock<IPty['kill']>;
   emitData: (data: string) => void;
   emitExit: (exitCode: number) => void;
-  dataDisposable: IDisposable;
-  exitDisposable: IDisposable;
+  dataDisposable: { dispose: Mock<() => void> };
+  exitDisposable: { dispose: Mock<() => void> };
 }
 
 function createFakePty(): FakePty {
   let dataListener: ((data: string) => void) | null = null;
   let exitListener: ((event: { exitCode: number }) => void) | null = null;
 
-  const dataDisposable = { dispose: vi.fn() };
-  const exitDisposable = { dispose: vi.fn() };
+  const dataDisposable = { dispose: vi.fn<() => void>() };
+  const exitDisposable = { dispose: vi.fn<() => void>() };
 
   return {
     pid: 1234,
@@ -43,10 +48,10 @@ function createFakePty(): FakePty {
       exitListener = listener;
       return exitDisposable;
     }),
-    resize: vi.fn(),
+    resize: vi.fn<IPty['resize']>(),
     clear: vi.fn(),
-    write: vi.fn(),
-    kill: vi.fn(),
+    write: vi.fn<IPty['write']>(),
+    kill: vi.fn<IPty['kill']>(),
     pause: vi.fn(),
     resume: vi.fn(),
     emitData: (data: string) => {

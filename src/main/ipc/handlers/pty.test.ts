@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vite-plus/test';
 import { IPC } from '../../../shared/ipc-channels';
 import type { PtyManager } from '../../pty/pty-manager';
 import type { PtyCreateOptions } from '../../pty/types';

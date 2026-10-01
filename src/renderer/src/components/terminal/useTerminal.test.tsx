@@ -1,6 +1,6 @@
 import { render, waitFor } from '@testing-library/react';
-import type { Mock } from 'vitest';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { Mock } from 'vite-plus/test';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
 import type { PtyCreateRequest } from '../../../../shared/api-types';
 import { DEFAULT_APP_SETTINGS } from '../../../../shared/settings-defaults';
 import type { AppSettings } from '../../../../shared/types';
@@ -691,7 +691,7 @@ describe('useTerminal', () => {
     });
 
     // When: fonts become ready.
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    // oxlint-disable-next-line @typescript-eslint/no-explicit-any
     (document.fonts as any)._resolve();
 
     // Then: fit is called a 3rd time.
@@ -712,7 +712,7 @@ describe('useTerminal', () => {
     unmount();
 
     // When: fonts finally become ready.
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    // oxlint-disable-next-line @typescript-eslint/no-explicit-any
     (document.fonts as any)._resolve();
 
     // Then: no further fit calls are made (stale closure guard).

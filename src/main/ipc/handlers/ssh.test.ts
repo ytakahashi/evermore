@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vite-plus/test';
 import { IPC } from '../../../shared/ipc-channels';
 import type { SSHHost } from '../../../shared/types';
 import { MAX_ALIAS_LENGTH } from '../validation';

@@ -1,5 +1,5 @@
 import type { BrowserWindow, NotificationConstructorOptions } from 'electron';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vite-plus/test';
 import type { NotificationPayload } from '../../shared/notifications';
 import { createLogger, type LogRecord, type LogTransport } from '../logging/logger';
 import { NotificationService } from './notification-service';
@@ -48,7 +48,7 @@ function createFakeNotification(options: NotificationConstructorOptions): FakeNo
       return instance as unknown as NotificationLike;
     },
     emit(event: FakeNotificationEvent): void {
-      for (const listener of [...listeners[event]]) {
+      for (const listener of Array.from(listeners[event])) {
         listener();
       }
     },

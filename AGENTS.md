@@ -46,8 +46,8 @@ ones no tool checks.
 After completing any code implementation task, ensure the following all pass:
 
 ```bash
-pnpm run format    # Prettier check passes
-pnpm run lint      # ESLint check passes
+pnpm run format    # Oxfmt check passes
+pnpm run lint      # Oxlint check passes
 pnpm run typecheck # TypeScript type checks pass
 pnpm run test      # All test cases pass
 pnpm run build     # Production build succeeds

@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vite-plus/test';
 import type { PaneLayout, PaneRuntimeInfo, Workspace } from '../../../../shared/types';
 import { collectAgentSessions } from './agent-sessions';
 

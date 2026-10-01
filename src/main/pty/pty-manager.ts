@@ -72,7 +72,7 @@ export class PtyManager {
       env: {
         ...buildPtyProcessEnv(process.env, {
           ...paneEnv,
-          ...(shellIntegrationExtras ?? {}),
+          ...shellIntegrationExtras,
         }),
         EVERMORE_PTY_ID: id,
         ...(options.paneId ? { EVERMORE_PANE_ID: options.paneId } : {}),
@@ -153,7 +153,8 @@ export class PtyManager {
    * Disposes all active PTYs during app shutdown or IPC teardown.
    */
   public disposeAll(): void {
-    for (const id of [...this.ptys.keys()]) {
+    // Snapshot the ids: `dispose` removes each record from the map being iterated.
+    for (const id of Array.from(this.ptys.keys())) {
       this.dispose(id);
     }
   }

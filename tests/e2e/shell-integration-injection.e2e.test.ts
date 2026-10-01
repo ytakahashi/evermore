@@ -19,7 +19,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import * as nodePty from 'node-pty';
 import type { IPty } from 'node-pty';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vite-plus/test';
 
 import { TerminalSignalParser } from '../../src/main/pty/terminal-signal-parser';
 import { ShellIntegrationInjector } from '../../src/main/shell-integration/injector';

@@ -1,5 +1,5 @@
 import type { IDecoration, IDisposable, IMarker, Terminal } from '@xterm/xterm';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vite-plus/test';
 import { createTerminalOutputFingerprint } from './command-output';
 import { createTerminalCommandCopyDecoration } from './command-copy-decoration';
 import type { TerminalCommandHistoryEntry } from './command-history';
@@ -25,7 +25,8 @@ class MockMarker implements IMarker {
     }
     this.isDisposed = true;
     this.line = -1;
-    for (const listener of [...this.listeners]) {
+    // Snapshot: listeners may unsubscribe themselves while being notified.
+    for (const listener of Array.from(this.listeners)) {
       listener();
     }
   }
@@ -63,7 +64,7 @@ class MockDecoration implements IDecoration {
 
   public render(element: HTMLElement): void {
     this.element = element;
-    for (const listener of [...this.renderListeners]) {
+    for (const listener of Array.from(this.renderListeners)) {
       listener(element);
     }
   }
@@ -73,7 +74,7 @@ class MockDecoration implements IDecoration {
       return;
     }
     this.isDisposed = true;
-    for (const listener of [...this.disposeListeners]) {
+    for (const listener of Array.from(this.disposeListeners)) {
       listener();
     }
   }
@@ -449,8 +450,9 @@ describe('createTerminalCommandCopyDecoration', () => {
     });
     const button = renderButton(fixture.decoration);
     button.click();
-    await vi.runAllTicks();
-    expect(vi.getTimerCount()).toBe(1);
+    await vi.waitFor(() => {
+      expect(vi.getTimerCount()).toBe(1);
+    });
 
     // When: the owning history entry disposes the decoration twice.
     disposable?.dispose();

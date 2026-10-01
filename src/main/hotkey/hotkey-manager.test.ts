@@ -1,21 +1,30 @@
 import type { BrowserWindow } from 'electron';
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi, type Mock } from 'vite-plus/test';
 import { HotkeyManager } from './hotkey-manager';
 
-function createWindow(): BrowserWindow {
-  return {
-    focus: vi.fn(),
+// The mocks are returned alongside the window so assertions reference them directly rather than
+// through `BrowserWindow` methods, which `typescript/unbound-method` rejects.
+function createWindow(): {
+  window: BrowserWindow;
+  show: Mock<() => void>;
+  focus: Mock<() => void>;
+} {
+  const show = vi.fn<() => void>();
+  const focus = vi.fn<() => void>();
+  const window = {
+    focus,
     isDestroyed: vi.fn(() => false),
     isMinimized: vi.fn(() => false),
     restore: vi.fn(),
-    show: vi.fn(),
+    show,
   } as unknown as BrowserWindow;
+  return { window, show, focus };
 }
 
 describe('HotkeyManager', () => {
   it('registers a hotkey and focuses the current window when invoked', () => {
     // Given: global shortcut registration succeeds.
-    const window = createWindow();
+    const { window, show, focus } = createWindow();
     const callbacks: Array<() => void> = [];
     const onWindowReveal = vi.fn();
     const register = vi.fn((_accelerator: string, nextCallback: () => void) => {
@@ -35,11 +44,11 @@ describe('HotkeyManager', () => {
 
     // Then: the accelerator is accepted and the window is brought forward.
     expect(accepted).toBe('Command+Shift+,');
-    expect(window.show).toHaveBeenCalledOnce();
-    expect(window.focus).toHaveBeenCalledOnce();
+    expect(show).toHaveBeenCalledOnce();
+    expect(focus).toHaveBeenCalledOnce();
     expect(onWindowReveal).toHaveBeenCalledOnce();
     expect(onWindowReveal.mock.invocationCallOrder[0]).toBeLessThan(
-      (window.show as ReturnType<typeof vi.fn>).mock.invocationCallOrder[0] ?? Infinity,
+      show.mock.invocationCallOrder[0] ?? Infinity,
     );
   });
 

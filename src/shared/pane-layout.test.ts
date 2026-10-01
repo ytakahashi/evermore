@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vite-plus/test';
 import type { PaneLayout } from './types';
 import { collectPaneIds, countPaneLeaves, flattenLayout } from './pane-layout';
 

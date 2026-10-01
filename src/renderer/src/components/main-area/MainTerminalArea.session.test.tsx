@@ -1,6 +1,6 @@
 import { act, render, screen } from '@testing-library/react';
 import { useEffect } from 'react';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
 import type { Tab, Workspace } from '../../../../shared/types';
 import { useUiStore } from '../../stores/uiStore';
 import { useWorkspaceStore, type WorkspaceStoreState } from '../../stores/workspaceStore';

@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vite-plus/test';
 import { DEFAULT_APP_SETTINGS } from '../../shared/settings-defaults';
 import type { NotificationPayload } from '../../shared/notifications';
 import type { AppSettings, PaneRuntimeInfo } from '../../shared/types';

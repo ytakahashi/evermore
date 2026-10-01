@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi, type Mock } from 'vite-plus/test';
 import type { Workspace } from '../../shared/types';
 import type { Logger } from '../logging/logger';
 import { WorkspaceStore } from './workspace-store';
@@ -367,7 +367,11 @@ describe('WorkspaceStore', () => {
       return { store: seededStore, storage: seededStorage };
     }
 
-    function createTestLogger(): Logger {
+    // Mapped to `Mock` properties so assertions can pass `logger.warn` to `expect` without tripping
+    // `typescript/unbound-method` on `Logger`'s method signatures.
+    type TestLogger = { [K in keyof Logger]: Mock<Logger[K]> };
+
+    function createTestLogger(): TestLogger {
       return {
         debug: vi.fn(),
         info: vi.fn(),

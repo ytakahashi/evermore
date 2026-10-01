@@ -1,4 +1,4 @@
-import { expect, vi } from 'vitest';
+import { expect, vi } from 'vite-plus/test';
 
 export type IpcInvokeHandler = (event: unknown, payload?: unknown) => unknown;
 

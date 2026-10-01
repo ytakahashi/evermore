@@ -1,5 +1,5 @@
 import type { BrowserWindow } from 'electron';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vite-plus/test';
 import { IPC } from '../../shared/ipc-channels';
 import type { PaneRuntimeSignal } from '../../shared/pane-runtime-signal';
 import { DEFAULT_APP_SETTINGS } from '../../shared/settings-defaults';

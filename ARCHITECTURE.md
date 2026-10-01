@@ -70,8 +70,9 @@ These arrows are the whole contract: the three process-side layers may depend on
 `shared/` depends on nothing, and the two hops between processes happen at runtime rather than
 through imports.
 
-`eslint.config.mjs` is the executable form of this graph and the source of truth for its details —
-which external packages and runtime globals each layer may use. `pnpm run lint` rejects a violation,
+The `lint` block in `vite.config.ts` is the executable form of this graph and the source of truth
+for its details — which external packages and runtime globals each layer may use. Oxlint runs
+`eslint-plugin-boundaries` as a JS plugin for the import graph. `pnpm run lint` rejects a violation,
 and `tests/integration/architecture-rules.test.ts` guards the rules themselves.
 
 The renderer never has a static `import` from `preload/` — the only renderer-side reference is the
@@ -290,11 +291,12 @@ The IPC surface is the most important boundary in the app and follows a strict s
 
 ## Testing
 
-Tests are organized in three tiers by subject scope. The runner is Vitest (config in
-`vitest.config.ts`). The default environment is `jsdom` for `src/main/**`, `src/renderer/src/**`,
-`src/shared/**`, and `tests/**` tests; individual test files can opt into the Node environment when
-they need real Node-only APIs (for example the e2e suite that drives `node-pty`). Shared setup that
-registers DOM matchers and React Testing Library cleanup lives in `tests/setup.ts`.
+Tests are organized in three tiers by subject scope. The runner is Vitest through Vite+ (`vp test`,
+configured by the `test` block in `vite.config.ts`). The default environment is `jsdom` for
+`src/main/**`, `src/renderer/src/**`, `src/shared/**`, and `tests/**` tests; individual test files
+can opt into the Node environment when they need real Node-only APIs (for example the e2e suite that
+drives `node-pty`). Shared setup that registers DOM matchers and React Testing Library cleanup lives
+in `tests/setup.ts`.
 
 ### Tier policy
 
@@ -307,7 +309,7 @@ registers DOM matchers and React Testing Library cleanup lives in `tests/setup.t
   external process, no network, no host-dependent filesystem reads beyond temp dirs or checked-in
   fixtures). They live in `tests/integration/` so cross-module wiring is visible and is not mistaken
   for a unit test of either side. Tests that assert on the repository's own configuration — for
-  example running the real ESLint config over fixtures to prove the architecture rules still reject
+  example running the real lint config over fixtures to prove the architecture rules still reject
   what they claim to — belong in this tier too: they combine real, checked-in inputs and depend on
   no module in isolation.
 - **End-to-end tests** depend on a runtime external dependency (real subprocess such as zsh / ssh,

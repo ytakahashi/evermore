@@ -1,5 +1,5 @@
 import type { BrowserWindow, MessageBoxOptions } from 'electron';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vite-plus/test';
 import { DEFAULT_APP_SETTINGS } from '../shared/settings-defaults';
 import type { AppSettings, PaneRuntimeInfo } from '../shared/types';
 import { isRunningOnlyConditionMet, QuitConfirmationController } from './quit-confirmation';

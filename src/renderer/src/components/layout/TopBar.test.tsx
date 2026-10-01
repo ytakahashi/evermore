@@ -1,5 +1,5 @@
 import { act, fireEvent, render, screen } from '@testing-library/react';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vite-plus/test';
 import type { Workspace } from '../../../../shared/types';
 import { useTunnelsStore } from '../../stores/tunnelsStore';
 import { SIDEBAR_DEFAULT_WIDTH, useUiStore } from '../../stores/uiStore';

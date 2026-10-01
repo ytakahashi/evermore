@@ -3,11 +3,11 @@ const TRUNCATION_MARKER = '…';
 
 // Matches CSI/OSC/SS2/SS3 and bare ESC sequences. Covers the common ANSI color / cursor-move
 // sequences as well as terminal-specific escape sequences agents may leak into their messages.
-const ANSI_ESCAPE = /\x1B(?:\[[0-9;?]*[ -/]*[@-~]|\][^\x07]*(?:\x07|\x1B\\)|[NOPX^_])/g; // eslint-disable-line no-control-regex
+const ANSI_ESCAPE = /\x1B(?:\[[0-9;?]*[ -/]*[@-~]|\][^\x07]*(?:\x07|\x1B\\)|[NOPX^_])/g; // oxlint-disable-line no-control-regex
 // Control characters except for \n, \r, \t. \r is normalized to \n before either collapse
 // strategy runs; what becomes of \t and \n after that is the caller's decision, since the two
 // exported functions differ precisely in whether a line break survives.
-const NON_WHITESPACE_CONTROL_CHARS = /[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g; // eslint-disable-line no-control-regex
+const NON_WHITESPACE_CONTROL_CHARS = /[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g; // oxlint-disable-line no-control-regex
 
 /**
  * Normalizes agent-provided text (hook `message`/`activityLabel`/`toolName` fields) for safe
