@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vite-plus/test';
 import type { SSHHost } from '../../../../shared/types';
 import { useConnectionsStore } from '../../stores/connectionsStore';
 import { useSshResolutionsStore } from '../../stores/sshResolutionsStore';

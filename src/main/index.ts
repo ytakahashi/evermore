@@ -90,17 +90,19 @@ function createWindow(): void {
 
   // HMR for renderer base on electron-vite cli.
   // Load the remote URL for development or the local html file for production.
+  // Fire-and-forget: load failures surface through `webContents` events, and nothing here depends on
+  // the page having finished loading.
   if (devRendererUrl) {
-    window.loadURL(devRendererUrl);
+    void window.loadURL(devRendererUrl);
   } else {
-    window.loadFile(join(_dirname, '../renderer/index.html'));
+    void window.loadFile(join(_dirname, '../renderer/index.html'));
   }
 }
 
 // This method will be called when Electron has finished
 // initialization and is ready to create browser windows.
 // Some APIs can only be used after this event occurs.
-app.whenReady().then(() => {
+void app.whenReady().then(() => {
   // Set app user model id for windows
   electronApp.setAppUserModelId('net.ytakahashi.evermore');
 

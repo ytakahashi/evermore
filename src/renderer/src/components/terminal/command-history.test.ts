@@ -1,5 +1,5 @@
 import type { IBuffer, IBufferLine, IDisposable, IMarker, Terminal } from '@xterm/xterm';
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vite-plus/test';
 import { encodeOsc633CommandLine } from '../../../../shared/shell-integration/osc633-encode';
 import { TerminalCommandHistory, type TerminalCommandHistoryEntry } from './command-history';
 
@@ -33,7 +33,8 @@ class MockMarker implements IMarker {
     }
     this.isDisposed = true;
     this.line = -1;
-    for (const listener of [...this.disposeListeners]) {
+    // Snapshot: listeners may unsubscribe themselves while being notified.
+    for (const listener of Array.from(this.disposeListeners)) {
       listener();
     }
   }

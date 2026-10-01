@@ -1,5 +1,5 @@
 import type { MenuItemConstructorOptions } from 'electron';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
 import { IPC } from '../../shared/ipc-channels';
 import { DEFAULT_KEYBINDINGS } from '../../shared/keyboard-shortcuts';
 import { SettingsStore } from '../settings/settings-store';
@@ -25,6 +25,19 @@ class MemorySettingsStorageAdapter implements SettingsStorageAdapter {
   public getFilePath(): string {
     return '/tmp/evermore/settings.json';
   }
+}
+
+/**
+ * Invokes a menu item's click handler the way Electron's menu would, failing the test when the
+ * item or its handler is missing instead of masking it behind optional chaining.
+ */
+function clickMenuItem(item: MenuItemConstructorOptions | null): void {
+  const click = item?.click;
+  if (!click) {
+    throw new Error(`menu item ${item?.label ?? '(not found)'} has no click handler`);
+  }
+  // @ts-expect-error click args are not used by the handlers under test
+  click(undefined, undefined, undefined);
 }
 
 function findItemByLabel(
@@ -159,13 +172,7 @@ describe('createMenuController', () => {
 
     // When: the New Tab click handler is invoked by the menu system.
     const newTab = findItemByLabel(template, 'New Tab');
-    type ClickHandler = NonNullable<MenuItemConstructorOptions['click']>;
-    (newTab?.click as ClickHandler)(
-      // @ts-expect-error click args are not used by the handler
-      undefined,
-      undefined,
-      undefined,
-    );
+    clickMenuItem(newTab);
 
     // Then: the dispatcher forwards the action id over IPC.
     expect(send).toHaveBeenCalledWith(IPC.SHORTCUT_INVOKE, { actionId: 'workspace.newTab' });

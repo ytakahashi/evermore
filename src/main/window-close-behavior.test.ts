@@ -1,5 +1,5 @@
 import type { BrowserWindow } from 'electron';
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vite-plus/test';
 import { attachHideOnClose, type HideOnCloseHandle } from './window-close-behavior';
 
 type Listener = (event: { preventDefault: () => void }) => void;

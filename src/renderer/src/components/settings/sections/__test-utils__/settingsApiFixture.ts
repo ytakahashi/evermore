@@ -1,4 +1,4 @@
-import { vi } from 'vitest';
+import { vi } from 'vite-plus/test';
 import type { Api, SettingsUpdate } from '../../../../../../shared/api-types';
 import { DEFAULT_APP_SETTINGS } from '../../../../../../shared/settings-defaults';
 import type { AppSettings } from '../../../../../../shared/types';

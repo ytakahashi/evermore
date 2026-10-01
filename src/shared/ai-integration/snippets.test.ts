@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vite-plus/test';
 import {
   AGENT_USER_PROMPT_HOOK_MAX_CHARS,
   OSC_777_PAYLOAD_MAX_BYTES,

@@ -1,5 +1,5 @@
 import { render, screen, waitFor } from '@testing-library/react';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
 import App from './App';
 import type { Workspace } from '../../shared/types';
 import { DEFAULT_APP_SETTINGS } from '../../shared/settings-defaults';

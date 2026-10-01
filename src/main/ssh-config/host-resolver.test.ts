@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi } from 'vite-plus/test';
 import { SshHostResolver, parseSshGOutput } from './host-resolver';
 
 describe('parseSshGOutput', () => {

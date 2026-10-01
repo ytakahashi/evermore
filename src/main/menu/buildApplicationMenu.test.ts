@@ -1,5 +1,5 @@
 import type { BrowserWindow, MenuItemConstructorOptions } from 'electron';
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vite-plus/test';
 import {
   DEFAULT_KEYBINDINGS,
   KEYBOARD_SHORTCUT_ACTION_IDS,
@@ -41,6 +41,19 @@ function defaultOptions(
     isDev: false,
     ...overrides,
   };
+}
+
+/**
+ * Invokes a menu item's click handler the way Electron's menu would, failing the test when the
+ * item or its handler is missing instead of masking it behind optional chaining.
+ */
+function clickMenuItem(item: MenuItemConstructorOptions | null): void {
+  const click = item?.click;
+  if (!click) {
+    throw new Error(`menu item ${item?.label ?? '(not found)'} has no click handler`);
+  }
+  // @ts-expect-error click args are not used by the handlers under test
+  click(undefined, undefined, undefined);
 }
 
 /**
@@ -103,13 +116,7 @@ describe('buildApplicationMenu', () => {
     // When: the template is built and the menu item is clicked.
     const template = buildApplicationMenu(options);
     const newTab = findItemByLabel(template, 'New Tab');
-    type ClickHandler = NonNullable<MenuItemConstructorOptions['click']>;
-    (newTab?.click as ClickHandler)(
-      // @ts-expect-error click args are not used by the handler
-      undefined,
-      undefined,
-      undefined,
-    );
+    clickMenuItem(newTab);
 
     // Then: the accelerator is undefined but the action still dispatches via click.
     expect(newTab?.accelerator).toBeUndefined();
@@ -140,13 +147,7 @@ describe('buildApplicationMenu', () => {
 
     // When: the Agents item is located and clicked.
     const agents = findItemByLabel(template, 'Agents');
-    type ClickHandler = NonNullable<MenuItemConstructorOptions['click']>;
-    (agents?.click as ClickHandler)(
-      // @ts-expect-error click args are not used by the handler
-      undefined,
-      undefined,
-      undefined,
-    );
+    clickMenuItem(agents);
 
     // Then: the mode-switching view is reachable from the menu bar with its accelerator, which is
     // what makes it discoverable at all.
@@ -183,13 +184,7 @@ describe('buildApplicationMenu', () => {
 
     // When: the Close Window menu item is located and clicked.
     const closeWindow = findItemByLabel(template, 'Close Window');
-    type ClickHandler = NonNullable<MenuItemConstructorOptions['click']>;
-    (closeWindow?.click as ClickHandler)(
-      // @ts-expect-error click args are not used by the handler
-      undefined,
-      undefined,
-      undefined,
-    );
+    clickMenuItem(closeWindow);
 
     // Then: it has neither a role nor a Cmd+W accelerator, and forwards to the injected window.
     expect(closeWindow?.role).toBeUndefined();
@@ -203,15 +198,7 @@ describe('buildApplicationMenu', () => {
     const closeWindow = findItemByLabel(template, 'Close Window');
 
     // When / Then: clicking is a safe no-op.
-    type ClickHandler = NonNullable<MenuItemConstructorOptions['click']>;
-    expect(() =>
-      (closeWindow?.click as ClickHandler)(
-        // @ts-expect-error click args are not used by the handler
-        undefined,
-        undefined,
-        undefined,
-      ),
-    ).not.toThrow();
+    expect(() => clickMenuItem(closeWindow)).not.toThrow();
   });
 
   it('exposes the full set of Evermore-action accelerators plus standard role bindings via getReservedAccelerators', () => {
@@ -279,13 +266,7 @@ describe('buildApplicationMenu', () => {
     expect(learnMore?.accelerator).toBeUndefined();
 
     // When: the Learn More click handler runs.
-    type ClickHandler = NonNullable<MenuItemConstructorOptions['click']>;
-    (learnMore?.click as ClickHandler)(
-      // @ts-expect-error click args are not used by the handler
-      undefined,
-      undefined,
-      undefined,
-    );
+    clickMenuItem(learnMore);
 
     // Then: the injected callback fires.
     expect(openHelp).toHaveBeenCalledOnce();

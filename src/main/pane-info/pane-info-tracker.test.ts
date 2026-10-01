@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
 import {
   AGENT_DETAIL_ACTIVITY_LABEL_MAX_CHARS,
   AGENT_DETAIL_MESSAGE_MAX_CHARS,

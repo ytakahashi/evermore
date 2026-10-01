@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vite-plus/test';
 import { resolveDropEdge, toInsertIndex, toReorderIndex, type Bounds } from './tabDnd';
 
 const horizontalBounds: Bounds = { left: 100, right: 200, top: 0, bottom: 30 };

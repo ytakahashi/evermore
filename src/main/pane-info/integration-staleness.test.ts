@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vite-plus/test';
 import { PANE_INTEGRATION } from '../../shared/pane-integration-constants';
 import type { PaneIntegrationInfo } from '../../shared/types';
 import { isIntegrationStale } from './integration-staleness';

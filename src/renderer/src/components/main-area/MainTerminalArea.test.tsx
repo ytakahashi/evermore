@@ -1,5 +1,5 @@
 import { render, screen, waitFor } from '@testing-library/react';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
 import type { Workspace } from '../../../../shared/types';
 import { useUiStore } from '../../stores/uiStore';
 import { useWorkspaceStore, type WorkspaceStoreState } from '../../stores/workspaceStore';

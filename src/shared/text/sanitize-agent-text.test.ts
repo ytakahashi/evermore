@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vite-plus/test';
 import { sanitizeAgentText, sanitizeUserPromptText } from './sanitize-agent-text';
 
 // Build control characters at runtime via String.fromCharCode so the source file stays plain

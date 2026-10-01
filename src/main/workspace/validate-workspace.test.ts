@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vite-plus/test';
 import { MAX_SPLIT_RATIO, MIN_SPLIT_RATIO } from '../../shared/pane-layout-constants';
 import type { Pane, PaneLayout, Workspace } from '../../shared/types';
 import { MAX_WORKSPACE_TABS } from '../../shared/workspace-constants';

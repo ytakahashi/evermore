@@ -11,7 +11,7 @@
 
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vite-plus/test';
 
 import { PaneInfoTracker } from '../../src/main/pane-info/pane-info-tracker';
 import type { PaneInfoChangedEvent } from '../../src/main/pane-info/types';

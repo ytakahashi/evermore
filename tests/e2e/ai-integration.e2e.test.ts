@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import * as nodePty from 'node-pty';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'vite-plus/test';
 import { EVERMORE_AGENT_STATUS_HELPER_SCRIPT } from '../../src/shared/ai-integration/snippets';
 import {
   AGENT_USER_PROMPT_HOOK_MAX_CHARS,

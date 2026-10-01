@@ -1,5 +1,5 @@
 import { render, waitFor } from '@testing-library/react';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
 import { DEFAULT_APP_SETTINGS } from '../../../shared/settings-defaults';
 import { useSettingsStore } from '../stores/settingsStore';
 import { useSettingsBridge } from './useSettingsBridge';

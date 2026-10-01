@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
 import { EVERMORE_ZSH_SHELL_INTEGRATION_SNIPPET } from '../../shared/shell-integration/zsh-snippet';
 import { createLogger, type LogRecord, type LogTransport } from '../logging/logger';
 import { buildZlogin, buildZprofile, buildZshenv, buildZshrc } from './forwarding-scripts';

@@ -1,5 +1,5 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vite-plus/test';
 import type { Tunnel } from '../../../../shared/types';
 import { useConnectionsStore } from '../../stores/connectionsStore';
 import { useTunnelsStore } from '../../stores/tunnelsStore';

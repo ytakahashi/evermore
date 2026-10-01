@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vite-plus/test';
 import { createLogger, resolveLogLevel, type LogRecord, type LogTransport } from './logger';
 
 interface RecordingTransport extends LogTransport {

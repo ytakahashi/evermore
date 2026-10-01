@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vite-plus/test';
 import { EVERMORE_ZSH_SHELL_INTEGRATION_SNIPPET } from './zsh-snippet';
 
 describe('EVERMORE_ZSH_SHELL_INTEGRATION_SNIPPET', () => {

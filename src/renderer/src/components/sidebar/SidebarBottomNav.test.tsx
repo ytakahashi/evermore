@@ -1,5 +1,5 @@
 import { fireEvent, render, screen } from '@testing-library/react';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vite-plus/test';
 import { useUiStore } from '../../stores/uiStore';
 import { SidebarBottomNav } from './SidebarBottomNav';
 

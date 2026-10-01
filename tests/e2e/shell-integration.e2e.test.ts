@@ -17,7 +17,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import * as nodePty from 'node-pty';
 import type { IPty } from 'node-pty';
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vite-plus/test';
 
 import { PaneInfoTracker } from '../../src/main/pane-info/pane-info-tracker';
 import { TerminalSignalParser } from '../../src/main/pty/terminal-signal-parser';

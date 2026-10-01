@@ -1,5 +1,5 @@
 import { render, screen } from '@testing-library/react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vite-plus/test';
 import { useConnectionsStore } from '../../stores/connectionsStore';
 import { useTunnelsStore } from '../../stores/tunnelsStore';
 import { ConnectionsView } from './ConnectionsView';

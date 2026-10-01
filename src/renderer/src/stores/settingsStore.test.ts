@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
 import { DEFAULT_APP_SETTINGS } from '../../../shared/settings-defaults';
 import type { Api } from '../../../shared/api-types';
 import type { AppSettings } from '../../../shared/types';

@@ -1,5 +1,5 @@
 import type { BrowserWindow, Input } from 'electron';
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vite-plus/test';
 import { attachWindowShortcuts } from './window-shortcuts';
 
 vi.mock('@electron-toolkit/utils', () => ({
