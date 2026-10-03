@@ -2,12 +2,11 @@ import { useCallback, useEffect, useRef } from 'react';
 import { FitAddon } from '@xterm/addon-fit';
 import { Unicode11Addon } from '@xterm/addon-unicode11';
 import { WebLinksAddon } from '@xterm/addon-web-links';
-import { Terminal, type IDisposable } from '@xterm/xterm';
+import { Terminal } from '@xterm/xterm';
 import { useResizeObserver } from '../../hooks/useResizeObserver';
 import { DEFAULT_APP_SETTINGS } from '../../../../shared/settings-defaults';
 import { useSettingsStore } from '../../stores/settingsStore';
-import { createTerminalCommandCopyDecoration } from './command-copy-decoration';
-import { TerminalCommandHistory, type TerminalCommandHistoryEntry } from './command-history';
+import { attachCommandBlocks } from './command-blocks';
 import { terminalTheme } from './theme';
 
 export type PtyIdChangeReason = 'created' | 'exit' | 'unmount';
@@ -205,32 +204,7 @@ export function useTerminal(options: UseTerminalOptions): UseTerminalResult {
     }
 
     let disposed = false;
-    const commandDecorations = new Map<string, IDisposable>();
-    const commandHistory = new TerminalCommandHistory({
-      terminal,
-      onCommandCompleted: (entry: TerminalCommandHistoryEntry) => {
-        // Entry ids are unique, so this only guards against an unexpected duplicate completion for
-        // the same id leaking a previous decoration.
-        commandDecorations.get(entry.id)?.dispose();
-        let decoration: IDisposable | null = null;
-        decoration = createTerminalCommandCopyDecoration({
-          terminal,
-          entry,
-          onDisposed: () => {
-            if (commandDecorations.get(entry.id) === decoration) {
-              commandDecorations.delete(entry.id);
-            }
-          },
-        });
-        if (decoration) {
-          commandDecorations.set(entry.id, decoration);
-        }
-      },
-      onCommandRemoved: (entry: TerminalCommandHistoryEntry) => {
-        commandDecorations.get(entry.id)?.dispose();
-        commandDecorations.delete(entry.id);
-      },
-    });
+    const commandBlocks = attachCommandBlocks(terminal);
     const dataCleanup = ptyApi.onData((id, data) => {
       if (id === ptyIdRef.current) {
         terminal.write(data);
@@ -297,11 +271,7 @@ export function useTerminal(options: UseTerminalOptions): UseTerminalResult {
       inputDisposable.dispose();
       dataCleanup();
       exitCleanup();
-      for (const decoration of commandDecorations.values()) {
-        decoration.dispose();
-      }
-      commandDecorations.clear();
-      commandHistory.dispose();
+      commandBlocks.dispose();
       terminal.dispose();
       terminalRef.current = null;
       fitAddonRef.current = null;
