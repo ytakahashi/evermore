@@ -14,6 +14,7 @@ interface AgentSnippet {
   label: string;
   notes: readonly string[];
   snippet: CopyableSnippetDefinition;
+  launchSnippet?: CopyableSnippetDefinition;
 }
 
 const HELPER_SNIPPET: CopyableSnippetDefinition = {
@@ -63,7 +64,7 @@ const AGENT_SNIPPETS: readonly [AgentSnippet, ...AgentSnippet[]] = [
     label: 'Codex CLI',
     notes: [
       'Paste or merge this into ~/.codex/hooks.json.',
-      'Codex CLI can write the OSC sequence directly to /dev/tty from the hook process.',
+      'Launch Codex in the target Evermore pane using the launch command below so hooks can send updates to its terminal.',
       'When Codex asks to trust the configured hooks, approve them so Evermore can receive status updates.',
       'After setup, the sidebar shows Codex as running while a turn is active, awaiting input when approval is needed, and ready when the turn completes.',
       'PostToolUse and PermissionRequest show Codex Bash commands and apply_patch target files in the sidebar label. Other tools fall back to a recognized target field or just the tool name.',
@@ -76,6 +77,25 @@ const AGENT_SNIPPETS: readonly [AgentSnippet, ...AgentSnippet[]] = [
       description:
         'Updates the sidebar as Codex starts running, waits for approval, resumes after tool use, and finishes a turn.',
       content: CODEX_CLI_HOOK_SNIPPET,
+    },
+    launchSnippet: {
+      id: 'codex-cli-launch',
+      title: 'Codex CLI launch command',
+      target: 'Run in the target Evermore pane',
+      language: 'sh',
+      description: (
+        <>
+          Codex hooks have no controlling terminal, so EVERMORE_AGENT_TTY_PATH supplies this
+          pane&apos;s terminal path. --no-daemon lets hooks inherit that setting instead of running
+          through the shared background server. Use both when starting, resuming, or forking a
+          conversation.
+          <code className="mt-2 block overflow-x-auto rounded bg-raised px-2 py-1 font-mono">
+            {'EVERMORE_AGENT_TTY_PATH="$(tty)" codex --no-daemon'}
+          </code>
+          Append resume or fork and a session ID when continuing an existing conversation.
+        </>
+      ),
+      content: 'EVERMORE_AGENT_TTY_PATH="$(tty)" codex --no-daemon',
     },
   },
   {
@@ -168,6 +188,9 @@ export function AIIntegrationSection(): React.JSX.Element {
             ))}
           </ul>
           <CopyableSnippet snippet={activeAgent.snippet} />
+          {activeAgent.launchSnippet ? (
+            <CopyableSnippet snippet={activeAgent.launchSnippet} />
+          ) : null}
         </div>
       </section>
 
