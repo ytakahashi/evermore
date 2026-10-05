@@ -1,19 +1,21 @@
+import { formatAgentDisplayName } from '../../../../shared/ai-integration/agent-display-name';
 import { flattenLayout } from '../../../../shared/pane-layout';
 import type { PaneRuntimeInfo, Workspace } from '../../../../shared/types';
 
 /**
- * One pane that currently has an AI agent in its foreground, resolved down to everything the
- * Agents view needs to render a card and act on a click.
+ * One agent pane, or a selected live pane retained while agent information is unavailable,
+ * resolved to everything the Agents view needs to render a card and act on a click.
  */
 export interface AgentSession {
   /** Stable React key. Pane ids are globally unique across workspaces, so the pane id suffices. */
   paneId: string;
+  ptyId: string;
   workspaceId: string;
   workspaceName: string;
   tabId: string;
   tabName: string;
-  /** Runtime snapshot for this pane; `info.agent` is guaranteed to be present. */
-  info: PaneRuntimeInfo;
+  /** Runtime snapshot, which may be absent for a retained selected pane. */
+  info: PaneRuntimeInfo | undefined;
   /** Working directory as recorded on the pane, used for the card footer. */
   cwd: string;
 }
@@ -30,12 +32,14 @@ export interface AgentSession {
  * badge. Structural order also lines the cards up with the sidebar, so moving between the two
  * surfaces preserves the reader's sense of place.
  *
+ * Selection validity depends on the pane and PTY, never on a transient runtime snapshot.
  * Nothing here is cached by id: the whole list is rebuilt from the current workspaces and runtime
  * snapshots on every render, so a closed pane or a deleted workspace simply stops appearing.
  */
 export function collectAgentSessions(
   workspaces: readonly Workspace[],
   infosByPtyId: Readonly<Record<string, PaneRuntimeInfo>>,
+  options: { retainPaneId?: string } = {},
 ): AgentSession[] {
   const sessions: AgentSession[] = [];
 
@@ -54,12 +58,13 @@ export function collectAgentSessions(
         }
 
         const info = infosByPtyId[pane.ptyId];
-        if (!info?.agent) {
+        if (!info?.agent && pane.id !== options.retainPaneId) {
           continue;
         }
 
         sessions.push({
           paneId: pane.id,
+          ptyId: pane.ptyId,
           workspaceId: workspace.id,
           workspaceName: workspace.name,
           tabId: tab.id,
@@ -72,4 +77,11 @@ export function collectAgentSessions(
   }
 
   return sessions;
+}
+
+/** Distinguishes an ended agent from temporarily unavailable runtime information. */
+export function getAgentSessionName(session: AgentSession): string {
+  if (!session.info) return 'Agent status unavailable';
+  if (!session.info.agent) return 'No agent running';
+  return formatAgentDisplayName(session.info.agent);
 }

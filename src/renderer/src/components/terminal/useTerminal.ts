@@ -3,6 +3,7 @@ import { FitAddon } from '@xterm/addon-fit';
 import { Unicode11Addon } from '@xterm/addon-unicode11';
 import { WebLinksAddon } from '@xterm/addon-web-links';
 import { Terminal } from '@xterm/xterm';
+import { terminalHostRegistry } from '../../terminal-host/terminalHostRegistry';
 import { useResizeObserver } from '../../hooks/useResizeObserver';
 import { DEFAULT_APP_SETTINGS } from '../../../../shared/settings-defaults';
 import { useSettingsStore } from '../../stores/settingsStore';
@@ -179,6 +180,16 @@ export function useTerminal(options: UseTerminalOptions): UseTerminalResult {
     terminal.unicode.activeVersion = '11';
     terminalRef.current = terminal;
     fitAddonRef.current = fitAddon;
+    const paneId = initialOptionsRef.current.paneId;
+    // Only xterm's root may move. Its React container and PTY remain owned by this hook.
+    const unregisterHost =
+      paneId && terminal.element
+        ? terminalHostRegistry.register(paneId, {
+            element: terminal.element,
+            home: container,
+            fit: fitAndResize,
+          })
+        : undefined;
     fitAndResize();
 
     // Re-fit once fonts are ready to ensure accurate cell width measurements
@@ -197,6 +208,7 @@ export function useTerminal(options: UseTerminalOptions): UseTerminalResult {
       // message keeps smoke tests simple while making a broken preload obvious in development.
       terminal.writeln('Terminal API is unavailable.');
       return () => {
+        unregisterHost?.();
         terminal.dispose();
         terminalRef.current = null;
         fitAddonRef.current = null;
@@ -262,6 +274,7 @@ export function useTerminal(options: UseTerminalOptions): UseTerminalResult {
 
     return () => {
       disposed = true;
+      unregisterHost?.();
       const ptyId = ptyIdRef.current;
       ptyIdRef.current = null;
       if (ptyId) {

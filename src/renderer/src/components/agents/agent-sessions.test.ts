@@ -84,6 +84,7 @@ describe('collectAgentSessions', () => {
     expect(sessions).toEqual([
       {
         paneId: 'p1',
+        ptyId: 'pty-1',
         workspaceId: 'ws-1',
         workspaceName: 'Project',
         tabId: 'tab-1',
@@ -206,5 +207,44 @@ describe('collectAgentSessions', () => {
 
     // Then: the dangling id is passed over rather than throwing, and the valid pane still appears.
     expect(sessions.map((session) => session.paneId)).toEqual(['p2']);
+  });
+  it('retains the selected pane in structural order without agent or runtime info', () => {
+    // Given: a selected shell between agent panes, plus a pane without a PTY.
+    const workspaces = [
+      workspace({
+        id: 'ws',
+        name: 'Project',
+        tabs: [
+          {
+            id: 'tab',
+            name: 'shell',
+            isCustomName: false,
+            activePaneId: 'p1',
+            layout: splitLayout('p1', 'p2'),
+          },
+        ],
+        panes: [
+          { id: 'p1', cwd: '/a', ptyId: 'pty-1' },
+          { id: 'p2', cwd: '/b', ptyId: 'pty-2' },
+        ],
+      }),
+    ];
+    // When: runtime info has disappeared for the selected pane.
+    const sessions = collectAgentSessions(
+      workspaces,
+      { 'pty-2': agentInfo('pty-2') },
+      { retainPaneId: 'p1' },
+    );
+    // Then: it stays first without inventing runtime information.
+    expect(sessions.map((session) => session.paneId)).toEqual(['p1', 'p2']);
+    expect(sessions[0]?.info).toBeUndefined();
+    expect(
+      collectAgentSessions(workspaces, { 'pty-1': runtimeInfo('pty-1') }, { retainPaneId: 'p1' }),
+    ).toHaveLength(1);
+    const withoutPty = workspaces.map((ws) => ({
+      ...ws,
+      panes: ws.panes.map((pane) => ({ ...pane, ptyId: undefined })),
+    }));
+    expect(collectAgentSessions(withoutPty, {}, { retainPaneId: 'p1' })).toEqual([]);
   });
 });

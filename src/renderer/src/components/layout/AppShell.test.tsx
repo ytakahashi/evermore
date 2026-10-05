@@ -16,7 +16,13 @@ vi.mock('../settings/SettingsView', () => ({
 }));
 
 vi.mock('../agents/AgentsView', () => ({
-  AgentsView: () => <div data-testid="agents-pane">agents</div>,
+  AgentsView: () => (
+    <div data-testid="agents-pane">
+      <div className="xterm">
+        <textarea aria-label="Terminal input" />
+      </div>
+    </div>
+  ),
 }));
 
 vi.mock('./Sidebar', () => ({
@@ -125,5 +131,17 @@ describe('AppShell', () => {
     expect(useUiStore.getState().activeView).toBe('workspace');
 
     window.removeEventListener('keydown', otherListener);
+  });
+
+  it('ignores bubbled Esc from an xterm descendant while Agents is active', () => {
+    // Given: a terminal input inside the Agents view.
+    useUiStore.setState({ activeView: 'agents' });
+    render(<AppShell />);
+    const event = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
+    // When: Esc bubbles from a dummy textarea (testing the shell guard, not xterm key handling).
+    screen.getByRole('textbox', { name: 'Terminal input' }).dispatchEvent(event);
+    // Then: the shell neither dismisses the view nor prevents the terminal's action.
+    expect(useUiStore.getState().activeView).toBe('agents');
+    expect(event.defaultPrevented).toBe(false);
   });
 });

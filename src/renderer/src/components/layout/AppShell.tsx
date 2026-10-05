@@ -15,7 +15,8 @@ import { TopBar } from './TopBar';
  * how `MainTerminalArea` already keeps non-active workspaces mounted while hidden. Unmounting the
  * workspace tree when another view opens would tear down every xterm container and force a full
  * re-init on return. The price is a few extra subtrees in the React commit; each still owns its own
- * state, and only the visible one paints.
+ * state, and only the visible one paints. AgentsView is an exception internally: it unmounts its
+ * contents on departure to discard selection and return the borrowed xterm before paint.
  */
 export function AppShell(): React.JSX.Element {
   const activeView = useUiStore((state) => state.activeView);
@@ -29,7 +30,10 @@ export function AppShell(): React.JSX.Element {
       // this condition excludes.
       if (event.key === 'Escape') {
         const currentActiveView = useUiStore.getState().activeView;
-        if (currentActiveView !== 'workspace') {
+        // xterm stops propagation for handled keys, but IME composition and screen reader mode
+        // can let Esc bubble here. Do not dismiss the view for those terminal-originated events.
+        const isTerminalTarget = event.target instanceof Element && event.target.closest('.xterm');
+        if (currentActiveView !== 'workspace' && !isTerminalTarget) {
           event.preventDefault();
           showWorkspaceView();
         }

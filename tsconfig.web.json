@@ -6,7 +6,8 @@
     "src/renderer/src/**/*.tsx",
     "src/shared/**/*",
     "src/preload/*.d.ts",
-    "tests/setup.ts"
+    "tests/setup.ts",
+    "tests/integration/renderer/**/*"
   ],
   "compilerOptions": {
     "composite": true,

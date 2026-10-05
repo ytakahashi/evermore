@@ -11,5 +11,6 @@
   "compilerOptions": {
     "composite": true,
     "types": ["electron-vite/node"]
-  }
+  },
+  "exclude": ["tests/integration/renderer/**/*"]
 }
