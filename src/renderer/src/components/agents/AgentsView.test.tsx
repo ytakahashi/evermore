@@ -8,7 +8,21 @@ import { AgentsView } from './AgentsView';
 
 vi.mock('../../stores/workspaceStore', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../stores/workspaceStore')>();
-  return { ...actual, useWorkspaceStore: actual.createWorkspaceStore() };
+  // Inject the API instead of stubbing `window.api`: debounced persistence can fire after a
+  // test's cleanup, and the store must not read a preload global that no longer exists.
+  return {
+    ...actual,
+    useWorkspaceStore: actual.createWorkspaceStore({
+      workspaceApi: {
+        list: vi.fn(() => Promise.resolve({ workspaces: [], activeWorkspaceId: null })),
+        get: vi.fn(() => Promise.resolve(null)),
+        create: vi.fn(() => Promise.reject(new Error('Not used by these tests'))),
+        update: vi.fn(() => Promise.resolve()),
+        delete: vi.fn(() => Promise.resolve()),
+        setActiveWorkspaceId: vi.fn(() => Promise.resolve()),
+      },
+    }),
+  };
 });
 vi.mock('../../stores/paneInfoStore', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../stores/paneInfoStore')>();
@@ -91,15 +105,6 @@ function agentInfo(ptyId: string, overrides: Partial<PaneRuntimeInfo> = {}): Pan
 
 describe('AgentsView', () => {
   beforeEach(() => {
-    Object.defineProperty(window, 'api', {
-      configurable: true,
-      value: {
-        workspace: {
-          update: vi.fn(() => Promise.resolve()),
-          setActiveWorkspaceId: vi.fn(() => Promise.resolve()),
-        },
-      },
-    });
     useWorkspaceStore.setState({
       workspaces: [workspace1, workspace2],
       activeWorkspaceId: workspace1.id,
@@ -119,7 +124,6 @@ describe('AgentsView', () => {
     });
     usePaneInfoStore.setState({ infosByPtyId: {}, isLoading: false, error: null });
     useUiStore.setState({ activeView: 'workspace' });
-    Reflect.deleteProperty(window, 'api');
   });
 
   it('renders the activity summary and the submitted prompt on one card', () => {

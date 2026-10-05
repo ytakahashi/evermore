@@ -14,7 +14,21 @@ import {
 vi.mock('../../../src/renderer/src/stores/workspaceStore', async (importOriginal) => {
   const actual =
     await importOriginal<typeof import('../../../src/renderer/src/stores/workspaceStore')>();
-  return { ...actual, useWorkspaceStore: actual.createWorkspaceStore() };
+  // Inject the API instead of stubbing `window.api`: debounced persistence can fire after a
+  // test's cleanup, and the store must not read a preload global that no longer exists.
+  return {
+    ...actual,
+    useWorkspaceStore: actual.createWorkspaceStore({
+      workspaceApi: {
+        list: vi.fn(() => Promise.resolve({ workspaces: [], activeWorkspaceId: null })),
+        get: vi.fn(() => Promise.resolve(null)),
+        create: vi.fn(() => Promise.reject(new Error('Not used by these tests'))),
+        update: vi.fn(() => Promise.resolve()),
+        delete: vi.fn(() => Promise.resolve()),
+        setActiveWorkspaceId: vi.fn(() => Promise.resolve()),
+      },
+    }),
+  };
 });
 vi.mock('../../../src/renderer/src/stores/paneInfoStore', async (importOriginal) => {
   const actual =
@@ -98,21 +112,11 @@ describe('Agents view terminal borrowing', () => {
       infosByPtyId: { 'pty-1': info('pty-1', 'claude'), 'pty-2': info('pty-2', 'codex') },
     });
     useUiStore.setState({ activeView: 'agents' });
-    Object.defineProperty(window, 'api', {
-      configurable: true,
-      value: {
-        workspace: {
-          update: vi.fn(() => Promise.resolve()),
-          setActiveWorkspaceId: vi.fn(() => Promise.resolve()),
-        },
-      },
-    });
   });
   afterEach(() => {
     cleanup();
     for (const dispose of cleanups.splice(0)) dispose();
     useUiStore.setState({ activeView: 'workspace' });
-    Reflect.deleteProperty(window, 'api');
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
   });
