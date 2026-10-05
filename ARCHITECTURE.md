@@ -226,15 +226,19 @@ The renderer is a single React 19 app rendered into `#root` by `main.tsx` with `
   live in `useTerminal`'s refs. The hook intentionally does **not** restart a PTY when `cwd` props
   change after creation; `cwd` is a process-creation input only. Restarting a running shell on prop
   drift would destroy the user's session.
+- **Borrowing a terminal changes its display host, never its owner.** The renderer's
+  `terminal-host/terminalHostRegistry.ts` moves only the xterm root, never the React-managed
+  container. The original `TerminalView` / `useTerminal` still owns its PTY, subscriptions, and
+  disposal. At most one terminal is borrowed at a time. Agents returns it in layout cleanup before a
+  view transition paints; late owner cleanup cannot resurrect a disposed terminal.
 - **`PaneLayout` flattens the pane tree.** Every pane leaf is rendered as a sibling absolute element
   so React identity stays stable across splits and closes; if the renderer used a recursive tree,
   splits would unmount + remount the xterm + PTY pair. See the comment in
   `components/main-area/PaneLayout.tsx`.
-- **`MainTerminalArea` mounts every tab in one flat list keyed by `tab.id`.** The same
-  identity-stability reasoning as `PaneLayout` is extended up to the tab level: because a tab keeps
-  a stable position in the React tree regardless of which workspace owns it, reordering a tab or
-  moving it to another workspace preserves its subtree — and therefore its live PTYs/terminals —
-  instead of unmounting and recreating them. This relies on the durable-model invariant below.
+- **`MainTerminalArea` mounts every pane in one flat list keyed by `pane.id`.** Because a pane keeps
+  a stable position in the React tree regardless of its owning tab or workspace, moving or
+  reordering it preserves its live PTY/terminal instead of unmounting and recreating it. Do not
+  introduce per-tab wrappers that change pane identity.
 - **Pane and tab ids are globally unique across workspaces.** The main-process `WorkspaceStore`
   enforces this on every read/write and self-heals inconsistent persisted data (see
   `workspace/workspace-store.ts`). The renderer keys live terminals by `pane.id` and the tab list by
@@ -311,7 +315,9 @@ in `tests/setup.ts`.
   for a unit test of either side. Tests that assert on the repository's own configuration — for
   example running the real lint config over fixtures to prove the architecture rules still reject
   what they claim to — belong in this tier too: they combine real, checked-in inputs and depend on
-  no module in isolation.
+  no module in isolation. Renderer integration tests live in `tests/integration/renderer/` and
+  belong to `tsconfig.web.json`; `tsconfig.node.json` excludes that directory to preserve the
+  TypeScript process boundary.
 - **End-to-end tests** depend on a runtime external dependency (real subprocess such as zsh / ssh,
   real network socket, etc.). They live in `tests/e2e/` and use `describe.skipIf(...)` to skip when
   that dependency is unavailable on the current host (for example, `existsSync('/bin/zsh')` is

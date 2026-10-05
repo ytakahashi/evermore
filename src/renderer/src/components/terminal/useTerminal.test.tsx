@@ -5,6 +5,7 @@ import type { PtyCreateRequest } from '../../../../shared/api-types';
 import { DEFAULT_APP_SETTINGS } from '../../../../shared/settings-defaults';
 import type { AppSettings } from '../../../../shared/types';
 import { useSettingsStore } from '../../stores/settingsStore';
+import { terminalHostRegistry } from '../../terminal-host/terminalHostRegistry';
 import { useTerminal, type PtyIdChangeReason } from './useTerminal';
 
 const commandIntegrationMock = vi.hoisted(() => {
@@ -47,10 +48,17 @@ const xtermMock = vi.hoisted(() => {
     public readonly cols = 132;
     public readonly rows = 43;
     public readonly loadAddon = vi.fn();
-    public readonly open = vi.fn();
+    public element: HTMLElement | undefined;
+    public readonly open = vi.fn((home: HTMLElement) => {
+      this.element = document.createElement('div');
+      this.element.className = 'xterm';
+      home.appendChild(this.element);
+    });
     public readonly write = vi.fn();
     public readonly writeln = vi.fn();
-    public readonly dispose = vi.fn();
+    public readonly dispose = vi.fn(() => {
+      this.element?.remove();
+    });
     public readonly focus = vi.fn();
     public readonly inputDisposable = { dispose: vi.fn() };
     public readonly selectionChangeDisposable = {
@@ -718,5 +726,37 @@ describe('useTerminal', () => {
     // Then: no further fit calls are made (stale closure guard).
     await new Promise((resolve) => setTimeout(resolve, 10));
     expect(fitSpy).toHaveBeenCalledTimes(2);
+  });
+  it('registers its existing terminal and removes it from a borrowed host on unmount', async () => {
+    // Given: the terminal owner has created exactly one PTY.
+    const { unmount } = render(<TestTerminal />);
+    await waitFor(() => {
+      expect(ptyApi.resize).toHaveBeenCalled();
+    });
+    const terminal = xtermMock.terminalInstances[0];
+    const handle = terminalHostRegistry.getHandle('pane-1');
+    const host = document.createElement('div');
+    expect(handle?.element).toBe(terminal?.element);
+    // When: an alternative surface borrows it and its owner unmounts.
+    const release = terminalHostRegistry.borrow('pane-1', host);
+    expect(handle?.element.parentElement).toBe(host);
+    expect(ptyApi.create).toHaveBeenCalledOnce();
+    unmount();
+    release?.();
+    // Then: disposal removes the borrowed DOM and stale release cannot restore it.
+    expect(terminalHostRegistry.getHandle('pane-1')).toBeUndefined();
+    expect(host.childElementCount).toBe(0);
+    expect(ptyApi.dispose).toHaveBeenCalledOnce();
+  });
+
+  it('unregisters the terminal even when preload is unavailable', () => {
+    // Given: xterm can open but the preload PTY API is absent.
+    Reflect.deleteProperty(window, 'api');
+    const { unmount } = render(<TestTerminal />);
+    expect(terminalHostRegistry.getHandle('pane-1')).toBeDefined();
+    // When: the smoke-test terminal unmounts.
+    unmount();
+    // Then: its fallback cleanup leaves no registered host.
+    expect(terminalHostRegistry.getHandle('pane-1')).toBeUndefined();
   });
 });

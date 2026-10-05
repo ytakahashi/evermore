@@ -1,10 +1,37 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
 import type { PaneRuntimeInfo, Workspace } from '../../../../shared/types';
 import { usePaneInfoStore } from '../../stores/paneInfoStore';
 import { useUiStore } from '../../stores/uiStore';
 import { useWorkspaceStore } from '../../stores/workspaceStore';
 import { AgentsView } from './AgentsView';
+
+vi.mock('../../stores/workspaceStore', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../stores/workspaceStore')>();
+  return { ...actual, useWorkspaceStore: actual.createWorkspaceStore() };
+});
+vi.mock('../../stores/paneInfoStore', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../stores/paneInfoStore')>();
+  return { ...actual, usePaneInfoStore: actual.createPaneInfoStore() };
+});
+vi.mock('./AgentTerminalPanel', () => ({
+  AgentTerminalPanel: ({
+    onClose,
+    onOpenWorkspace,
+  }: {
+    onClose: () => void;
+    onOpenWorkspace: () => void;
+  }) => (
+    <section aria-label="Selected agent terminal">
+      <button type="button" onClick={onClose}>
+        Close agent terminal
+      </button>
+      <button type="button" onClick={onOpenWorkspace}>
+        Open in workspace
+      </button>
+    </section>
+  ),
+}));
 
 const workspace1: Workspace = {
   id: 'workspace-1',
@@ -193,7 +220,7 @@ describe('AgentsView', () => {
     expect(screen.getByText('working')).toBeInTheDocument();
   });
 
-  it('activates the pane and returns to the workspace view when a card is clicked', () => {
+  it('opens the selected pane in the workspace only through the explicit action', () => {
     // Given: an agent running in a workspace other than the active one.
     usePaneInfoStore.setState({
       infosByPtyId: { 'pty-2': agentInfo('pty-2') },
@@ -204,6 +231,13 @@ describe('AgentsView', () => {
 
     // When: the card is clicked.
     fireEvent.click(screen.getByText('Project / server'));
+
+    // Then: selection keeps the Agents view and active workspace unchanged.
+    expect(useUiStore.getState().activeView).toBe('agents');
+    expect(useWorkspaceStore.getState().activeWorkspaceId).toBe('workspace-1');
+
+    // When: the explicit workspace action is used.
+    fireEvent.click(screen.getByRole('button', { name: 'Open in workspace' }));
 
     // Then: the workspace, tab and pane are all selected and the main area switches back, so the
     // click lands the user on the terminal they were looking at.
@@ -228,4 +262,108 @@ describe('AgentsView', () => {
     // Then: the main area switches to settings, where the hook snippets live.
     expect(useUiStore.getState().activeView).toBe('settings');
   });
+
+  it('toggles selection and clears it on every view departure', () => {
+    // Given: an agent row in the full-width list.
+    usePaneInfoStore.setState({ infosByPtyId: { 'pty-1': agentInfo('pty-1') } });
+    render(<AgentsView />);
+    const row = screen.getByRole('button', { name: /Default \/ zsh/ });
+
+    // When: the row is selected.
+    fireEvent.click(row);
+
+    // Then: the row is selected and its terminal panel opens.
+    expect(row).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('region', { name: 'Selected agent terminal' })).toBeInTheDocument();
+
+    // When: the selected row is clicked again.
+    fireEvent.click(row);
+
+    // Then: selection is cleared and the panel closes.
+    expect(
+      screen.queryByRole('region', { name: 'Selected agent terminal' }),
+    ).not.toBeInTheDocument();
+
+    // When: another selection is followed by departure and a revisit.
+    fireEvent.click(row);
+    act(() => {
+      useUiStore.setState({ activeView: 'settings' });
+    });
+    act(() => {
+      useUiStore.setState({ activeView: 'agents' });
+    });
+
+    // Then: the later visit does not restore selection.
+    expect(
+      screen.queryByRole('region', { name: 'Selected agent terminal' }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Default \/ zsh/ })).toHaveAttribute(
+      'aria-pressed',
+      'false',
+    );
+  });
+
+  it('keeps an ended agent selected until explicitly closed', () => {
+    // Given: a selected agent.
+    usePaneInfoStore.setState({ infosByPtyId: { 'pty-1': agentInfo('pty-1') } });
+    render(<AgentsView />);
+    fireEvent.click(screen.getByRole('button', { name: /Default \/ zsh/ }));
+
+    // When: its agent status disappears.
+    act(() => {
+      usePaneInfoStore.setState({
+        infosByPtyId: { 'pty-1': agentInfo('pty-1', { agent: undefined }) },
+      });
+    });
+
+    // Then: the ended agent remains selected.
+    expect(screen.getByText('No agent running')).toBeInTheDocument();
+
+    // When: its runtime snapshot also disappears.
+    act(() => {
+      usePaneInfoStore.setState({ infosByPtyId: {} });
+    });
+
+    // Then: structural selection survives the missing snapshot.
+    expect(screen.getByText('Agent status unavailable')).toBeInTheDocument();
+    expect(screen.getByRole('region', { name: 'Selected agent terminal' })).toBeInTheDocument();
+
+    // When: the user explicitly closes the selected terminal.
+    fireEvent.click(screen.getByRole('button', { name: 'Close agent terminal' }));
+
+    // Then: the retained row disappears and focus returns to the list.
+    expect(screen.getByText('No agents detected')).toBeInTheDocument();
+    expect(screen.getByLabelText('Agent sessions')).toHaveFocus();
+  });
+
+  it.each(['pane', 'pty'] as const)(
+    'clears selection when the selected %s disappears',
+    (removed) => {
+      // Given: a selected agent pane.
+      usePaneInfoStore.setState({ infosByPtyId: { 'pty-1': agentInfo('pty-1') } });
+      render(<AgentsView />);
+      fireEvent.click(screen.getByRole('button', { name: /Default \/ zsh/ }));
+
+      // When: the structural model loses the pane or its PTY.
+      act(() => {
+        useWorkspaceStore.setState({
+          workspaces: [
+            {
+              ...workspace1,
+              panes:
+                removed === 'pane'
+                  ? []
+                  : workspace1.panes.map((pane) => ({ ...pane, ptyId: undefined })),
+            },
+          ],
+        });
+      });
+
+      // Then: it no longer holds a terminal selection.
+      expect(
+        screen.queryByRole('region', { name: 'Selected agent terminal' }),
+      ).not.toBeInTheDocument();
+      expect(screen.getByText('No agents detected')).toBeInTheDocument();
+    },
+  );
 });
