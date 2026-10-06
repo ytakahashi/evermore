@@ -152,6 +152,7 @@ function createEntry(promptMarker: IMarker, output = 'result'): TerminalCommandH
   return {
     id: 'terminal-command-1',
     command: 'echo result',
+    blockStartMarker: promptMarker,
     promptMarker,
     outputStart: { marker: new MockMarker(), column: 0 },
     outputEnd: { marker: Object.assign(new MockMarker(), { line: 1 }), column: 0 },
