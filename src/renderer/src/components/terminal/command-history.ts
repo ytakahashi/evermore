@@ -9,27 +9,36 @@ import {
 
 export type { TerminalBufferBoundary } from './command-output';
 
+interface PromptStartedState {
+  blockStartMarker: IMarker;
+  kind: 'prompt-started';
+}
+
 interface PromptReadyState {
+  blockStartMarker: IMarker;
   kind: 'prompt-ready';
   promptMarker: IMarker;
 }
 
 interface CommandKnownState {
+  blockStartMarker: IMarker;
   command: string;
   kind: 'command-known';
   promptMarker: IMarker;
 }
 
 interface RunningState {
+  blockStartMarker: IMarker;
   command: string;
   kind: 'running';
   outputStart: TerminalBufferBoundary;
   promptMarker: IMarker;
 }
 
-type ActiveCommandState = PromptReadyState | CommandKnownState | RunningState;
+type ActiveCommandState = PromptStartedState | PromptReadyState | CommandKnownState | RunningState;
 
 interface PendingCommand {
+  blockStartMarker: IMarker;
   command: string;
   outputEnd: TerminalBufferBoundary;
   outputStart: TerminalBufferBoundary;
@@ -37,6 +46,7 @@ interface PendingCommand {
 }
 
 interface CommandMarkerSet {
+  blockStartMarker: IMarker;
   outputEnd: TerminalBufferBoundary;
   outputStart: TerminalBufferBoundary;
   promptMarker: IMarker;
@@ -52,6 +62,8 @@ export interface TerminalCommandHistoryEntry {
   id: string;
   /** Exact command line decoded from OSC 633;E. */
   command: string;
+  /** Prompt start captured at OSC 133;A, falling back to the input marker when A is absent. */
+  blockStartMarker: IMarker;
   /** Marker used later to anchor the command's copy decoration. */
   promptMarker: IMarker;
   /** First output buffer position captured at OSC 133;C. */
@@ -111,6 +123,7 @@ export class TerminalCommandHistory {
         this.finalizePendingCommands();
       }),
       this.terminal.buffer.onBufferChange((buffer) => {
+        // Prompt editors may use the alternate screen before the command starts executing.
         if (buffer.type === 'alternate' && this.active?.kind === 'running') {
           this.discardActive();
         }
@@ -155,6 +168,9 @@ export class TerminalCommandHistory {
 
     const marker = data.split(';', 1)[0];
     switch (marker) {
+      case 'A':
+        this.beginPromptStart();
+        return;
       case 'B':
         this.beginPrompt();
         return;
@@ -187,19 +203,41 @@ export class TerminalCommandHistory {
     this.active = {
       kind: 'command-known',
       command,
+      blockStartMarker: this.active.blockStartMarker,
       promptMarker: this.active.promptMarker,
     };
   }
 
-  private beginPrompt(): void {
+  private beginPromptStart(): void {
     this.discardActive();
     if (this.terminal.buffer.active.type !== 'normal') {
       return;
     }
+    this.active = {
+      kind: 'prompt-started',
+      blockStartMarker: this.terminal.registerMarker(0),
+    };
+  }
 
+  private beginPrompt(): void {
+    // Transfer A's marker before discarding any incomplete cycle; B may be several rows below A.
+    const blockStartMarker =
+      this.active?.kind === 'prompt-started' ? this.active.blockStartMarker : null;
+    if (blockStartMarker) {
+      this.active = null;
+    } else {
+      this.discardActive();
+    }
+    if (this.terminal.buffer.active.type !== 'normal') {
+      blockStartMarker?.dispose();
+      return;
+    }
+
+    const promptMarker = this.terminal.registerMarker(0);
     this.active = {
       kind: 'prompt-ready',
-      promptMarker: this.terminal.registerMarker(0),
+      blockStartMarker: blockStartMarker ?? promptMarker,
+      promptMarker,
     };
   }
 
@@ -216,6 +254,7 @@ export class TerminalCommandHistory {
         column: this.terminal.buffer.active.cursorX,
         marker: this.terminal.registerMarker(0),
       },
+      blockStartMarker: this.active.blockStartMarker,
       promptMarker: this.active.promptMarker,
     };
   }
@@ -233,6 +272,7 @@ export class TerminalCommandHistory {
         marker: this.terminal.registerMarker(0),
       },
       outputStart: this.active.outputStart,
+      blockStartMarker: this.active.blockStartMarker,
       promptMarker: this.active.promptMarker,
     });
     this.active = null;
@@ -258,6 +298,7 @@ export class TerminalCommandHistory {
       const entry: TerminalCommandHistoryEntry = {
         id: `terminal-command-${++nextCommandId}`,
         command: command.command,
+        blockStartMarker: command.blockStartMarker,
         promptMarker: command.promptMarker,
         outputStart: command.outputStart,
         outputEnd: command.outputEnd,
@@ -284,7 +325,13 @@ export class TerminalCommandHistory {
       return;
     }
 
-    this.active.promptMarker.dispose();
+    this.active.blockStartMarker.dispose();
+    if (
+      this.active.kind !== 'prompt-started' &&
+      this.active.promptMarker !== this.active.blockStartMarker
+    ) {
+      this.active.promptMarker.dispose();
+    }
     if (this.active.kind === 'running') {
       this.active.outputStart.marker.dispose();
     }
@@ -317,7 +364,15 @@ export class TerminalCommandHistory {
 }
 
 function getCommandMarkers(command: CommandMarkerSet): IMarker[] {
-  return [command.promptMarker, command.outputStart.marker, command.outputEnd.marker];
+  // The A-missing fallback shares the input marker; subscribe and dispose only once per marker.
+  return [
+    ...new Set([
+      command.blockStartMarker,
+      command.promptMarker,
+      command.outputStart.marker,
+      command.outputEnd.marker,
+    ]),
+  ];
 }
 
 function disposeCommandMarkers(command: PendingCommand): void {
@@ -329,9 +384,5 @@ function disposeCommandMarkers(command: PendingCommand): void {
 }
 
 function hasDisposedMarker(command: PendingCommand): boolean {
-  return (
-    command.promptMarker.isDisposed ||
-    command.outputStart.marker.isDisposed ||
-    command.outputEnd.marker.isDisposed
-  );
+  return getCommandMarkers(command).some((marker) => marker.isDisposed);
 }

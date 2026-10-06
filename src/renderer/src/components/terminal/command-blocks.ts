@@ -1,10 +1,16 @@
 import type { IDisposable, Terminal } from '@xterm/xterm';
 import { createTerminalCommandCopyDecoration } from './command-copy-decoration';
 import { TerminalCommandHistory, type TerminalCommandHistoryEntry } from './command-history';
+import { findAdjacentCommand } from './command-navigation';
 
-/** Attaches completed-command copy decorations to a terminal and owns their lifecycle. */
+/** Attaches command navigation and copy decorations to a terminal and owns their lifecycle. */
 export function attachCommandBlocks(terminal: Terminal): IDisposable {
   const commandDecorations = new Map<string, IDisposable>();
+  let navigatedId: string | null = null;
+  let disposed = false;
+  const resetNavigation = (): void => {
+    navigatedId = null;
+  };
   const commandHistory = new TerminalCommandHistory({
     terminal,
     onCommandCompleted: (entry: TerminalCommandHistoryEntry) => {
@@ -26,13 +32,86 @@ export function attachCommandBlocks(terminal: Terminal): IDisposable {
       }
     },
     onCommandRemoved: (entry: TerminalCommandHistoryEntry) => {
+      if (entry.id === navigatedId) {
+        resetNavigation();
+      }
       commandDecorations.get(entry.id)?.dispose();
       commandDecorations.delete(entry.id);
     },
   });
 
+  const disposables = [
+    terminal.onData(resetNavigation),
+    terminal.buffer.onBufferChange((buffer) => {
+      if (buffer.type === 'alternate') {
+        resetNavigation();
+      }
+    }),
+  ];
+
+  // This attachment owns xterm's single custom key handler; teardown replaces it with passthrough.
+  // The disposed guard also protects callers retaining a reference to the previous handler.
+  terminal.attachCustomKeyEventHandler((event) => {
+    if (
+      disposed ||
+      terminal.buffer.active.type !== 'normal' ||
+      event.type !== 'keydown' ||
+      !event.metaKey ||
+      event.ctrlKey ||
+      event.altKey ||
+      event.shiftKey ||
+      (event.key !== 'ArrowUp' && event.key !== 'ArrowDown')
+    ) {
+      return true;
+    }
+    const entries = commandHistory.getCompletedCommands();
+    if (entries.length === 0) {
+      return true;
+    }
+    event.preventDefault();
+    const anchor = entries.find((entry) => entry.id === navigatedId);
+    const buffer = terminal.buffer.active;
+    const anchorStillShown =
+      anchor !== undefined &&
+      buffer.viewportY === Math.min(anchor.blockStartMarker.line, buffer.baseY);
+    if (!anchorStillShown) {
+      resetNavigation();
+    }
+    // At the bottom, the current prompt is the starting point so visible commands are not skipped.
+    const anchorLine = anchorStillShown
+      ? anchor.blockStartMarker.line
+      : buffer.viewportY === buffer.baseY
+        ? buffer.baseY + buffer.cursorY
+        : buffer.viewportY;
+    const direction = event.key === 'ArrowUp' ? 'previous' : 'next';
+    const id = findAdjacentCommand(
+      entries.map((entry) => ({ id: entry.id, startLine: entry.blockStartMarker.line })),
+      anchorLine,
+      direction,
+    );
+    const target = entries.find((entry) => entry.id === id);
+    if (target) {
+      // Near the bottom, scrolling clamps to baseY. Keep the command id, not the viewport, as anchor.
+      navigatedId = target.id;
+      terminal.scrollToLine(target.blockStartMarker.line);
+    } else if (direction === 'next') {
+      resetNavigation();
+      terminal.scrollToBottom();
+    }
+    return false;
+  });
+
   return {
     dispose: () => {
+      if (disposed) {
+        return;
+      }
+      disposed = true;
+      resetNavigation();
+      terminal.attachCustomKeyEventHandler(() => true);
+      for (const disposable of disposables) {
+        disposable.dispose();
+      }
       for (const decoration of commandDecorations.values()) {
         decoration.dispose();
       }

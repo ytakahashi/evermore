@@ -421,4 +421,145 @@ describe('TerminalCommandHistory', () => {
       terminal.disposables.every((disposable) => disposable.dispose.mock.calls.length === 1),
     ).toBe(true);
   });
+  it('retains the prompt start separately from a multi-line input marker', () => {
+    // Given: the prompt begins above the input line.
+    const terminal = new MockTerminal();
+    const history = new TerminalCommandHistory({ terminal: asTerminal(terminal) });
+    terminal.emitOsc(133, 'A');
+    const start = terminal.markers[0];
+
+    // When: input and a complete command cycle follow.
+    emitCompletedCommand(terminal, 'echo multiline');
+
+    // Then: navigation uses A while the copy decoration still uses B.
+    const entry = history.getCompletedCommands()[0];
+    expect(entry?.blockStartMarker).toBe(start);
+    expect(entry?.promptMarker).not.toBe(start);
+    expect(entry?.blockStartMarker.line).toBeLessThan(entry?.promptMarker.line ?? 0);
+    expect(start?.isDisposed).toBe(false);
+    history.dispose();
+    expect(terminal.markers.every((marker) => marker.isDisposed)).toBe(true);
+  });
+
+  it('subscribes once to the shared input marker when the prompt start is absent', () => {
+    // Given: a command cycle without A has captured its input marker.
+    const terminal = new MockTerminal();
+    const history = new TerminalCommandHistory({ terminal: asTerminal(terminal) });
+    terminal.emitOsc(133, 'B');
+    const marker = terminal.markers[0];
+    if (!marker) {
+      throw new Error('Expected an input marker');
+    }
+    const onDispose = vi.spyOn(marker, 'onDispose');
+
+    // When: the command completes without a separate prompt-start marker.
+    terminal.emitOsc(633, 'E;echo fallback');
+    terminal.emitOsc(133, 'C');
+    terminal.emitOsc(133, 'D;0');
+    terminal.emitWriteParsed();
+
+    // Then: both fields share a single lifecycle subscription.
+    const entry = history.getCompletedCommands()[0];
+    expect(entry?.blockStartMarker).toBe(entry?.promptMarker);
+    expect(onDispose).toHaveBeenCalledOnce();
+    history.dispose();
+  });
+
+  it.each(['pending', 'completed'] as const)(
+    'drops a %s command when its prompt start is trimmed',
+    (state) => {
+      // Given: A is present and the command has finished.
+      const terminal = new MockTerminal();
+      const removed = vi.fn();
+      const history = new TerminalCommandHistory({
+        terminal: asTerminal(terminal),
+        onCommandRemoved: removed,
+      });
+      terminal.emitOsc(133, 'A');
+      terminal.emitOsc(133, 'B');
+      terminal.emitOsc(633, 'E;echo trimmed');
+      terminal.emitOsc(133, 'C');
+      terminal.emitOsc(133, 'D;0');
+      if (state === 'completed') {
+        terminal.emitWriteParsed();
+      }
+
+      // When: only the upper prompt line is lost.
+      terminal.markers[0]?.dispose();
+      terminal.emitWriteParsed();
+
+      // Then: all owned markers are released and completed removals are reported once.
+      expect(history.getCompletedCommands()).toEqual([]);
+      expect(terminal.markers.every((marker) => marker.isDisposed)).toBe(true);
+      expect(removed).toHaveBeenCalledTimes(state === 'completed' ? 1 : 0);
+      history.dispose();
+    },
+  );
+
+  it.each(['duplicate-start', 'duplicate-input', 'empty-command', 'dispose'] as const)(
+    'releases prompt markers after %s',
+    (scenario) => {
+      // Given: a normal-buffer prompt has begun.
+      const terminal = new MockTerminal();
+      const history = new TerminalCommandHistory({ terminal: asTerminal(terminal) });
+      terminal.emitOsc(133, 'A');
+      const original = terminal.markers[0];
+
+      // When: the prompt is superseded, invalidated, or disposed.
+      if (scenario === 'duplicate-start') {
+        terminal.emitOsc(133, 'A');
+      }
+      if (scenario === 'duplicate-input') {
+        terminal.emitOsc(133, 'B');
+        terminal.emitOsc(133, 'B');
+      }
+      if (scenario === 'empty-command') {
+        terminal.emitOsc(133, 'B');
+        terminal.emitOsc(633, 'E;');
+      }
+      history.dispose();
+      history.dispose();
+
+      // Then: no prompt-only markers or completed metadata leak.
+      expect(original?.isDisposed).toBe(true);
+      expect(terminal.markers.every((marker) => marker.isDisposed)).toBe(true);
+      expect(history.getCompletedCommands()).toEqual([]);
+    },
+  );
+  it.each(['prompt-started', 'prompt-ready', 'command-known'] as const)(
+    'preserves a %s cycle through an alternate-screen prompt editor',
+    (state) => {
+      // Given: a prompt or command line is being prepared in the normal buffer.
+      const terminal = new MockTerminal();
+      const history = new TerminalCommandHistory({ terminal: asTerminal(terminal) });
+      terminal.emitOsc(133, 'A');
+      if (state !== 'prompt-started') {
+        terminal.emitOsc(133, 'B');
+      }
+      if (state === 'command-known') {
+        terminal.emitOsc(633, 'E;echo edited');
+      }
+      const markers = [...terminal.markers];
+
+      // When: an editor temporarily switches buffers before the command executes.
+      terminal.setBuffer('alternate');
+      terminal.setBuffer('normal');
+      if (state === 'prompt-started') {
+        terminal.emitOsc(133, 'B');
+      }
+      if (state !== 'command-known') {
+        terminal.emitOsc(633, 'E;echo edited');
+      }
+      terminal.emitOsc(133, 'C');
+      terminal.emitOsc(133, 'D;0');
+      terminal.emitWriteParsed();
+
+      // Then: the original prompt markers and command history survive the editing session.
+      expect(markers.every((marker) => !marker.isDisposed)).toBe(true);
+      expect(history.getCompletedCommands().map((entry) => entry.command)).toEqual(['echo edited']);
+      expect(history.getCompletedCommands()[0]?.blockStartMarker).toBe(markers[0]);
+      history.dispose();
+      expect(terminal.markers.every((marker) => marker.isDisposed)).toBe(true);
+    },
+  );
 });
