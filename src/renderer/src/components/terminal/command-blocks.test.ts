@@ -42,6 +42,8 @@ const integrationMock = vi.hoisted(() => {
     historyInstances: [] as MockTerminalCommandHistory[],
     MockTerminalCommandHistory,
     createDecoration: vi.fn(),
+    createHighlight: vi.fn(() => ({ dispose: vi.fn() })),
+    copies: [] as { dispose: ReturnType<typeof vi.fn>; copy: ReturnType<typeof vi.fn> }[],
   };
 });
 
@@ -51,6 +53,19 @@ vi.mock('./command-history', () => ({
 
 vi.mock('./command-copy-decoration', () => ({
   createTerminalCommandCopyDecoration: integrationMock.createDecoration,
+}));
+
+vi.mock('./command-block-decoration', () => ({
+  createTerminalCommandBlockDecoration: integrationMock.createHighlight,
+}));
+vi.mock('./command-copy', () => ({
+  TerminalCommandCopyController: class {
+    public readonly dispose = vi.fn();
+    public readonly copy = vi.fn(() => Promise.resolve());
+    public constructor() {
+      integrationMock.copies.push(this);
+    }
+  },
 }));
 
 class NavigationTerminal {
@@ -113,6 +128,8 @@ describe('attachCommandBlocks', () => {
     terminal = fake as unknown as Terminal;
     integrationMock.historyInstances.length = 0;
     integrationMock.createDecoration.mockReset();
+    integrationMock.createHighlight.mockClear();
+    integrationMock.copies.length = 0;
   });
 
   it('creates a copy decoration for a completed command and disposes it when removed', () => {
@@ -132,6 +149,7 @@ describe('attachCommandBlocks', () => {
     expect(integrationMock.createDecoration).toHaveBeenCalledWith({
       terminal,
       entry,
+      copyController: integrationMock.copies[0],
       onDisposed: expect.any(Function),
     });
     expect(decoration.dispose).toHaveBeenCalledOnce();
@@ -354,6 +372,41 @@ describe('attachCommandBlocks', () => {
     blocks.dispose();
   });
 
+  it.each([
+    { key: 'Escape', metaKey: false, isComposing: true },
+    { key: 'Escape', metaKey: false, keyCode: 229 },
+    { key: 'ArrowUp', metaKey: true, isComposing: true },
+    { key: 'ArrowDown', metaKey: true, keyCode: 229 },
+    { key: 'C', code: 'KeyC', metaKey: true, shiftKey: true, isComposing: true },
+    { key: 'ç', code: 'KeyC', metaKey: true, altKey: true, keyCode: 229 },
+  ])('preserves selection and IME handling during composition: %j', (init) => {
+    // Given: a command was selected before IME composition started without emitting onData.
+    const blocks = attachCommandBlocks(terminal);
+    integrationMock.historyInstances[0]?.emitCompleted({
+      id: 'only',
+      blockStartMarker: { line: 5 },
+    });
+    press(fake, 'ArrowUp');
+    fake.scrollToLine.mockClear();
+    const highlight = integrationMock.createHighlight.mock.results[0]?.value;
+    const event = new KeyboardEvent('keydown', { ...init, cancelable: true });
+
+    // When: a composition event resembles a command shortcut.
+    const result = fake.handler(event);
+
+    // Then: xterm and the IME receive it, while navigation, selection and clipboard remain unchanged.
+    expect(result).toBe(true);
+    expect(event.defaultPrevented).toBe(false);
+    expect(fake.scrollToLine).not.toHaveBeenCalled();
+    expect(highlight?.dispose).not.toHaveBeenCalled();
+    expect(integrationMock.copies[0]?.copy).not.toHaveBeenCalled();
+    expect(press(fake, 'C', { code: 'KeyC', shiftKey: true })).toBe(false);
+    expect(integrationMock.copies[0]?.copy).toHaveBeenCalledWith('command-and-output');
+    expect(press(fake, 'Escape', { metaKey: false })).toBe(false);
+    expect(highlight?.dispose).toHaveBeenCalledOnce();
+    blocks.dispose();
+  });
+
   it('passes shortcuts through with no history or an alternate buffer', () => {
     // Given: an attachment initially has no completed history.
     const blocks = attachCommandBlocks(terminal);
@@ -462,5 +515,108 @@ describe('attachCommandBlocks', () => {
     expect(fake.dataListener).toBeNull();
     expect(fake.bufferListener).toBeNull();
     expect(integrationMock.historyInstances[0]?.dispose).toHaveBeenCalledOnce();
+  });
+  it('clears only selection on Escape and continues navigation from the clamped command', () => {
+    // Given: the latest selected command is below the viewport limit.
+    fake.buffer.active.baseY = 10;
+    fake.buffer.active.viewportY = 10;
+    fake.buffer.active.cursorY = 15;
+    const blocks = attachCommandBlocks(terminal);
+    const history = integrationMock.historyInstances[0];
+    for (const line of [5, 15, 20]) {
+      history?.emitCompleted({ id: `command-${line}`, blockStartMarker: { line } });
+    }
+    press(fake, 'ArrowUp');
+    const highlight = integrationMock.createHighlight.mock.results[0]?.value;
+
+    // When: Escape removes selection and a further previous shortcut is pressed.
+    expect(press(fake, 'Escape', { metaKey: false })).toBe(false);
+    expect(press(fake, 'c', { code: 'KeyC', shiftKey: true })).toBe(true);
+    press(fake, 'ArrowUp');
+
+    // Then: the hidden highlight is disposed and navigation continues from the previous id.
+    expect(highlight?.dispose).toHaveBeenCalledOnce();
+    expect(fake.scrollToLine).toHaveBeenLastCalledWith(15);
+    expect(press(fake, 'c', { code: 'KeyC', shiftKey: true })).toBe(false);
+    expect(integrationMock.copies[1]?.copy).toHaveBeenCalledWith('command-and-output');
+    blocks.dispose();
+  });
+
+  it('copies the selected block after manual scrolling, then selects the next visible jump destination', () => {
+    // Given: the latest command is selected.
+    const blocks = attachCommandBlocks(terminal);
+    const history = integrationMock.historyInstances[0];
+    for (const line of [5, 15, 20]) {
+      history?.emitCompleted({ id: `command-${line}`, blockStartMarker: { line } });
+    }
+    press(fake, 'ArrowUp');
+
+    // When: the viewport moves away and Option changes C into a different character.
+    fake.scrollToLine(0);
+    const copied = press(fake, 'ç', { code: 'KeyC', altKey: true });
+    press(fake, 'ArrowDown');
+    press(fake, 'C', { code: 'KeyC', shiftKey: true });
+
+    // Then: copying retains the selected target, while a new jump uses the visible viewport.
+    expect(copied).toBe(false);
+    expect(integrationMock.copies[2]?.copy).toHaveBeenCalledWith('output');
+    expect(integrationMock.copies[0]?.copy).toHaveBeenCalledWith('command-and-output');
+    expect(integrationMock.createHighlight).toHaveBeenCalledTimes(2);
+    blocks.dispose();
+  });
+
+  it.each(['input', 'alternate', 'removal', 'past-latest'] as const)(
+    'clears the copy target after %s',
+    (reason) => {
+      // Given: a command has been selected through navigation.
+      const blocks = attachCommandBlocks(terminal);
+      const history = integrationMock.historyInstances[0];
+      const entry = { id: 'only', blockStartMarker: { line: 5 } };
+      history?.emitCompleted(entry);
+      press(fake, 'ArrowUp');
+
+      // When: selection is invalidated by normal lifecycle or input.
+      if (reason === 'input') {
+        fake.dataListener?.();
+      }
+      if (reason === 'alternate') {
+        fake.bufferListener?.({ type: 'alternate' });
+      }
+      if (reason === 'removal') {
+        history?.emitRemoved(entry);
+      }
+      if (reason === 'past-latest') {
+        press(fake, 'ArrowDown');
+      }
+
+      // Then: copy keys and Escape return to their normal behavior.
+      expect(press(fake, 'c', { code: 'KeyC', shiftKey: true })).toBe(true);
+      expect(press(fake, 'Escape', { metaKey: false })).toBe(true);
+      expect(integrationMock.copies[0]?.copy).not.toHaveBeenCalled();
+      blocks.dispose();
+    },
+  );
+
+  it.each([
+    { ctrlKey: true, shiftKey: true },
+    { altKey: true, shiftKey: true },
+    {},
+    { metaKey: false, shiftKey: true },
+  ])('passes through unrelated copy modifier combinations %j', (modifiers) => {
+    // Given: a completed command is selected.
+    const blocks = attachCommandBlocks(terminal);
+    integrationMock.historyInstances[0]?.emitCompleted({
+      id: 'only',
+      blockStartMarker: { line: 5 },
+    });
+    press(fake, 'ArrowUp');
+
+    // When: an unassigned copy combination is offered.
+    const result = press(fake, 'c', { code: 'KeyC', ...modifiers });
+
+    // Then: standard Cmd+C and extra modifiers retain their existing behavior.
+    expect(result).toBe(true);
+    expect(integrationMock.copies[0]?.copy).not.toHaveBeenCalled();
+    blocks.dispose();
   });
 });
