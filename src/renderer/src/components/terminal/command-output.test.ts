@@ -363,4 +363,46 @@ describe('createTerminalCommandCopyText', () => {
     // Then: stale or partial output is not copied.
     expect(text).toBeNull();
   });
+  it.each([
+    { mode: 'command-and-output' as const, output: 'result', expected: '$ echo result\nresult' },
+    { mode: 'command-and-output' as const, output: '', expected: '$ echo result' },
+    { mode: 'output' as const, output: 'result', expected: 'result' },
+    { mode: 'output' as const, output: '', expected: '' },
+    { mode: 'command' as const, output: 'result', expected: 'echo result' },
+    { mode: 'command' as const, output: '', expected: 'echo result' },
+  ])('builds $mode clipboard text for output "$output"', ({ mode, output, expected }) => {
+    // Given: a verified output range and a command line.
+    const buffer = createBuffer([{ text: output }, { text: '' }]);
+    const source = {
+      command: 'echo result',
+      outputStart: boundary(0, 0),
+      outputEnd: boundary(1, 0),
+      outputFingerprint: createTerminalOutputFingerprint(output),
+    };
+
+    // When: a copy mode is requested.
+    const result = createTerminalCommandCopyText(buffer, source, mode);
+
+    // Then: command-only mode omits the shell prefix, while empty output remains distinguishable.
+    expect(result).toBe(expected);
+  });
+
+  it('copies only the command even when output boundaries and fingerprints are invalid', () => {
+    // Given: the output is no longer reconstructible.
+    const buffer = createBuffer([]);
+    const source = {
+      command: 'echo retained',
+      outputStart: boundary(-1, 0),
+      outputEnd: boundary(-1, 0),
+      outputFingerprint: createTerminalOutputFingerprint('missing'),
+    };
+
+    // When: command-only and output modes are requested.
+    const command = createTerminalCommandCopyText(buffer, source, 'command');
+    const output = createTerminalCommandCopyText(buffer, source, 'output');
+
+    // Then: only command text is independent of the buffer.
+    expect(command).toBe('echo retained');
+    expect(output).toBeNull();
+  });
 });

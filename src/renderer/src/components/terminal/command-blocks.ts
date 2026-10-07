@@ -1,11 +1,21 @@
 import type { IDisposable, Terminal } from '@xterm/xterm';
 import { createTerminalCommandCopyDecoration } from './command-copy-decoration';
 import { TerminalCommandHistory, type TerminalCommandHistoryEntry } from './command-history';
+import { createTerminalCommandBlockDecoration } from './command-block-decoration';
+import { TerminalCommandCopyController } from './command-copy';
 import { findAdjacentCommand } from './command-navigation';
 
 /** Attaches command navigation and copy decorations to a terminal and owns their lifecycle. */
 export function attachCommandBlocks(terminal: Terminal): IDisposable {
   const commandDecorations = new Map<string, IDisposable>();
+  const copies = new Map<string, TerminalCommandCopyController>();
+  let selectedId: string | null = null;
+  let highlight: IDisposable | null = null;
+  const clearSelection = (): void => {
+    selectedId = null;
+    highlight?.dispose();
+    highlight = null;
+  };
   let navigatedId: string | null = null;
   let disposed = false;
   const resetNavigation = (): void => {
@@ -17,10 +27,14 @@ export function attachCommandBlocks(terminal: Terminal): IDisposable {
       // Entry ids are unique, so this only guards against an unexpected duplicate completion for
       // the same id leaking a previous decoration.
       commandDecorations.get(entry.id)?.dispose();
+      copies.get(entry.id)?.dispose();
+      const copyController = new TerminalCommandCopyController({ terminal, entry });
+      copies.set(entry.id, copyController);
       let decoration: IDisposable | null = null;
       decoration = createTerminalCommandCopyDecoration({
         terminal,
         entry,
+        copyController,
         onDisposed: () => {
           if (commandDecorations.get(entry.id) === decoration) {
             commandDecorations.delete(entry.id);
@@ -35,15 +49,24 @@ export function attachCommandBlocks(terminal: Terminal): IDisposable {
       if (entry.id === navigatedId) {
         resetNavigation();
       }
+      if (entry.id === selectedId) {
+        clearSelection();
+      }
       commandDecorations.get(entry.id)?.dispose();
       commandDecorations.delete(entry.id);
+      copies.get(entry.id)?.dispose();
+      copies.delete(entry.id);
     },
   });
 
   const disposables = [
-    terminal.onData(resetNavigation),
+    terminal.onData(() => {
+      clearSelection();
+      resetNavigation();
+    }),
     terminal.buffer.onBufferChange((buffer) => {
       if (buffer.type === 'alternate') {
+        clearSelection();
         resetNavigation();
       }
     }),
@@ -52,10 +75,40 @@ export function attachCommandBlocks(terminal: Terminal): IDisposable {
   // This attachment owns xterm's single custom key handler; teardown replaces it with passthrough.
   // The disposed guard also protects callers retaining a reference to the previous handler.
   terminal.attachCustomKeyEventHandler((event) => {
+    if (disposed || terminal.buffer.active.type !== 'normal' || event.type !== 'keydown') {
+      return true;
+    }
+    // xterm invokes this handler before its composition helper; IME cancellation must reach it.
+    if (event.isComposing || event.keyCode === 229) {
+      return true;
+    }
     if (
-      disposed ||
-      terminal.buffer.active.type !== 'normal' ||
-      event.type !== 'keydown' ||
+      event.key === 'Escape' &&
+      !event.metaKey &&
+      !event.ctrlKey &&
+      !event.altKey &&
+      !event.shiftKey &&
+      selectedId !== null
+    ) {
+      event.preventDefault();
+      clearSelection();
+      return false;
+    }
+    if (
+      event.code === 'KeyC' &&
+      event.metaKey &&
+      !event.ctrlKey &&
+      event.altKey !== event.shiftKey
+    ) {
+      const copy = selectedId === null ? undefined : copies.get(selectedId);
+      if (!copy) {
+        return true;
+      }
+      event.preventDefault();
+      void copy.copy(event.altKey ? 'output' : 'command-and-output');
+      return false;
+    }
+    if (
       !event.metaKey ||
       event.ctrlKey ||
       event.altKey ||
@@ -93,8 +146,14 @@ export function attachCommandBlocks(terminal: Terminal): IDisposable {
     if (target) {
       // Near the bottom, scrolling clamps to baseY. Keep the command id, not the viewport, as anchor.
       navigatedId = target.id;
+      if (selectedId !== target.id) {
+        clearSelection();
+        selectedId = target.id;
+        highlight = createTerminalCommandBlockDecoration(terminal, target);
+      }
       terminal.scrollToLine(target.blockStartMarker.line);
     } else if (direction === 'next') {
+      clearSelection();
       resetNavigation();
       terminal.scrollToBottom();
     }
@@ -107,6 +166,7 @@ export function attachCommandBlocks(terminal: Terminal): IDisposable {
         return;
       }
       disposed = true;
+      clearSelection();
       resetNavigation();
       terminal.attachCustomKeyEventHandler(() => true);
       for (const disposable of disposables) {
@@ -116,6 +176,10 @@ export function attachCommandBlocks(terminal: Terminal): IDisposable {
         decoration.dispose();
       }
       commandDecorations.clear();
+      for (const copy of copies.values()) {
+        copy.dispose();
+      }
+      copies.clear();
       commandHistory.dispose();
     },
   };

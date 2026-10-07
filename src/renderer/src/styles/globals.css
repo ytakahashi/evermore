@@ -58,6 +58,36 @@
 }
 
 @layer components {
+  .xterm .evermore-command-block-selection {
+    background: rgba(from var(--color-brand) r g b / 0.08);
+    pointer-events: none;
+  }
+
+  .xterm .evermore-command-copy-feedback-decoration {
+    pointer-events: none;
+  }
+
+  .xterm .evermore-command-copy-feedback {
+    display: flex;
+    width: 100%;
+    height: 100%;
+    align-items: center;
+    justify-content: center;
+    border-radius: 3px;
+    background: var(--color-panel);
+    color: var(--color-success);
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+  }
+
+  .xterm .evermore-command-copy-feedback[data-state='error'] {
+    color: var(--color-danger);
+  }
+
+  .xterm .evermore-command-copy-button[hidden] {
+    display: none;
+  }
+
   .xterm .evermore-command-copy-decoration {
     pointer-events: auto;
   }
@@ -85,9 +115,7 @@
   }
 
   .xterm .evermore-command-copy-decoration:hover .evermore-command-copy-button,
-  .xterm .evermore-command-copy-button:focus-visible,
-  .xterm .evermore-command-copy-button[data-state='copied'],
-  .xterm .evermore-command-copy-button[data-state='error'] {
+  .xterm .evermore-command-copy-button:focus-visible {
     opacity: 1;
   }
 
@@ -96,14 +124,6 @@
     border-color: var(--color-brand);
     color: var(--color-brand);
     outline: none;
-  }
-
-  .xterm .evermore-command-copy-button[data-state='copied'] {
-    color: var(--color-success);
-  }
-
-  .xterm .evermore-command-copy-button[data-state='error'] {
-    color: var(--color-danger);
   }
 
   .xterm .evermore-command-copy-button:disabled {

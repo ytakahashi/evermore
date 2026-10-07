@@ -1,7 +1,7 @@
 import type { IDecoration, IDisposable, IMarker, Terminal } from '@xterm/xterm';
 import { afterEach, describe, expect, it, vi } from 'vite-plus/test';
-import { createTerminalOutputFingerprint } from './command-output';
 import { createTerminalCommandCopyDecoration } from './command-copy-decoration';
+import type { TerminalCommandCopyController, TerminalCommandCopyState } from './command-copy';
 import type { TerminalCommandHistoryEntry } from './command-history';
 
 class MockMarker implements IMarker {
@@ -80,85 +80,89 @@ class MockDecoration implements IDecoration {
   }
 }
 
-interface TerminalFixture {
-  decoration: MockDecoration;
-  emitResize: (cols: number) => void;
-  registerDecoration: ReturnType<typeof vi.fn>;
+class FakeCopyController {
+  private state: TerminalCommandCopyState = {
+    status: 'idle',
+    mode: 'command-and-output',
+    busy: false,
+    outputAvailable: true,
+  };
+  private readonly listeners = new Set<() => void>();
+  public readonly copy = vi.fn(() => Promise.resolve());
+  public readonly dispose = vi.fn();
+  public readonly getState = (): TerminalCommandCopyState => this.state;
+  public readonly onStateChange = (listener: () => void): IDisposable => {
+    this.listeners.add(listener);
+    return {
+      dispose: () => {
+        this.listeners.delete(listener);
+      },
+    };
+  };
+  public change(state: Partial<TerminalCommandCopyState>): void {
+    this.state = { ...this.state, ...state };
+    for (const listener of this.listeners) {
+      listener();
+    }
+  }
+}
+
+const handles: IDisposable[] = [];
+
+function fixture(promptLine = 0): {
+  controller: FakeCopyController;
+  entry: TerminalCommandHistoryEntry;
   terminal: Terminal;
-}
-
-function createTerminalFixture(output = 'result'): TerminalFixture {
-  const promptMarker = new MockMarker();
-  const decoration = new MockDecoration(promptMarker);
-  const lines = [
-    {
-      isWrapped: false,
-      length: output.length,
-      translateToString: (
-        _trimRight?: boolean,
-        startColumn = 0,
-        endColumn = output.length,
-      ): string => output.slice(startColumn, endColumn),
-      getCell: () => undefined,
-    },
-    {
-      isWrapped: false,
-      length: 80,
-      translateToString: () => '',
-      getCell: () => undefined,
-    },
-  ];
-  const normalBuffer = {
-    type: 'normal' as const,
-    cursorX: 0,
-    cursorY: 0,
-    viewportY: 0,
-    baseY: 0,
-    length: lines.length,
-    getLine: (index: number) => lines[index],
-    getNullCell: () => {
-      throw new Error('getNullCell is not used by command copy decoration');
-    },
-  };
-  const registerDecoration = vi.fn(() => decoration);
-  let resizeListener: ((dimensions: { cols: number; rows: number }) => void) | null = null;
-  const terminal = {
-    cols: 80,
-    buffer: {
-      normal: normalBuffer,
-    },
-    onResize: (listener: (dimensions: { cols: number; rows: number }) => void) => {
-      resizeListener = listener;
-      return {
-        dispose: (): void => {
-          resizeListener = null;
-        },
-      };
-    },
-    registerDecoration,
-  } as unknown as Terminal;
-
-  return {
-    decoration,
-    emitResize: (cols: number): void => {
-      resizeListener?.({ cols, rows: 24 });
-    },
-    registerDecoration,
-    terminal,
-  };
-}
-
-function createEntry(promptMarker: IMarker, output = 'result'): TerminalCommandHistoryEntry {
-  return {
-    id: 'terminal-command-1',
+  decorations: MockDecoration[];
+  registerDecoration: ReturnType<
+    typeof vi.fn<(options: { marker: IMarker }) => MockDecoration | undefined>
+  >;
+  onDisposed: ReturnType<typeof vi.fn>;
+  attach: () => IDisposable | null;
+} {
+  const blockStartMarker = new MockMarker();
+  const promptMarker = Object.assign(new MockMarker(), { line: promptLine });
+  const entry: TerminalCommandHistoryEntry = {
+    id: 'command',
     command: 'echo result',
-    blockStartMarker: promptMarker,
+    blockStartMarker,
     promptMarker,
-    outputStart: { marker: new MockMarker(), column: 0 },
-    outputEnd: { marker: Object.assign(new MockMarker(), { line: 1 }), column: 0 },
-    outputFingerprint: createTerminalOutputFingerprint(output),
+    outputStart: { marker: promptMarker, column: 0 },
+    outputEnd: { marker: Object.assign(new MockMarker(), { line: promptLine + 2 }), column: 0 },
+    outputFingerprint: { length: 6, hash: '00000000' },
     completionCols: 80,
     endsAtLineStart: true,
+  };
+  const decorations: MockDecoration[] = [];
+  const registerDecoration = vi.fn<(options: { marker: IMarker }) => MockDecoration | undefined>(
+    (options) => {
+      const value = new MockDecoration(options.marker);
+      decorations.push(value);
+      return value;
+    },
+  );
+  const terminal = { registerDecoration } as unknown as Terminal;
+  const controller = new FakeCopyController();
+  const onDisposed = vi.fn();
+  return {
+    entry,
+    terminal,
+    controller,
+    decorations,
+    registerDecoration,
+    onDisposed,
+    attach: () => {
+      const handle = createTerminalCommandCopyDecoration({
+        terminal,
+        entry,
+        copyController: controller as unknown as TerminalCommandCopyController,
+        onDisposed,
+      });
+      if (handle) {
+        handles.push(handle);
+      }
+      return handle;
+    },
   };
 }
 
@@ -167,317 +171,250 @@ function renderButton(decoration: MockDecoration): HTMLButtonElement {
   decoration.render(element);
   const button = element.querySelector('button');
   if (!(button instanceof HTMLButtonElement)) {
-    throw new Error('Expected command copy button to render');
+    throw new Error('Expected copy button');
   }
   return button;
 }
 
+function decorationAt(decorations: MockDecoration[], index: number): MockDecoration {
+  const value = decorations[index];
+  if (!value) {
+    throw new Error('Expected registered decoration');
+  }
+  return value;
+}
+
 describe('createTerminalCommandCopyDecoration', () => {
   afterEach(() => {
-    vi.useRealTimers();
+    for (const handle of handles.splice(0)) {
+      handle.dispose();
+    }
   });
 
-  it('registers a right-anchored top-layer decoration on the prompt marker', () => {
-    // Given: a completed command entry.
-    const fixture = createTerminalFixture();
-    const entry = createEntry(fixture.decoration.marker);
+  it('registers the action at the prompt and retains one semantic button across renders', () => {
+    // Given: a multi-line prompt with an independently owned copy controller.
+    const f = fixture(1);
+    f.attach();
+    const decoration = decorationAt(f.decorations, 0);
+    const element = document.createElement('div');
 
-    // When: its copy decoration is created.
-    const disposable = createTerminalCommandCopyDecoration({
-      terminal: fixture.terminal,
-      entry,
-    });
+    // When: xterm renders the same container repeatedly.
+    decoration.render(element);
+    decoration.render(element);
 
-    // Then: xterm receives the initial compact right-edge placement.
-    expect(disposable).not.toBeNull();
-    expect(fixture.registerDecoration).toHaveBeenCalledWith({
-      marker: entry.promptMarker,
+    // Then: placement and accessible action are stable.
+    expect(f.registerDecoration).toHaveBeenCalledExactlyOnceWith({
+      marker: f.entry.promptMarker,
       anchor: 'right',
       width: 2,
       height: 1,
       layer: 'top',
     });
-  });
-
-  it('returns null when xterm cannot register the decoration', () => {
-    // Given: xterm rejects a disposed or alternate-buffer marker.
-    const fixture = createTerminalFixture();
-    fixture.registerDecoration.mockReturnValue(undefined);
-
-    // When: decoration creation is attempted.
-    const disposable = createTerminalCommandCopyDecoration({
-      terminal: fixture.terminal,
-      entry: createEntry(fixture.decoration.marker),
-    });
-
-    // Then: the caller receives no lifecycle handle.
-    expect(disposable).toBeNull();
-  });
-
-  it('renders one semantic button across repeated decoration renders', () => {
-    // Given: a registered command decoration.
-    const fixture = createTerminalFixture();
-    const disposable = createTerminalCommandCopyDecoration({
-      terminal: fixture.terminal,
-      entry: createEntry(fixture.decoration.marker),
-    });
-    const element = document.createElement('div');
-
-    // When: xterm renders the same decoration element more than once.
-    fixture.decoration.render(element);
-    fixture.decoration.render(element);
-
-    // Then: one keyboard-operable button is retained.
-    const buttons = element.querySelectorAll('button');
-    expect(buttons).toHaveLength(1);
-    expect(buttons[0]?.type).toBe('button');
-    expect(buttons[0]?.tabIndex).toBe(0);
-    expect(buttons[0]?.getAttribute('aria-label')).toBe('Copy command and output');
     expect(element).toHaveClass('evermore-command-copy-decoration');
-    disposable?.dispose();
-  });
-
-  it('copies the current verified command output and shows temporary success state', async () => {
-    // Given: current buffer output matches the completion fingerprint.
-    vi.useFakeTimers();
-    const fixture = createTerminalFixture();
-    const writeClipboardText = vi.fn(() => Promise.resolve());
-    const disposable = createTerminalCommandCopyDecoration({
-      terminal: fixture.terminal,
-      entry: createEntry(fixture.decoration.marker),
-      writeClipboardText,
-    });
-    const button = renderButton(fixture.decoration);
-
-    // When: the user clicks the command copy button.
-    button.click();
-    await vi.waitFor(() => {
-      expect(button.disabled).toBe(false);
-    });
-
-    // Then: verified text is copied and success feedback resets after 1.5 seconds.
-    expect(writeClipboardText).toHaveBeenCalledWith('$ echo result\nresult');
-    expect(button.dataset.state).toBe('copied');
-    expect(button.textContent).toBe('✓');
-    await vi.advanceTimersByTimeAsync(1500);
-    expect(button.dataset.state).toBe('idle');
-    expect(button.textContent).toBe('⧉');
-    disposable?.dispose();
-  });
-
-  it('preserves the browser receiver when scheduling and clearing success feedback', async () => {
-    // Given: Chromium-like timers throw when called without the global Window receiver.
-    const originalSetTimeout = globalThis.setTimeout;
-    const originalClearTimeout = globalThis.clearTimeout;
-    const timer = 123 as unknown as ReturnType<typeof globalThis.setTimeout>;
-    const setTimeoutSpy = vi.fn(function (
-      this: unknown,
-      _callback: TimerHandler,
-      _delay?: number,
-    ): ReturnType<typeof globalThis.setTimeout> {
-      if (this !== globalThis) {
-        throw new TypeError('Illegal invocation');
-      }
-      return timer;
-    });
-    const clearTimeoutSpy = vi.fn(function (this: unknown): void {
-      if (this !== globalThis) {
-        throw new TypeError('Illegal invocation');
-      }
-    });
-    Object.defineProperty(globalThis, 'setTimeout', {
-      configurable: true,
-      value: setTimeoutSpy,
-    });
-    Object.defineProperty(globalThis, 'clearTimeout', {
-      configurable: true,
-      value: clearTimeoutSpy,
-    });
-    const fixture = createTerminalFixture();
-    const disposable = createTerminalCommandCopyDecoration({
-      terminal: fixture.terminal,
-      entry: createEntry(fixture.decoration.marker),
-      writeClipboardText: () => Promise.resolve(),
-    });
-    const button = renderButton(fixture.decoration);
-
-    try {
-      // When: clipboard writing succeeds and schedules the temporary check state.
-      button.click();
-      await Promise.resolve();
-      await Promise.resolve();
-
-      // Then: timer scheduling succeeds instead of converting the copied state to an error.
-      expect(button.dataset.state).toBe('copied');
-      expect(setTimeoutSpy).toHaveBeenCalledOnce();
-      disposable?.dispose();
-      expect(clearTimeoutSpy).toHaveBeenCalledWith(timer);
-    } finally {
-      Object.defineProperty(globalThis, 'setTimeout', {
-        configurable: true,
-        value: originalSetTimeout,
-      });
-      Object.defineProperty(globalThis, 'clearTimeout', {
-        configurable: true,
-        value: originalClearTimeout,
-      });
-    }
-  });
-
-  it('shows an error without writing when the buffer no longer matches the fingerprint', () => {
-    // Given: the entry fingerprint refers to different completion-time output.
-    const fixture = createTerminalFixture('changed');
-    const writeClipboardText = vi.fn(() => Promise.resolve());
-    const disposable = createTerminalCommandCopyDecoration({
-      terminal: fixture.terminal,
-      entry: createEntry(fixture.decoration.marker, 'original'),
-      writeClipboardText,
-    });
-    const button = renderButton(fixture.decoration);
-
-    // When: the user tries to copy stale buffer content.
-    button.click();
-
-    // Then: no partial text is written and the visible button reports failure.
-    expect(writeClipboardText).not.toHaveBeenCalled();
-    expect(button.dataset.state).toBe('error');
-    expect(button.getAttribute('aria-label')).toBe('Copy command and output failed');
-    expect(button.textContent).toBe('!');
-    disposable?.dispose();
-  });
-
-  it('shows an error when clipboard writing is rejected', async () => {
-    // Given: the browser clipboard rejects the explicit write.
-    const fixture = createTerminalFixture();
-    const disposable = createTerminalCommandCopyDecoration({
-      terminal: fixture.terminal,
-      entry: createEntry(fixture.decoration.marker),
-      writeClipboardText: () => Promise.reject(new Error('denied')),
-    });
-    const button = renderButton(fixture.decoration);
-
-    // When: copy is attempted.
-    button.click();
-    await vi.waitFor(() => {
-      expect(button.dataset.state).toBe('error');
-    });
-
-    // Then: the button is enabled for a later retry.
-    expect(button.disabled).toBe(false);
-    disposable?.dispose();
-  });
-
-  it('prevents concurrent clipboard writes while one copy is pending', async () => {
-    // Given: the first clipboard write remains pending.
-    const fixture = createTerminalFixture();
-    let resolveWrite!: () => void;
-    const writeClipboardText = vi.fn(
-      () =>
-        new Promise<void>((resolve) => {
-          resolveWrite = resolve;
-        }),
+    expect(element.querySelectorAll('button')).toHaveLength(1);
+    expect(element.querySelector('button')).toHaveAttribute(
+      'aria-label',
+      'Copy command and output',
     );
-    const disposable = createTerminalCommandCopyDecoration({
-      terminal: fixture.terminal,
-      entry: createEntry(fixture.decoration.marker),
-      writeClipboardText,
-    });
-    const button = renderButton(fixture.decoration);
+    expect(element.querySelector('button')).toHaveAttribute('type', 'button');
+    expect(element.querySelector('button')).toHaveAttribute('tabindex', '0');
+  });
 
-    // When: repeated activation occurs before the first write settles.
+  it('delegates button activation and reflects busy state without owning copy execution', () => {
+    // Given: a rendered copy action.
+    const f = fixture();
+    f.attach();
+    const button = renderButton(decorationAt(f.decorations, 0));
+    const bubbled = vi.fn();
+    button.parentElement?.addEventListener('mousedown', bubbled);
+
+    // When: the action is clicked and its owner reports a pending write.
+    button.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
     button.click();
-    button.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    f.controller.change({ busy: true });
+    button.click();
 
-    // Then: only one clipboard write is in flight.
-    expect(writeClipboardText).toHaveBeenCalledOnce();
+    // Then: one action request is delegated, terminal pointer handling is suppressed, and busy disables it.
+    expect(f.controller.copy).toHaveBeenCalledExactlyOnceWith('command-and-output');
+    expect(bubbled).not.toHaveBeenCalled();
     expect(button.disabled).toBe(true);
-    resolveWrite();
-    await vi.waitFor(() => {
-      expect(button.disabled).toBe(false);
-    });
-    disposable?.dispose();
+    f.controller.change({ busy: false });
+    expect(button.disabled).toBe(false);
   });
 
-  it('disposes non-newline-terminated output decoration after a column resize', () => {
-    // Given: a command completed mid-line, where reflow cannot preserve the recorded end column.
-    const fixture = createTerminalFixture();
-    const entry = {
-      ...createEntry(fixture.decoration.marker),
-      endsAtLineStart: false,
-    };
-    const onDisposed = vi.fn();
-    createTerminalCommandCopyDecoration({
-      terminal: fixture.terminal,
-      entry,
-      onDisposed,
-    });
-    const button = renderButton(fixture.decoration);
+  it.each([
+    { mode: 'output', status: 'copied', label: 'Copied output', symbol: '✓' },
+    { mode: 'output', status: 'error', label: 'Copy output failed', symbol: '!' },
+    { mode: 'command', status: 'copied', label: 'Copied command', symbol: '✓' },
+    { mode: 'command', status: 'error', label: 'Copy command failed', symbol: '!' },
+    {
+      mode: 'command-and-output',
+      status: 'copied',
+      label: 'Copied command and output',
+      symbol: '✓',
+    },
+    {
+      mode: 'command-and-output',
+      status: 'error',
+      label: 'Copy command and output failed',
+      symbol: '!',
+    },
+  ] as const)(
+    'shows $mode / $status only in the independent indicator',
+    ({ mode, status, label, symbol }) => {
+      // Given: the action and block start occupy different prompt rows.
+      const f = fixture(1);
+      f.attach();
+      const button = renderButton(decorationAt(f.decorations, 0));
 
-    // When: terminal columns change from the completion width.
-    fixture.emitResize(79);
+      // When: the shared owner reports a keyboard or button result.
+      f.controller.change({ mode, status });
+      const indicator = decorationAt(f.decorations, 1);
+      const element = document.createElement('div');
+      indicator.render(element);
 
-    // Then: the potentially inaccurate command is no longer offered for copying.
-    expect(fixture.decoration.isDisposed).toBe(true);
+      // Then: feedback describes the actual copy and the action continues to describe its next operation.
+      expect(f.registerDecoration).toHaveBeenLastCalledWith({
+        marker: f.entry.blockStartMarker,
+        anchor: 'right',
+        width: 2,
+        height: 1,
+        layer: 'top',
+      });
+      expect(element).toHaveClass('evermore-command-copy-feedback-decoration');
+      expect(element.querySelector('[role="status"]')).toHaveTextContent(symbol);
+      expect(element.querySelector('[role="status"]')).toHaveAttribute('aria-label', label);
+      expect(button.textContent).toBe('⧉');
+      expect(button).toHaveAttribute('aria-label', 'Copy command and output');
+      expect(button.hidden).toBe(false);
+    },
+  );
+
+  it('restores presentation from shared state after DOM replacement and removes idle feedback', () => {
+    // Given: same-line prompt feedback occupies the action's cell.
+    const f = fixture();
+    f.attach();
+    const action = decorationAt(f.decorations, 0);
+    const original = renderButton(action);
+    f.controller.change({ status: 'copied', mode: 'output' });
+    expect(original.hidden).toBe(true);
+    const indicator = decorationAt(f.decorations, 1);
+    const originalContainer = document.createElement('div');
+    indicator.render(originalContainer);
+
+    // When: xterm replaces both DOM containers before the owner clears feedback.
+    const replacement = renderButton(action);
+    const replacementContainer = document.createElement('div');
+    indicator.render(replacementContainer);
+    expect(replacement.hidden).toBe(true);
+    expect(replacementContainer.querySelector('[role="status"]')).toHaveAttribute(
+      'aria-label',
+      'Copied output',
+    );
+    original.dispatchEvent(new MouseEvent('click'));
+    f.controller.change({ status: 'idle' });
+
+    // Then: detached actions have no listeners, and the controller's idle notification alone restores the action.
+    expect(f.controller.copy).not.toHaveBeenCalled();
+    expect(original.parentElement).toBeNull();
+    expect(originalContainer.childElementCount).toBe(0);
+    expect(replacement.hidden).toBe(false);
+    expect(replacementContainer.childElementCount).toBe(0);
+    expect(indicator.isDisposed).toBe(true);
+  });
+
+  it('keeps feedback alive when output invalidation removes the action', () => {
+    // Given: an independently owned copy controller and rendered action.
+    const f = fixture();
+    const visual = f.attach();
+    const action = decorationAt(f.decorations, 0);
+    const button = renderButton(action);
+
+    // When: the owner invalidates output after reflow, then reports a rejected keyboard copy.
+    f.controller.change({ outputAvailable: false });
+    f.controller.change({ status: 'error', mode: 'output' });
+    const element = document.createElement('div');
+    decorationAt(f.decorations, 1).render(element);
+
+    // Then: only the action is removed; feedback and controller lifetime remain independent.
+    expect(action.isDisposed).toBe(true);
     expect(button.parentElement).toBeNull();
-    expect(onDisposed).toHaveBeenCalledOnce();
+    expect(f.onDisposed).not.toHaveBeenCalled();
+    expect(element.querySelector('[role="status"]')).toHaveAttribute(
+      'aria-label',
+      'Copy output failed',
+    );
+    visual?.dispose();
+    expect(f.controller.dispose).not.toHaveBeenCalled();
   });
 
-  it('keeps newline-terminated output decoration across column resizes', () => {
-    // Given: a command ended at column zero and can be reconstructed after reflow.
-    const fixture = createTerminalFixture();
-    const disposable = createTerminalCommandCopyDecoration({
-      terminal: fixture.terminal,
-      entry: createEntry(fixture.decoration.marker),
-    });
-    const button = renderButton(fixture.decoration);
+  it.each(['initially-invalid', 'registration-failed'] as const)(
+    'can show feedback without an action: %s',
+    (reason) => {
+      // Given: output is unavailable or xterm temporarily cannot register the action.
+      const f = fixture();
+      if (reason === 'initially-invalid') {
+        f.controller.change({ outputAvailable: false });
+      } else {
+        f.registerDecoration.mockReturnValueOnce(undefined);
+      }
 
-    // When: terminal columns change.
-    fixture.emitResize(40);
+      // When: the view attaches and the copy owner reports an error.
+      expect(f.attach()).not.toBeNull();
+      f.controller.change({ status: 'error', mode: 'output' });
+      const element = document.createElement('div');
+      decorationAt(f.decorations, 0).render(element);
 
-    // Then: the marker-backed copy action remains available.
-    expect(fixture.decoration.isDisposed).toBe(false);
-    expect(button.parentElement).not.toBeNull();
-    disposable?.dispose();
+      // Then: feedback uses an independent block-start decoration.
+      expect(element.querySelector('[role="status"]')).toHaveTextContent('!');
+    },
+  );
+
+  it('rejects disposed history markers', () => {
+    // Given: history has already lost its block-start marker.
+    const f = fixture();
+    f.entry.blockStartMarker.dispose();
+
+    // When: attachment attempts to create a view.
+    const handle = f.attach();
+
+    // Then: no decoration or copy ownership is acquired.
+    expect(handle).toBeNull();
+    expect(f.registerDecoration).not.toHaveBeenCalled();
+    expect(f.controller.dispose).not.toHaveBeenCalled();
   });
 
-  it('cleans up the button, feedback timer, and decoration idempotently', async () => {
-    // Given: a copied decoration has an active feedback timer.
-    vi.useFakeTimers();
-    const fixture = createTerminalFixture();
-    const disposable = createTerminalCommandCopyDecoration({
-      terminal: fixture.terminal,
-      entry: createEntry(fixture.decoration.marker),
-      writeClipboardText: () => Promise.resolve(),
-    });
-    const button = renderButton(fixture.decoration);
-    button.click();
-    await vi.waitFor(() => {
-      expect(vi.getTimerCount()).toBe(1);
-    });
+  it.each(['owner', 'xterm'] as const)(
+    'disposes presentation and subscriptions independently: %s',
+    (source) => {
+      // Given: rendered action and feedback with an externally owned copy controller.
+      const f = fixture(1);
+      const visual = f.attach();
+      const action = decorationAt(f.decorations, 0);
+      const button = renderButton(action);
+      f.controller.change({ status: 'copied' });
+      const indicator = decorationAt(f.decorations, 1);
+      const element = document.createElement('div');
+      indicator.render(element);
 
-    // When: the owning history entry disposes the decoration twice.
-    disposable?.dispose();
-    disposable?.dispose();
+      // When: the view is disposed directly or through xterm's marker lifecycle, then state changes again.
+      if (source === 'xterm') {
+        action.dispose();
+      }
+      visual?.dispose();
+      visual?.dispose();
+      f.controller.change({ status: 'error' });
+      button.dispatchEvent(new MouseEvent('click'));
 
-    // Then: all owned UI resources are removed without a late timer update.
-    expect(fixture.decoration.isDisposed).toBe(true);
-    expect(button.isConnected).toBe(false);
-    expect(vi.getTimerCount()).toBe(0);
-  });
-
-  it('cleans up owned UI when xterm disposes the decoration through marker lifecycle', () => {
-    // Given: a rendered copy decoration.
-    const fixture = createTerminalFixture();
-    createTerminalCommandCopyDecoration({
-      terminal: fixture.terminal,
-      entry: createEntry(fixture.decoration.marker),
-    });
-    const button = renderButton(fixture.decoration);
-
-    // When: xterm disposes the decoration after its marker is trimmed or cleared.
-    fixture.decoration.dispose();
-
-    // Then: the controller removes its button and listeners.
-    expect(button.isConnected).toBe(false);
-  });
+      // Then: no UI or listener is revived and the view never disposes the shared owner.
+      expect(action.isDisposed).toBe(true);
+      expect(indicator.isDisposed).toBe(true);
+      expect(button.parentElement).toBeNull();
+      expect(element.childElementCount).toBe(0);
+      expect(f.onDisposed).toHaveBeenCalledOnce();
+      expect(f.controller.copy).not.toHaveBeenCalled();
+      expect(f.controller.dispose).not.toHaveBeenCalled();
+      expect(f.registerDecoration).toHaveBeenCalledTimes(2);
+    },
+  );
 });

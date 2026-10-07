@@ -1,5 +1,7 @@
 import type { IBuffer, IMarker } from '@xterm/xterm';
 
+export type CommandCopyMode = 'command-and-output' | 'output' | 'command';
+
 export interface TerminalBufferBoundary {
   /** Zero-based xterm buffer column captured with the marker. */
   column: number;
@@ -89,12 +91,16 @@ export function createTerminalOutputFingerprint(output: string): TerminalOutputF
 }
 
 /**
- * Builds clipboard text only when the current xterm range matches its completion fingerprint.
+ * Builds clipboard text, verifying buffer identity for modes that include output.
  */
 export function createTerminalCommandCopyText(
   buffer: IBuffer,
   source: TerminalCommandCopySource,
+  mode: CommandCopyMode = 'command-and-output',
 ): string | null {
+  if (mode === 'command') {
+    return source.command;
+  }
   const output = extractNormalizedTerminalOutput(buffer, source);
   if (output === null) {
     return null;
@@ -104,6 +110,9 @@ export function createTerminalCommandCopyText(
     return null;
   }
 
+  if (mode === 'output') {
+    return output;
+  }
   return output.length === 0 ? `$ ${source.command}` : `$ ${source.command}\n${output}`;
 }
 
