@@ -1,95 +1,223 @@
 import type { IDecoration, IDisposable, Terminal } from '@xterm/xterm';
 import type { TerminalCommandHistoryEntry } from './command-history';
 import type { TerminalCommandCopyController, TerminalCommandCopyState } from './command-copy';
+import type { CommandCopyMode } from './command-output';
+import type {
+  TerminalCommandToolbarHost,
+  TerminalCommandToolbarHover,
+} from './command-toolbar-hover';
 
 export interface TerminalCommandCopyDecorationOptions {
   terminal: Terminal;
   entry: TerminalCommandHistoryEntry;
   copyController: TerminalCommandCopyController;
+  hover: TerminalCommandToolbarHover;
   onDisposed?: () => void;
+  /** Lets the owner restore focus after history removal, but never during owner teardown. */
+  onFocusedEntryRemoved?: () => void;
 }
 
-/** Renders the existing copy action and a separate feedback indicator using shared copy state. */
+export interface TerminalCommandCopyDecoration extends IDisposable {
+  /** Removes a history entry's presentation, restoring focus when its toolbar had focus. */
+  disposeForRemoval: () => void;
+}
+
+const actions: readonly { mode: CommandCopyMode; label: string; text: string }[] = [
+  { mode: 'command-and-output', label: 'Copy command and output', text: 'C+O' },
+  { mode: 'output', label: 'Copy output', text: 'O' },
+  { mode: 'command', label: 'Copy command', text: 'C' },
+];
+
+/** Displays three copy actions and independent feedback without owning copy state or history markers. */
 export function createTerminalCommandCopyDecoration(
   options: TerminalCommandCopyDecorationOptions,
-): IDisposable | null {
-  if (options.entry.promptMarker.isDisposed || options.entry.blockStartMarker.isDisposed) {
+): TerminalCommandCopyDecoration | null {
+  if (options.entry.blockStartMarker.isDisposed) {
     return null;
   }
   return new CommandCopyDecorationController(options);
 }
 
-class CommandCopyDecorationController implements IDisposable {
-  private buttonDecoration: IDecoration | undefined;
-  private buttonDisposables: IDisposable[] = [];
+class CommandCopyDecorationController implements TerminalCommandCopyDecoration {
+  private toolbarDecoration: IDecoration | undefined;
+  private toolbarSubscriptions: IDisposable[] = [];
   private indicatorDecoration: IDecoration | undefined;
-  private indicatorDisposables: IDisposable[] = [];
-  private button: HTMLButtonElement | null = null;
+  private indicatorSubscriptions: IDisposable[] = [];
+  private toolbar: HTMLDivElement | null = null;
   private indicator: HTMLSpanElement | null = null;
-  private readonly stateDisposable: IDisposable;
+  private readonly buttons = new Map<CommandCopyMode, HTMLButtonElement>();
+  private readonly subscriptions: IDisposable[];
+  private readonly hoverHost: TerminalCommandToolbarHost;
+  private hovered = false;
+  private representative = true;
+  private pendingFocus: CommandCopyMode | null = null;
   private disposed = false;
 
   public constructor(private readonly options: TerminalCommandCopyDecorationOptions) {
-    if (options.copyController.getState().outputAvailable) {
-      this.buttonDecoration = options.terminal.registerDecoration({
-        marker: options.entry.promptMarker,
-        anchor: 'right',
-        width: 2,
-        height: 1,
-        layer: 'top',
-      });
-      if (this.buttonDecoration) {
-        this.buttonDisposables = [
-          this.buttonDecoration.onRender((element) => {
-            this.renderButton(element);
-          }),
-          this.buttonDecoration.onDispose(() => {
-            this.dispose();
-          }),
-        ];
-      }
-    }
-    this.stateDisposable = options.copyController.onStateChange(() => {
-      this.update();
-    });
-    this.update();
+    this.hoverHost = options.hover.register(
+      options.entry.blockStartMarker,
+      (hovered, representative) => {
+        this.hovered = hovered;
+        this.representative = representative;
+        this.updateToolbar();
+      },
+    );
+    this.subscriptions = [
+      options.copyController.onStateChange(() => this.update()),
+      options.terminal.onResize(() => this.rebuild()),
+      options.terminal.buffer.onBufferChange(() => this.rebuild()),
+      options.entry.blockStartMarker.onDispose(() => this.disposeForRemoval()),
+    ];
+    this.rebuild();
   }
 
   public dispose(): void {
+    this.disposePresentation(false);
+  }
+
+  public disposeForRemoval(): void {
+    this.disposePresentation(true);
+  }
+
+  private disposePresentation(entryRemoved: boolean): void {
     if (this.disposed) {
       return;
     }
     this.disposed = true;
-    this.stateDisposable.dispose();
-    this.clearButton();
+    const wasFocused = this.focusedMode() !== null;
+    for (const subscription of this.subscriptions) {
+      subscription.dispose();
+    }
+    this.hoverHost.dispose();
+    this.clearToolbar();
     this.clearIndicator();
+    this.pendingFocus = null;
+    // Explicit disposal includes replacement and pane teardown, which must not redirect focus.
+    if (entryRemoved && wasFocused && this.options.terminal.element?.isConnected) {
+      this.options.onFocusedEntryRemoved?.();
+    }
     this.options.onDisposed?.();
   }
 
-  private renderButton(element: HTMLElement): void {
+  private rebuild(): void {
+    if (this.disposed) {
+      return;
+    }
+    const focused = this.focusedMode();
+    if (focused !== null) {
+      this.pendingFocus = focused;
+    }
+    // Unsubscribe before replacing decorations: a renderer disposal is not an entry disposal.
+    this.clearToolbar();
+    this.clearIndicator();
+    if (
+      this.options.terminal.buffer.active.type !== 'normal' ||
+      this.options.entry.blockStartMarker.isDisposed
+    ) {
+      return;
+    }
+    this.toolbarDecoration = this.options.terminal.registerDecoration({
+      marker: this.options.entry.blockStartMarker,
+      width: this.options.terminal.cols,
+      height: 1,
+      layer: 'top',
+    });
+    if (this.toolbarDecoration) {
+      this.toolbarSubscriptions = [
+        this.toolbarDecoration.onRender((element) => this.renderToolbar(element)),
+        this.toolbarDecoration.onDispose(() => this.clearToolbar()),
+      ];
+    }
+    this.update();
+  }
+
+  private renderToolbar(element: HTMLElement): void {
     if (this.disposed) {
       return;
     }
     element.classList.add('evermore-command-copy-decoration');
-    if (this.button?.parentElement !== element) {
-      this.removeButton();
-      const button = element.ownerDocument.createElement('button');
-      button.className = 'evermore-command-copy-button';
-      button.type = 'button';
-      button.tabIndex = 0;
-      button.addEventListener('mousedown', stopTerminalPointerEvent);
-      button.addEventListener('click', this.copyCommand);
-      this.button = button;
-      element.appendChild(button);
+    if (this.toolbar?.parentElement !== element) {
+      const focused = this.focusedMode();
+      if (focused !== null) {
+        this.pendingFocus = focused;
+      }
+      this.removeToolbar();
+      const toolbar = element.ownerDocument.createElement('div');
+      toolbar.className = 'evermore-command-copy-toolbar';
+      toolbar.setAttribute('role', 'toolbar');
+      const code = this.options.entry.exitCode;
+      toolbar.setAttribute(
+        'aria-label',
+        code === null
+          ? 'Command actions (exit status unknown)'
+          : `Command actions (exit status ${code})`,
+      );
+      toolbar.title = code === null ? 'Exit status unknown' : `Exit status ${code}`;
+      for (const action of actions) {
+        const button = element.ownerDocument.createElement('button');
+        button.type = 'button';
+        button.className = 'evermore-command-copy-button';
+        button.dataset.mode = action.mode;
+        button.setAttribute('aria-label', action.label);
+        button.title = action.label;
+        button.textContent = action.text;
+        toolbar.appendChild(button);
+        this.buttons.set(action.mode, button);
+      }
+      toolbar.addEventListener('click', this.copyCommand);
+      toolbar.addEventListener('mousedown', stopTerminalEvent);
+      toolbar.addEventListener('pointerdown', stopTerminalEvent);
+      // Native button activation and Tab keep their defaults, but cannot turn into shell input.
+      toolbar.addEventListener('keydown', stopTerminalEvent);
+      toolbar.addEventListener('keyup', stopTerminalEvent);
+      toolbar.addEventListener('keypress', stopTerminalEvent);
+      this.toolbar = toolbar;
+      element.appendChild(toolbar);
     }
-    this.updateButton(this.options.copyController.getState());
+    this.hoverHost.setElement(element);
+    // Keep feedback separate even in narrow panes; actions scroll within the remaining area.
+    const cols = this.options.terminal.cols;
+    element.style.setProperty(
+      '--command-feedback-width',
+      `${(100 * this.feedbackWidth()) / cols}%`,
+    );
+    this.updateToolbar();
+    if (this.pendingFocus !== null && element.isConnected && element.style.display !== 'none') {
+      const active = element.ownerDocument.activeElement;
+      // A user who focused another control while awaiting xterm's render must not lose that focus.
+      if (active === element.ownerDocument.body || this.toolbar?.contains(active)) {
+        const button = this.buttons.get(this.pendingFocus);
+        if (button && !button.disabled && this.representative) {
+          button.focus({ preventScroll: true });
+          // Restore only this horizontal viewport; scrollIntoView could move the terminal/page too.
+          const toolbar = this.toolbar;
+          if (toolbar) {
+            if (button.offsetLeft < toolbar.scrollLeft) {
+              toolbar.scrollLeft = button.offsetLeft;
+            } else if (
+              button.offsetLeft + button.offsetWidth >
+              toolbar.scrollLeft + toolbar.clientWidth
+            ) {
+              toolbar.scrollLeft = button.offsetLeft + button.offsetWidth - toolbar.clientWidth;
+            }
+          }
+        }
+      }
+      this.pendingFocus = null;
+    }
   }
 
   private readonly copyCommand = (event: MouseEvent): void => {
     event.preventDefault();
     event.stopPropagation();
-    if (!this.disposed) {
-      void this.options.copyController.copy('command-and-output');
+    if (this.disposed || !(event.target instanceof Element)) {
+      return;
+    }
+    const target = event.target.closest('button');
+    for (const [mode, button] of this.buttons) {
+      if (button === target && !button.disabled) {
+        void this.options.copyController.copy(mode);
+      }
     }
   };
 
@@ -97,12 +225,9 @@ class CommandCopyDecorationController implements IDisposable {
     if (this.disposed) {
       return;
     }
+    this.updateToolbar();
     const state = this.options.copyController.getState();
-    if (!state.outputAvailable) {
-      this.clearButton();
-    }
-    this.updateButton(state);
-    if (state.status === 'idle') {
+    if (state.status === 'idle' || this.options.terminal.buffer.active.type !== 'normal') {
       this.clearIndicator();
       return;
     }
@@ -110,13 +235,16 @@ class CommandCopyDecorationController implements IDisposable {
       this.indicatorDecoration = this.options.terminal.registerDecoration({
         marker: this.options.entry.blockStartMarker,
         anchor: 'right',
-        width: 2,
+        width: this.feedbackWidth(),
         height: 1,
         layer: 'top',
       });
       if (this.indicatorDecoration) {
-        this.indicatorDisposables = [
+        this.indicatorSubscriptions = [
           this.indicatorDecoration.onRender((element) => {
+            if (this.disposed) {
+              return;
+            }
             element.classList.add('evermore-command-copy-feedback-decoration');
             if (this.indicator?.parentElement !== element) {
               this.indicator?.remove();
@@ -127,28 +255,23 @@ class CommandCopyDecorationController implements IDisposable {
             }
             this.updateIndicator();
           }),
-          this.indicatorDecoration.onDispose(() => {
-            this.clearIndicator();
-          }),
+          this.indicatorDecoration.onDispose(() => this.clearIndicator()),
         ];
       }
     }
     this.updateIndicator();
   }
 
-  private updateButton(state: TerminalCommandCopyState): void {
-    if (!this.button) {
+  private updateToolbar(): void {
+    if (!this.toolbar) {
       return;
     }
-    this.button.disabled = state.busy;
-    // The action always copies both parts; only the independent indicator describes past results.
-    this.button.textContent = '⧉';
-    this.button.setAttribute('aria-label', 'Copy command and output');
-    this.button.title = 'Copy command and output';
-    // The independent indicator takes this cell while feedback is visible on a one-line prompt.
-    this.button.hidden =
-      state.status !== 'idle' &&
-      this.options.entry.blockStartMarker.line === this.options.entry.promptMarker.line;
+    this.toolbar.dataset.hovered = String(this.hovered);
+    this.toolbar.hidden = !this.representative;
+    const state = this.options.copyController.getState();
+    for (const [mode, button] of this.buttons) {
+      button.disabled = state.busy || (mode !== 'command' && !state.outputAvailable);
+    }
   }
 
   private updateIndicator(): void {
@@ -163,28 +286,45 @@ class CommandCopyDecorationController implements IDisposable {
     this.indicator.title = label;
   }
 
-  private clearButton(): void {
-    for (const disposable of this.buttonDisposables.splice(0)) {
-      disposable.dispose();
+  private feedbackWidth(): number {
+    return Math.min(2, Math.max(1, this.options.terminal.cols - 1));
+  }
+
+  private focusedMode(): CommandCopyMode | null {
+    for (const [mode, button] of this.buttons) {
+      if (button.ownerDocument.activeElement === button) {
+        return mode;
+      }
     }
-    this.removeButton();
-    const decoration = this.buttonDecoration;
-    this.buttonDecoration = undefined;
+    return null;
+  }
+
+  private clearToolbar(): void {
+    for (const subscription of this.toolbarSubscriptions.splice(0)) {
+      subscription.dispose();
+    }
+    this.hoverHost.setElement(null);
+    this.removeToolbar();
+    const decoration = this.toolbarDecoration;
+    this.toolbarDecoration = undefined;
     if (decoration && !decoration.isDisposed) {
       decoration.dispose();
     }
   }
 
-  private removeButton(): void {
-    this.button?.removeEventListener('mousedown', stopTerminalPointerEvent);
-    this.button?.removeEventListener('click', this.copyCommand);
-    this.button?.remove();
-    this.button = null;
+  private removeToolbar(): void {
+    this.toolbar?.removeEventListener('click', this.copyCommand);
+    for (const type of ['mousedown', 'pointerdown', 'keydown', 'keyup', 'keypress']) {
+      this.toolbar?.removeEventListener(type, stopTerminalEvent);
+    }
+    this.toolbar?.remove();
+    this.toolbar = null;
+    this.buttons.clear();
   }
 
   private clearIndicator(): void {
-    for (const disposable of this.indicatorDisposables.splice(0)) {
-      disposable.dispose();
+    for (const subscription of this.indicatorSubscriptions.splice(0)) {
+      subscription.dispose();
     }
     this.indicator?.remove();
     this.indicator = null;
@@ -196,7 +336,7 @@ class CommandCopyDecorationController implements IDisposable {
   }
 }
 
-function stopTerminalPointerEvent(event: MouseEvent): void {
+function stopTerminalEvent(event: Event): void {
   event.stopPropagation();
 }
 

@@ -42,6 +42,8 @@ const integrationMock = vi.hoisted(() => {
     historyInstances: [] as MockTerminalCommandHistory[],
     MockTerminalCommandHistory,
     createDecoration: vi.fn(),
+    createGauge: vi.fn(() => ({ dispose: vi.fn() })),
+    hoverInstances: [] as { dispose: ReturnType<typeof vi.fn> }[],
     createHighlight: vi.fn(() => ({ dispose: vi.fn() })),
     copies: [] as { dispose: ReturnType<typeof vi.fn>; copy: ReturnType<typeof vi.fn> }[],
   };
@@ -58,6 +60,18 @@ vi.mock('./command-copy-decoration', () => ({
 vi.mock('./command-block-decoration', () => ({
   createTerminalCommandBlockDecoration: integrationMock.createHighlight,
 }));
+vi.mock('./command-block-gauge', () => ({
+  createTerminalCommandBlockGauge: integrationMock.createGauge,
+}));
+vi.mock('./command-toolbar-hover', () => ({
+  TerminalCommandToolbarHover: class {
+    public readonly dispose = vi.fn();
+    public constructor() {
+      integrationMock.hoverInstances.push(this);
+    }
+  },
+}));
+
 vi.mock('./command-copy', () => ({
   TerminalCommandCopyController: class {
     public readonly dispose = vi.fn();
@@ -106,6 +120,7 @@ class NavigationTerminal {
     this.scrollToLine(this.buffer.active.baseY);
   });
   public readonly select = vi.fn();
+  public readonly focus = vi.fn();
   public readonly selectLines = vi.fn();
 }
 
@@ -130,11 +145,30 @@ describe('attachCommandBlocks', () => {
     integrationMock.createDecoration.mockReset();
     integrationMock.createHighlight.mockClear();
     integrationMock.copies.length = 0;
+    integrationMock.hoverInstances.length = 0;
+    integrationMock.createGauge.mockClear();
+  });
+
+  it('restores entry-removal focus only while the attachment is alive', () => {
+    // Given: a completed command's view delegates focus restoration to its owner.
+    const blocks = attachCommandBlocks(terminal);
+    integrationMock.historyInstances[0]?.emitCompleted({ id: 'command-1' });
+    const options = integrationMock.createDecoration.mock.calls[0]?.[0] as {
+      onFocusedEntryRemoved: () => void;
+    };
+
+    // When: entry removal requests focus before and after owner teardown.
+    options.onFocusedEntryRemoved();
+    blocks.dispose();
+    options.onFocusedEntryRemoved();
+
+    // Then: a retained callback cannot focus a terminal whose owner has been disposed.
+    expect(fake.focus).toHaveBeenCalledOnce();
   });
 
   it('creates a copy decoration for a completed command and disposes it when removed', () => {
     // Given: a terminal with a command history observer.
-    const decoration = { dispose: vi.fn() };
+    const decoration = { dispose: vi.fn(), disposeForRemoval: vi.fn() };
     integrationMock.createDecoration.mockReturnValue(decoration);
     const blocks = attachCommandBlocks(terminal);
     const history = integrationMock.historyInstances[0];
@@ -150,11 +184,15 @@ describe('attachCommandBlocks', () => {
       terminal,
       entry,
       copyController: integrationMock.copies[0],
+      hover: integrationMock.hoverInstances[0],
       onDisposed: expect.any(Function),
+      onFocusedEntryRemoved: expect.any(Function),
     });
-    expect(decoration.dispose).toHaveBeenCalledOnce();
+    expect(decoration.disposeForRemoval).toHaveBeenCalledOnce();
+    expect(decoration.dispose).not.toHaveBeenCalled();
     blocks.dispose();
-    expect(decoration.dispose).toHaveBeenCalledOnce();
+    expect(decoration.disposeForRemoval).toHaveBeenCalledOnce();
+    expect(decoration.dispose).not.toHaveBeenCalled();
   });
 
   it('replaces a previous decoration for an unexpected duplicate completion', () => {
@@ -179,7 +217,7 @@ describe('attachCommandBlocks', () => {
 
   it('forgets a decoration that disposes itself', () => {
     // Given: a copy decoration reports its own disposal.
-    const decoration = { dispose: vi.fn() };
+    const decoration = { dispose: vi.fn(), disposeForRemoval: vi.fn() };
     integrationMock.createDecoration.mockReturnValue(decoration);
     const blocks = attachCommandBlocks(terminal);
     const history = integrationMock.historyInstances[0];

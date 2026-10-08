@@ -142,6 +142,48 @@ function emitCompletedCommand(
 }
 
 describe('TerminalCommandHistory', () => {
+  it.each([
+    { data: 'D;0', expected: 0 },
+    { data: 'D;17', expected: 17 },
+    { data: 'D;256', expected: 256 },
+    { data: 'D;9007199254740991', expected: Number.MAX_SAFE_INTEGER },
+    ...[
+      'D',
+      'D;',
+      'D; ',
+      'D;-1',
+      'D;+1',
+      'D;1.5',
+      'D;1error',
+      'D;NaN',
+      'D;Infinity',
+      'D;9007199254740992',
+    ].map((data) => ({ data, expected: null })),
+  ])('preserves strict exit status through pending completion: $data', ({ data, expected }) => {
+    // Given: a valid shell cycle and an observer of completed entries.
+    const terminal = new MockTerminal();
+    const completed = vi.fn();
+    const history = new TerminalCommandHistory({
+      terminal: asTerminal(terminal),
+      onCommandCompleted: completed,
+    });
+    terminal.emitOsc(133, 'B');
+    terminal.emitOsc(633, 'E;echo status');
+    terminal.emitOsc(133, 'C');
+
+    // When: completion arrives before its write is finalized.
+    terminal.emitOsc(133, data);
+    expect(completed).not.toHaveBeenCalled();
+    terminal.emitWriteParsed();
+
+    // Then: malformed status stays unknown without discarding the command or misreporting success.
+    expect(history.getCompletedCommands()[0]?.exitCode).toBe(expected);
+    expect(completed).toHaveBeenCalledWith(
+      expect.objectContaining({ command: 'echo status', exitCode: expected }),
+    );
+    history.dispose();
+  });
+
   it('publishes independent completed entries after each write is parsed', () => {
     // Given: a history controller observing a normal xterm buffer.
     const terminal = new MockTerminal();

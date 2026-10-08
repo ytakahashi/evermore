@@ -1,7 +1,11 @@
 import type { IDecoration, IDisposable, IMarker, Terminal } from '@xterm/xterm';
 import { afterEach, describe, expect, it, vi } from 'vite-plus/test';
-import { createTerminalCommandCopyDecoration } from './command-copy-decoration';
+import {
+  createTerminalCommandCopyDecoration,
+  type TerminalCommandCopyDecoration,
+} from './command-copy-decoration';
 import type { TerminalCommandCopyController, TerminalCommandCopyState } from './command-copy';
+import type { TerminalCommandToolbarHover } from './command-toolbar-hover';
 import type { TerminalCommandHistoryEntry } from './command-history';
 
 class MockMarker implements IMarker {
@@ -118,12 +122,16 @@ function fixture(promptLine = 0): {
     typeof vi.fn<(options: { marker: IMarker }) => MockDecoration | undefined>
   >;
   onDisposed: ReturnType<typeof vi.fn>;
-  attach: () => IDisposable | null;
+  onFocusedEntryRemoved: ReturnType<typeof vi.fn>;
+  attach: () => TerminalCommandCopyDecoration | null;
+  resize: (cols: number) => void;
+  visibility: (hovered: boolean, representative: boolean) => void;
 } {
   const blockStartMarker = new MockMarker();
   const promptMarker = Object.assign(new MockMarker(), { line: promptLine });
   const entry: TerminalCommandHistoryEntry = {
     id: 'command',
+    exitCode: null,
     command: 'echo result',
     blockStartMarker,
     promptMarker,
@@ -141,9 +149,26 @@ function fixture(promptLine = 0): {
       return value;
     },
   );
-  const terminal = { registerDecoration } as unknown as Terminal;
+  let resizeListener = (): void => undefined;
+  let changed = (_hovered: boolean, _representative: boolean): void => undefined;
+  const terminal = {
+    cols: 80,
+    buffer: { active: { type: 'normal' }, onBufferChange: () => ({ dispose: vi.fn() }) },
+    onResize: (listener: () => void) => {
+      resizeListener = listener;
+      return { dispose: vi.fn() };
+    },
+    registerDecoration,
+  } as unknown as Terminal;
+  const hover = {
+    register: (_marker: IMarker, listener: typeof changed) => {
+      changed = listener;
+      return { setElement: vi.fn(), dispose: vi.fn() };
+    },
+  } as unknown as TerminalCommandToolbarHover;
   const controller = new FakeCopyController();
   const onDisposed = vi.fn();
+  const onFocusedEntryRemoved = vi.fn();
   return {
     entry,
     terminal,
@@ -151,12 +176,20 @@ function fixture(promptLine = 0): {
     decorations,
     registerDecoration,
     onDisposed,
+    onFocusedEntryRemoved,
+    resize: (cols) => {
+      Object.assign(terminal, { cols });
+      resizeListener();
+    },
+    visibility: (hovered, representative) => changed(hovered, representative),
     attach: () => {
       const handle = createTerminalCommandCopyDecoration({
         terminal,
         entry,
+        hover,
         copyController: controller as unknown as TerminalCommandCopyController,
         onDisposed,
+        onFocusedEntryRemoved,
       });
       if (handle) {
         handles.push(handle);
@@ -185,10 +218,53 @@ function decorationAt(decorations: MockDecoration[], index: number): MockDecorat
 }
 
 describe('createTerminalCommandCopyDecoration', () => {
+  it.each([
+    { source: 'marker', connected: true, focused: true, expected: 1 },
+    { source: 'notification', connected: true, focused: true, expected: 1 },
+    { source: 'owner', connected: true, focused: true, expected: 0 },
+    { source: 'marker', connected: false, focused: true, expected: 0 },
+    { source: 'marker', connected: true, focused: false, expected: 0 },
+  ])(
+    'requests focus restoration only for a focused removed entry: $source/$connected/$focused',
+    ({ source, connected, focused, expected }) => {
+      // Given: a toolbar can have focus while its terminal is still connected or already detached.
+      const f = fixture();
+      const root = document.createElement('div');
+      Object.assign(f.terminal, { element: root });
+      const visual = f.attach();
+      const button = renderButton(decorationAt(f.decorations, 0));
+      root.appendChild(button.parentElement?.parentElement ?? button);
+      document.body.appendChild(root);
+      if (focused) {
+        button.focus();
+      }
+      if (!connected) {
+        root.remove();
+      }
+
+      // When: removal comes through either listener order, or the owner tears down the view.
+      if (source === 'marker') {
+        f.entry.blockStartMarker.dispose();
+        visual?.disposeForRemoval();
+      } else if (source === 'notification') {
+        visual?.disposeForRemoval();
+        f.entry.blockStartMarker.dispose();
+      } else {
+        visual?.dispose();
+        f.entry.blockStartMarker.dispose();
+      }
+      visual?.dispose();
+
+      // Then: teardown and replacement never redirect focus, even if the marker disappears later.
+      expect(f.onFocusedEntryRemoved).toHaveBeenCalledTimes(expected);
+    },
+  );
   afterEach(() => {
     for (const handle of handles.splice(0)) {
       handle.dispose();
     }
+    vi.restoreAllMocks();
+    document.body.replaceChildren();
   });
 
   it('registers the action at the prompt and retains one semantic button across renders', () => {
@@ -204,20 +280,19 @@ describe('createTerminalCommandCopyDecoration', () => {
 
     // Then: placement and accessible action are stable.
     expect(f.registerDecoration).toHaveBeenCalledExactlyOnceWith({
-      marker: f.entry.promptMarker,
-      anchor: 'right',
-      width: 2,
+      marker: f.entry.blockStartMarker,
+      width: 80,
       height: 1,
       layer: 'top',
     });
     expect(element).toHaveClass('evermore-command-copy-decoration');
-    expect(element.querySelectorAll('button')).toHaveLength(1);
+    expect(element.querySelectorAll('button')).toHaveLength(3);
     expect(element.querySelector('button')).toHaveAttribute(
       'aria-label',
       'Copy command and output',
     );
     expect(element.querySelector('button')).toHaveAttribute('type', 'button');
-    expect(element.querySelector('button')).toHaveAttribute('tabindex', '0');
+    expect(element.querySelector('button')?.tabIndex).toBe(0);
   });
 
   it('delegates button activation and reflects busy state without owning copy execution', () => {
@@ -226,7 +301,7 @@ describe('createTerminalCommandCopyDecoration', () => {
     f.attach();
     const button = renderButton(decorationAt(f.decorations, 0));
     const bubbled = vi.fn();
-    button.parentElement?.addEventListener('mousedown', bubbled);
+    button.parentElement?.parentElement?.addEventListener('mousedown', bubbled);
 
     // When: the action is clicked and its owner reports a pending write.
     button.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
@@ -284,7 +359,7 @@ describe('createTerminalCommandCopyDecoration', () => {
       expect(element).toHaveClass('evermore-command-copy-feedback-decoration');
       expect(element.querySelector('[role="status"]')).toHaveTextContent(symbol);
       expect(element.querySelector('[role="status"]')).toHaveAttribute('aria-label', label);
-      expect(button.textContent).toBe('⧉');
+      expect(button.textContent).toBe('C+O');
       expect(button).toHaveAttribute('aria-label', 'Copy command and output');
       expect(button.hidden).toBe(false);
     },
@@ -297,7 +372,7 @@ describe('createTerminalCommandCopyDecoration', () => {
     const action = decorationAt(f.decorations, 0);
     const original = renderButton(action);
     f.controller.change({ status: 'copied', mode: 'output' });
-    expect(original.hidden).toBe(true);
+    expect(original.hidden).toBe(false);
     const indicator = decorationAt(f.decorations, 1);
     const originalContainer = document.createElement('div');
     indicator.render(originalContainer);
@@ -306,7 +381,7 @@ describe('createTerminalCommandCopyDecoration', () => {
     const replacement = renderButton(action);
     const replacementContainer = document.createElement('div');
     indicator.render(replacementContainer);
-    expect(replacement.hidden).toBe(true);
+    expect(replacement.hidden).toBe(false);
     expect(replacementContainer.querySelector('[role="status"]')).toHaveAttribute(
       'aria-label',
       'Copied output',
@@ -316,14 +391,14 @@ describe('createTerminalCommandCopyDecoration', () => {
 
     // Then: detached actions have no listeners, and the controller's idle notification alone restores the action.
     expect(f.controller.copy).not.toHaveBeenCalled();
-    expect(original.parentElement).toBeNull();
+    expect(original.parentElement?.parentElement).toBeNull();
     expect(originalContainer.childElementCount).toBe(0);
     expect(replacement.hidden).toBe(false);
     expect(replacementContainer.childElementCount).toBe(0);
     expect(indicator.isDisposed).toBe(true);
   });
 
-  it('keeps feedback alive when output invalidation removes the action', () => {
+  it('keeps command-only actions and feedback alive when output is invalid', () => {
     // Given: an independently owned copy controller and rendered action.
     const f = fixture();
     const visual = f.attach();
@@ -337,8 +412,9 @@ describe('createTerminalCommandCopyDecoration', () => {
     decorationAt(f.decorations, 1).render(element);
 
     // Then: only the action is removed; feedback and controller lifetime remain independent.
-    expect(action.isDisposed).toBe(true);
-    expect(button.parentElement).toBeNull();
+    expect(action.isDisposed).toBe(false);
+    expect(button.disabled).toBe(true);
+    expect(button.parentElement?.querySelector('button[data-mode=command]')).not.toBeDisabled();
     expect(f.onDisposed).not.toHaveBeenCalled();
     expect(element.querySelector('[role="status"]')).toHaveAttribute(
       'aria-label',
@@ -363,12 +439,93 @@ describe('createTerminalCommandCopyDecoration', () => {
       expect(f.attach()).not.toBeNull();
       f.controller.change({ status: 'error', mode: 'output' });
       const element = document.createElement('div');
-      decorationAt(f.decorations, 0).render(element);
+      decorationAt(f.decorations, reason === 'initially-invalid' ? 1 : 0).render(element);
 
       // Then: feedback uses an independent block-start decoration.
       expect(element.querySelector('[role="status"]')).toHaveTextContent('!');
     },
   );
+
+  it.each(['command-and-output', 'output', 'command'] as const)(
+    'delegates the explicit toolbar mode %s',
+    (mode) => {
+      // Given: three actions for a completed entry, without a navigation selection.
+      const f = fixture();
+      f.attach();
+      const first = renderButton(decorationAt(f.decorations, 0));
+      const button = first.parentElement?.querySelector<HTMLButtonElement>(
+        `button[data-mode="${mode}"]`,
+      );
+
+      // When: the corresponding action is activated.
+      button?.click();
+
+      // Then: only its copy mode is delegated to the externally owned controller.
+      expect(f.controller.copy).toHaveBeenCalledExactlyOnceWith(mode);
+    },
+  );
+
+  it('keeps actions accessible during hover changes and suppresses superseded rows', () => {
+    // Given: a rendered first-row toolbar.
+    const f = fixture();
+    f.attach();
+    const button = renderButton(decorationAt(f.decorations, 0));
+
+    // When: hover changes, then a later command represents the same physical row.
+    f.visibility(true, true);
+    expect(button.parentElement?.dataset.hovered).toBe('true');
+    f.visibility(false, true);
+    expect(button.tabIndex).toBe(0);
+    f.visibility(false, false);
+
+    // Then: the superseded toolbar is not an overlapping focus/interaction target.
+    expect(button.parentElement?.hidden).toBe(true);
+  });
+
+  it('rebuilds display with current width and focus while retaining feedback state', () => {
+    // Given: a focused output button and success feedback belong to the current DOM.
+    const f = fixture();
+    f.attach();
+    const action = decorationAt(f.decorations, 0);
+    const original = renderButton(action);
+    const originalHost = original.parentElement?.parentElement;
+    if (!originalHost) {
+      throw new Error('Expected toolbar host');
+    }
+    document.body.appendChild(originalHost);
+    const output = original.parentElement?.querySelector<HTMLButtonElement>(
+      'button[data-mode=output]',
+    );
+    output?.focus();
+    f.controller.change({ mode: 'output', status: 'copied' });
+    const previousIndicator = decorationAt(f.decorations, 1);
+
+    // When: resize replaces decorations and xterm renders their new DOM.
+    f.resize(40);
+    vi.spyOn(HTMLElement.prototype, 'offsetLeft', 'get').mockReturnValue(40);
+    vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockReturnValue(24);
+    vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(20);
+    const newHost = document.createElement('div');
+    document.body.appendChild(newHost);
+    decorationAt(f.decorations, 2).render(newHost);
+    const indicatorHost = document.createElement('div');
+    decorationAt(f.decorations, 3).render(indicatorHost);
+
+    // Then: width/focus follow the new view and shared feedback is neither reset nor duplicated.
+    expect(action.isDisposed).toBe(true);
+    expect(previousIndicator.isDisposed).toBe(true);
+    expect(document.activeElement).toBe(newHost.querySelector('button[data-mode=output]'));
+    expect(newHost.querySelector('[role=toolbar]')?.scrollLeft).toBe(44);
+    expect(newHost.style.getPropertyValue('--command-feedback-width')).toBe('5%');
+    expect(indicatorHost.querySelector('[role=status]')).toHaveAttribute(
+      'aria-label',
+      'Copied output',
+    );
+    expect(f.registerDecoration.mock.calls[2]?.[0]).toMatchObject({ width: 40 });
+    expect(f.controller.dispose).not.toHaveBeenCalled();
+    originalHost.remove();
+    newHost.remove();
+  });
 
   it('rejects disposed history markers', () => {
     // Given: history has already lost its block-start marker.
@@ -399,7 +556,7 @@ describe('createTerminalCommandCopyDecoration', () => {
 
       // When: the view is disposed directly or through xterm's marker lifecycle, then state changes again.
       if (source === 'xterm') {
-        action.dispose();
+        f.entry.blockStartMarker.dispose();
       }
       visual?.dispose();
       visual?.dispose();
@@ -409,7 +566,7 @@ describe('createTerminalCommandCopyDecoration', () => {
       // Then: no UI or listener is revived and the view never disposes the shared owner.
       expect(action.isDisposed).toBe(true);
       expect(indicator.isDisposed).toBe(true);
-      expect(button.parentElement).toBeNull();
+      expect(button.parentElement?.parentElement).toBeNull();
       expect(element.childElementCount).toBe(0);
       expect(f.onDisposed).toHaveBeenCalledOnce();
       expect(f.controller.copy).not.toHaveBeenCalled();

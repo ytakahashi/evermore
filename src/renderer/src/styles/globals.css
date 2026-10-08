@@ -84,39 +84,100 @@
     color: var(--color-danger);
   }
 
-  .xterm .evermore-command-copy-button[hidden] {
-    display: none;
+  .xterm.evermore-command-blocks {
+    padding-left: 5px;
+  }
+
+  .xterm .evermore-command-block-gauge {
+    pointer-events: none;
+  }
+
+  .xterm .evermore-command-block-gauge::before {
+    content: '';
+    position: absolute;
+    left: -5px;
+    width: 3px;
+    top: 0;
+    bottom: 0;
+    background: var(--color-neutral);
+  }
+
+  /* Gaps separate adjacent commands; the cap identifies a block's actual first row. */
+  .xterm .evermore-command-block-gauge[data-start='true']::before {
+    top: 3px;
+  }
+
+  .xterm .evermore-command-block-gauge[data-start='true']::after {
+    content: '';
+    position: absolute;
+    left: -5px;
+    top: 3px;
+    width: 5px;
+    height: 2px;
+    background: var(--color-neutral);
+  }
+
+  .xterm .evermore-command-block-gauge[data-end='true']::before {
+    bottom: 3px;
+  }
+
+  .xterm .evermore-command-block-gauge[data-status='unknown']::before,
+  .xterm .evermore-command-block-gauge[data-status='unknown']::after {
+    opacity: 0.4;
+  }
+
+  .xterm .evermore-command-block-gauge[data-status='error']::before,
+  .xterm .evermore-command-block-gauge[data-status='error']::after {
+    background: var(--color-danger);
   }
 
   .xterm .evermore-command-copy-decoration {
+    pointer-events: none;
+  }
+
+  .xterm .evermore-command-copy-toolbar {
+    position: absolute;
+    right: var(--command-feedback-width);
+    display: flex;
+    width: max-content;
+    max-width: calc(100% - var(--command-feedback-width));
+    height: 100%;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: none;
+    border-radius: 3px;
+    background: var(--color-panel);
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  .xterm .evermore-command-copy-toolbar::-webkit-scrollbar {
+    display: none;
+  }
+
+  .xterm .evermore-command-copy-toolbar[data-hovered='true'],
+  .xterm .evermore-command-copy-toolbar:focus-within {
+    opacity: 1;
     pointer-events: auto;
   }
 
+  .xterm .evermore-command-copy-toolbar[hidden] {
+    display: none;
+  }
+
   .xterm .evermore-command-copy-button {
-    display: flex;
-    width: 100%;
+    flex: 0 0 auto;
     height: 100%;
-    align-items: center;
-    justify-content: center;
-    padding: 0;
+    min-width: 2em;
+    padding: 0 0.2em;
     border: 1px solid transparent;
     border-radius: 3px;
-    background: color-mix(in srgb, var(--color-panel) 88%, transparent);
+    background: transparent;
     color: var(--color-muted);
     cursor: pointer;
     font-family: var(--font-mono);
     font-size: 0.75rem;
     line-height: 1;
-    opacity: 0;
-    transition:
-      opacity 120ms ease,
-      border-color 120ms ease,
-      color 120ms ease;
-  }
-
-  .xterm .evermore-command-copy-decoration:hover .evermore-command-copy-button,
-  .xterm .evermore-command-copy-button:focus-visible {
-    opacity: 1;
   }
 
   .xterm .evermore-command-copy-button:hover,
@@ -127,7 +188,16 @@
   }
 
   .xterm .evermore-command-copy-button:disabled {
-    cursor: wait;
-    opacity: 0.6;
+    cursor: default;
+    color: var(--color-disabled);
   }
+}
+
+/* Keep this outside cascade layers: xterm's unlayered decoration z-index would otherwise win.
+   Shared physical rows must preserve the error gauge regardless of completion order. */
+.xterm
+  .xterm-screen
+  .xterm-decoration-container
+  .evermore-command-block-gauge[data-status='error'] {
+  z-index: 7;
 }

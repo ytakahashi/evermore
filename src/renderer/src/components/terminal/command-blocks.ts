@@ -1,13 +1,23 @@
 import type { IDisposable, Terminal } from '@xterm/xterm';
-import { createTerminalCommandCopyDecoration } from './command-copy-decoration';
+import {
+  createTerminalCommandCopyDecoration,
+  type TerminalCommandCopyDecoration,
+} from './command-copy-decoration';
 import { TerminalCommandHistory, type TerminalCommandHistoryEntry } from './command-history';
 import { createTerminalCommandBlockDecoration } from './command-block-decoration';
 import { TerminalCommandCopyController } from './command-copy';
 import { findAdjacentCommand } from './command-navigation';
+import { createTerminalCommandBlockGauge } from './command-block-gauge';
+import { TerminalCommandToolbarHover } from './command-toolbar-hover';
 
 /** Attaches command navigation and copy decorations to a terminal and owns their lifecycle. */
 export function attachCommandBlocks(terminal: Terminal): IDisposable {
-  const commandDecorations = new Map<string, IDisposable>();
+  const root = terminal.element;
+  const addedGutter = root !== undefined && !root.classList.contains('evermore-command-blocks');
+  root?.classList.add('evermore-command-blocks');
+  const hover = new TerminalCommandToolbarHover(terminal);
+  const gauges = new Map<string, IDisposable>();
+  const commandDecorations = new Map<string, TerminalCommandCopyDecoration>();
   const copies = new Map<string, TerminalCommandCopyController>();
   let selectedId: string | null = null;
   let highlight: IDisposable | null = null;
@@ -28,13 +38,22 @@ export function attachCommandBlocks(terminal: Terminal): IDisposable {
       // the same id leaking a previous decoration.
       commandDecorations.get(entry.id)?.dispose();
       copies.get(entry.id)?.dispose();
+      gauges.get(entry.id)?.dispose();
+      gauges.set(entry.id, createTerminalCommandBlockGauge(terminal, entry));
       const copyController = new TerminalCommandCopyController({ terminal, entry });
       copies.set(entry.id, copyController);
-      let decoration: IDisposable | null = null;
+      let decoration: TerminalCommandCopyDecoration | null = null;
       decoration = createTerminalCommandCopyDecoration({
         terminal,
         entry,
         copyController,
+        hover,
+        onFocusedEntryRemoved: () => {
+          // A marker can disappear during teardown; the attachment owns terminal liveness.
+          if (!disposed) {
+            terminal.focus();
+          }
+        },
         onDisposed: () => {
           if (commandDecorations.get(entry.id) === decoration) {
             commandDecorations.delete(entry.id);
@@ -52,8 +71,11 @@ export function attachCommandBlocks(terminal: Terminal): IDisposable {
       if (entry.id === selectedId) {
         clearSelection();
       }
-      commandDecorations.get(entry.id)?.dispose();
+      // History observes markers first, so its removal notification must carry the disposal reason.
+      commandDecorations.get(entry.id)?.disposeForRemoval();
       commandDecorations.delete(entry.id);
+      gauges.get(entry.id)?.dispose();
+      gauges.delete(entry.id);
       copies.get(entry.id)?.dispose();
       copies.delete(entry.id);
     },
@@ -166,6 +188,7 @@ export function attachCommandBlocks(terminal: Terminal): IDisposable {
         return;
       }
       disposed = true;
+      hover.dispose();
       clearSelection();
       resetNavigation();
       terminal.attachCustomKeyEventHandler(() => true);
@@ -176,11 +199,18 @@ export function attachCommandBlocks(terminal: Terminal): IDisposable {
         decoration.dispose();
       }
       commandDecorations.clear();
+      for (const gauge of gauges.values()) {
+        gauge.dispose();
+      }
+      gauges.clear();
       for (const copy of copies.values()) {
         copy.dispose();
       }
       copies.clear();
       commandHistory.dispose();
+      if (addedGutter) {
+        root?.classList.remove('evermore-command-blocks');
+      }
     },
   };
 }

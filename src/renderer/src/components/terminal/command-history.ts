@@ -38,6 +38,7 @@ interface RunningState {
 type ActiveCommandState = PromptStartedState | PromptReadyState | CommandKnownState | RunningState;
 
 interface PendingCommand {
+  exitCode: number | null;
   blockStartMarker: IMarker;
   command: string;
   outputEnd: TerminalBufferBoundary;
@@ -58,6 +59,8 @@ interface StoredCommand {
 }
 
 export interface TerminalCommandHistoryEntry {
+  /** Exit status from OSC 133;D, or null when absent or invalid. */
+  exitCode: number | null;
   /** Renderer-local identifier that remains stable until the entry is removed. */
   id: string;
   /** Exact command line decoded from OSC 633;E. */
@@ -89,10 +92,9 @@ let nextCommandId = 0;
 /**
  * Tracks completed shell commands from xterm's OSC stream without retaining command output.
  *
- * The controller owns only command text and xterm markers. Completed entries become visible after
+ * The controller owns command metadata and xterm markers. Completed entries become visible after
  * the write containing OSC 133;D has fully parsed, ensuring all output from that write is present
- * in the terminal buffer. Output extraction and decorations are intentionally left to later
- * phases.
+ * in the terminal buffer. Copy extraction and decoration presentation remain separate concerns.
  */
 export class TerminalCommandHistory {
   private readonly terminal: Terminal;
@@ -178,7 +180,7 @@ export class TerminalCommandHistory {
         this.beginCommand();
         return;
       case 'D':
-        this.finishCommand();
+        this.finishCommand(data.split(';')[1]);
         return;
     }
   }
@@ -259,13 +261,14 @@ export class TerminalCommandHistory {
     };
   }
 
-  private finishCommand(): void {
+  private finishCommand(exitCode: string | undefined): void {
     if (this.active?.kind !== 'running' || this.terminal.buffer.active.type !== 'normal') {
       this.discardActive();
       return;
     }
 
     this.pending.push({
+      exitCode: parseExitCode(exitCode),
       command: this.active.command,
       outputEnd: {
         column: this.terminal.buffer.active.cursorX,
@@ -297,6 +300,7 @@ export class TerminalCommandHistory {
 
       const entry: TerminalCommandHistoryEntry = {
         id: `terminal-command-${++nextCommandId}`,
+        exitCode: command.exitCode,
         command: command.command,
         blockStartMarker: command.blockStartMarker,
         promptMarker: command.promptMarker,
@@ -385,4 +389,13 @@ function disposeCommandMarkers(command: PendingCommand): void {
 
 function hasDisposedMarker(command: PendingCommand): boolean {
   return getCommandMarkers(command).some((marker) => marker.isDisposed);
+}
+
+function parseExitCode(value: string | undefined): number | null {
+  // Partial numbers and coercion of missing/empty fields would misreport an unknown status as success.
+  if (value === undefined || !/^[0-9]+$/.test(value)) {
+    return null;
+  }
+  const code = Number(value);
+  return Number.isSafeInteger(code) ? code : null;
 }
