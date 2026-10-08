@@ -1,103 +1,7 @@
-import type { IDecoration, IDisposable, IMarker, Terminal } from '@xterm/xterm';
+import type { Terminal } from '@xterm/xterm';
 import { describe, expect, it, vi } from 'vite-plus/test';
 import { createTerminalCommandBlockDecoration } from './command-block-decoration';
-import type { TerminalCommandHistoryEntry } from './command-history';
-
-interface TestMarker extends IMarker {
-  readonly dispose: ReturnType<typeof vi.fn<() => void>>;
-}
-interface TestDecoration {
-  dispose: ReturnType<typeof vi.fn>;
-  render: (element: HTMLElement) => void;
-}
-interface HighlightFixture {
-  terminal: {
-    cols: number;
-    buffer: {
-      active: { type: string };
-      normal: { baseY: number; cursorY: number; length: number };
-    };
-    registerMarker: ReturnType<typeof vi.fn<(offset: number) => TestMarker>>;
-    registerDecoration: ReturnType<typeof vi.fn<() => IDecoration | undefined>>;
-    onResize: (listener: () => void) => IDisposable;
-  };
-  entry: TerminalCommandHistoryEntry;
-  markers: TestMarker[];
-  decorations: TestDecoration[];
-  prompt: TestMarker;
-  endMarker: TestMarker;
-  resizeDisposed: ReturnType<typeof vi.fn>;
-  resize: () => void;
-}
-
-function marker(line: number): TestMarker {
-  return {
-    id: line,
-    line,
-    isDisposed: false,
-    onDispose: () => ({ dispose: () => undefined }),
-    dispose: vi.fn(),
-  };
-}
-
-function fixture(endColumn = 0, start = 4, end = 7): HighlightFixture {
-  const markers: TestMarker[] = [];
-  const decorations: {
-    dispose: ReturnType<typeof vi.fn>;
-    render: (element: HTMLElement) => void;
-  }[] = [];
-  let resize = (): void => undefined;
-  const resizeDisposed = vi.fn();
-  const terminal = {
-    cols: 80,
-    buffer: { active: { type: 'normal' }, normal: { baseY: 10, cursorY: 2, length: 30 } },
-    registerMarker: vi.fn((offset: number) => {
-      const value = marker(12 + offset);
-      markers.push(value);
-      return value;
-    }),
-    registerDecoration: vi.fn<() => IDecoration | undefined>(() => {
-      let rendered = (_element: HTMLElement): void => undefined;
-      const result = {
-        dispose: vi.fn(),
-        render: (element: HTMLElement) => rendered(element),
-        onRender: (listener: typeof rendered) => {
-          rendered = listener;
-          return { dispose: vi.fn() };
-        },
-      };
-      decorations.push(result);
-      return result as unknown as IDecoration;
-    }),
-    onResize: (listener: () => void) => {
-      resize = listener;
-      return { dispose: resizeDisposed };
-    },
-  };
-  const prompt = marker(start);
-  const endMarker = marker(end);
-  const entry: TerminalCommandHistoryEntry = {
-    id: 'command',
-    command: 'echo example',
-    blockStartMarker: prompt,
-    promptMarker: prompt,
-    outputStart: { marker: prompt, column: 0 },
-    outputEnd: { marker: endMarker, column: endColumn },
-    outputFingerprint: { length: 0, hash: '811c9dc5' },
-    completionCols: 80,
-    endsAtLineStart: endColumn === 0,
-  };
-  return {
-    terminal,
-    entry,
-    markers,
-    decorations,
-    prompt,
-    endMarker,
-    resizeDisposed,
-    resize: () => resize(),
-  };
-}
+import { createCommandBlockRowsFixture as fixture } from './__test-utils__/command-block-rows';
 
 describe('createTerminalCommandBlockDecoration', () => {
   it.each([
@@ -125,18 +29,6 @@ describe('createTerminalCommandBlockDecoration', () => {
       value.render(element);
       expect(element).toHaveClass('evermore-command-block-selection');
     }
-    handle.dispose();
-  });
-
-  it('retains at least the prompt row for an empty same-line output', () => {
-    // Given: the exclusive output end is on the prompt's own row.
-    const f = fixture(0, 4, 4);
-
-    // When: selection is shown.
-    const handle = createTerminalCommandBlockDecoration(f.terminal as unknown as Terminal, f.entry);
-
-    // Then: the prompt remains highlighted without extending into a next row.
-    expect(f.markers.map((value) => value.line)).toEqual([4]);
     handle.dispose();
   });
 
@@ -169,39 +61,5 @@ describe('createTerminalCommandBlockDecoration', () => {
     expect(f.prompt.dispose).not.toHaveBeenCalled();
     expect(f.endMarker.dispose).not.toHaveBeenCalled();
     expect(f.resizeDisposed).toHaveBeenCalledOnce();
-  });
-
-  it('rolls back partial decorations when xterm rejects a row', () => {
-    // Given: registration succeeds once and then fails.
-    const f = fixture();
-    f.terminal.registerDecoration.mockReturnValueOnce({
-      dispose: vi.fn(),
-      onRender: () => ({ dispose: vi.fn() }),
-    } as unknown as IDecoration);
-    f.terminal.registerDecoration.mockReturnValueOnce(undefined);
-
-    // When: the block decoration is attempted.
-    const handle = createTerminalCommandBlockDecoration(f.terminal as unknown as Terminal, f.entry);
-
-    // Then: even the failing row's independent marker is released.
-    expect(f.markers).toHaveLength(2);
-    expect(f.markers.every((value) => vi.mocked(value.dispose).mock.calls.length === 1)).toBe(true);
-    handle.dispose();
-  });
-  it.each([
-    { start: -1, end: 7 },
-    { start: 4, end: 3 },
-    { start: 4, end: 30 },
-  ])('does not decorate an invalid buffer range %j', ({ start, end }) => {
-    // Given: one endpoint is outside the retained buffer or reversed.
-    const f = fixture(0, start, end);
-
-    // When: a highlight is requested.
-    const handle = createTerminalCommandBlockDecoration(f.terminal as unknown as Terminal, f.entry);
-
-    // Then: no partial marker or decoration is registered.
-    expect(f.terminal.registerMarker).not.toHaveBeenCalled();
-    expect(f.terminal.registerDecoration).not.toHaveBeenCalled();
-    handle.dispose();
   });
 });

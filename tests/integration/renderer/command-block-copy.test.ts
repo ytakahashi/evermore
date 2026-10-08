@@ -96,7 +96,9 @@ describe('selected command copy with real xterm', () => {
 
       // When: the command is selected through navigation, then explicitly copied in each mode.
       f.press('ArrowUp');
-      const highlights = f.registered.mock.calls.filter(([options]) => options.layer === 'bottom');
+      const highlights = f.registered.mock.calls.filter(
+        ([options]) => options.layer === 'bottom' && options.width !== 1,
+      );
       expect(highlights.map(([options]) => options.marker.line)).toEqual([0, 1, 2]);
       expect(clipboard).not.toHaveBeenCalled();
       expect(f.press('C', { code: 'KeyC', shiftKey: true })).toBe(false);
@@ -130,7 +132,9 @@ describe('selected command copy with real xterm', () => {
       // When: the user scrolls away and terminal reflow changes the viewport width.
       f.terminal.scrollToBottom();
       f.terminal.resize(40, 24);
-      const highlights = f.registered.mock.calls.filter(([options]) => options.layer === 'bottom');
+      const highlights = f.registered.mock.calls.filter(
+        ([options]) => options.layer === 'bottom' && options.width !== 1,
+      );
       expect(highlights.at(-1)?.[0].width).toBe(40);
       f.press('C', { code: 'KeyC', shiftKey: true });
       await vi.waitFor(() => expect(clipboard).toHaveBeenCalledWith('$ echo result\nresult'));

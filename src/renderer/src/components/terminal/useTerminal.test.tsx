@@ -405,6 +405,10 @@ describe('useTerminal', () => {
     expect(commandIntegrationMock.attach.mock.invocationCallOrder[0]).toBeLessThan(
       ptyApi.onData.mock.invocationCallOrder[0] ?? 0,
     );
+    // The gutter must participate in the initial fit, before the first PTY size is chosen.
+    expect(commandIntegrationMock.attach.mock.invocationCallOrder[0]).toBeLessThan(
+      xtermMock.fitAddonInstances[0]?.fit.mock.invocationCallOrder[0] ?? 0,
+    );
     expect(xtermMock.terminalInstances[0]?.write).toHaveBeenCalledWith('first output');
   });
 

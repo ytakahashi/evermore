@@ -175,6 +175,8 @@ export function useTerminal(options: UseTerminalOptions): UseTerminalResult {
     terminal.loadAddon(unicode11Addon);
     terminal.loadAddon(new WebLinksAddon());
     terminal.open(container);
+    // The gutter must exist before the first fit so PTY columns account for its padding.
+    const commandBlocks = attachCommandBlocks(terminal);
     // Activate Unicode 11 so CJK and other wide characters are measured as 2 columns. This must be
     // set after `open()` because the terminal's unicode service is initialised during that call.
     terminal.unicode.activeVersion = '11';
@@ -209,6 +211,7 @@ export function useTerminal(options: UseTerminalOptions): UseTerminalResult {
       terminal.writeln('Terminal API is unavailable.');
       return () => {
         unregisterHost?.();
+        commandBlocks.dispose();
         terminal.dispose();
         terminalRef.current = null;
         fitAddonRef.current = null;
@@ -216,7 +219,6 @@ export function useTerminal(options: UseTerminalOptions): UseTerminalResult {
     }
 
     let disposed = false;
-    const commandBlocks = attachCommandBlocks(terminal);
     const dataCleanup = ptyApi.onData((id, data) => {
       if (id === ptyIdRef.current) {
         terminal.write(data);
