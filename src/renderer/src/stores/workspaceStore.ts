@@ -1,30 +1,26 @@
 import { create, type StoreApi, type UseBoundStore } from 'zustand';
 import {
   collectPaneIds,
-  countPaneLeaves,
-  flattenLayout,
-  type PaneRect,
+  findFirstPaneId,
+  replacePaneLayout,
+  removePaneLayout,
+  remapPaneLayoutIds,
+  updateSplitRatio,
 } from '../../../shared/pane-layout';
-import { MAX_SPLIT_RATIO, MIN_SPLIT_RATIO } from '../../../shared/pane-layout-constants';
+import { findAdjacentPaneId, type PaneFocusDirection } from '../../../shared/pane-navigation';
 import { getPathBasename } from '../../../shared/path-label';
 import type { Pane, PaneLayout, Tab, Workspace } from '../../../shared/types';
 import { MAX_WORKSPACE_TABS } from '../../../shared/workspace-constants';
+import { detachPaneFromTab } from '../workspace/tab-pane-operations';
 
 const DEFAULT_SAVE_DEBOUNCE_MS = 300;
 const DEFAULT_CWD_SAVE_DEBOUNCE_MS = 1000;
 const DEFAULT_SPLIT_RATIO = 0.5;
 const AUTO_TAB_NAME_FALLBACK = 'Tab';
-/**
- * Tolerance for comparing pane edge positions in container-percentage units. `flattenLayout`
- * produces values derived from float multiplication on `ratio`, so exact equality cannot be
- * assumed; 0.01 percentage points is well below any pane size the renderer can produce.
- */
-const PANE_EDGE_EPSILON_PCT = 0.01;
 
 type WorkspaceApi = Window['api']['workspace'];
 type SplitDirection = Extract<PaneLayout, { type: 'split' }>['direction'];
 export type TabSelectionDirection = 'next' | 'previous';
-export type PaneFocusDirection = 'left' | 'right' | 'up' | 'down';
 
 interface CreateWorkspaceStoreOptions {
   createId?: () => string;
@@ -116,13 +112,8 @@ export interface WorkspaceStoreState {
    */
   selectAdjacentTabGlobal: (direction: TabSelectionDirection) => void;
   /**
-   * Moves focus to the pane geometrically adjacent to the active pane in the given direction.
-   *
-   * Selection algorithm: candidates are panes whose facing edge aligns with the active pane's edge
-   * in `direction` (within {@link PANE_EDGE_EPSILON_PCT}). Among those candidates, the one with
-   * the largest overlap on the perpendicular axis wins; ties are broken by smaller center
-   * distance. The active pane never wraps — if no candidate touches the edge (single pane or
-   * outermost pane in `direction`), this is a no-op.
+   * Moves focus to the pane geometrically adjacent to the active pane in the given direction, as
+   * resolved by {@link findAdjacentPaneId}. No-op when that helper finds no neighbor.
    */
   focusAdjacentPane: (direction: PaneFocusDirection) => void;
   closePane: (paneId: string) => void;
@@ -155,17 +146,6 @@ function getErrorMessage(error: unknown): string {
   return String(error);
 }
 
-/**
- * Returns the first leaf pane id in a layout tree.
- */
-export function findFirstPaneId(layout: PaneLayout): string | null {
-  if (layout.type === 'leaf') {
-    return layout.paneId;
-  }
-
-  return findFirstPaneId(layout.children[0]) ?? findFirstPaneId(layout.children[1]);
-}
-
 function replaceWorkspace(workspaces: Workspace[], workspace: Workspace): Workspace[] {
   if (workspaces.some((currentWorkspace) => currentWorkspace.id === workspace.id)) {
     return workspaces.map((currentWorkspace) =>
@@ -193,10 +173,6 @@ function toWorkspaceUpdatePayload(workspace: Workspace): Workspace {
     ...workspace,
     panes: workspace.panes.map(stripRuntimePaneFieldsForWorkspaceUpdate),
   };
-}
-
-function clampSplitRatio(ratio: number): number {
-  return Math.min(MAX_SPLIT_RATIO, Math.max(MIN_SPLIT_RATIO, ratio));
 }
 
 function replaceTab(workspace: Workspace, tab: Tab): Workspace {
@@ -228,240 +204,6 @@ function syncTabNameWithPane(tab: Tab, pane: Pane): Tab {
 
 function setTabActivePane(tab: Tab, pane: Pane): Tab {
   return syncTabNameWithPane({ ...tab, activePaneId: pane.id }, pane);
-}
-
-function replacePaneLayout(
-  layout: PaneLayout,
-  paneId: string,
-  replacement: PaneLayout,
-): PaneLayout {
-  if (layout.type === 'leaf') {
-    return layout.paneId === paneId ? replacement : layout;
-  }
-
-  return {
-    ...layout,
-    children: [
-      replacePaneLayout(layout.children[0], paneId, replacement),
-      replacePaneLayout(layout.children[1], paneId, replacement),
-    ],
-  };
-}
-
-function remapPaneLayoutIds(layout: PaneLayout, paneIdByOldId: Map<string, string>): PaneLayout {
-  if (layout.type === 'leaf') {
-    return {
-      ...layout,
-      paneId: paneIdByOldId.get(layout.paneId) ?? layout.paneId,
-    };
-  }
-
-  return {
-    ...layout,
-    children: [
-      remapPaneLayoutIds(layout.children[0], paneIdByOldId),
-      remapPaneLayoutIds(layout.children[1], paneIdByOldId),
-    ],
-  };
-}
-
-function removePaneLayout(
-  layout: PaneLayout,
-  paneId: string,
-): { layout: PaneLayout | null; removed: boolean } {
-  if (layout.type === 'leaf') {
-    return layout.paneId === paneId ? { layout: null, removed: true } : { layout, removed: false };
-  }
-
-  const firstChild = removePaneLayout(layout.children[0], paneId);
-  if (firstChild.removed) {
-    // Collapse this split only when the direct child was removed. If deletion happened deeper in
-    // that child subtree, keep this split node and replace just the changed child so sibling panes
-    // outside the removed subtree stay visible.
-    return {
-      layout:
-        firstChild.layout === null
-          ? layout.children[1]
-          : {
-              ...layout,
-              children: [firstChild.layout, layout.children[1]],
-            },
-      removed: true,
-    };
-  }
-
-  const secondChild = removePaneLayout(layout.children[1], paneId);
-  if (secondChild.removed) {
-    // Same rule as above for the second child: direct child removal promotes the sibling, while a
-    // nested removal preserves the current split and swaps in the updated child subtree.
-    return {
-      layout:
-        secondChild.layout === null
-          ? layout.children[0]
-          : {
-              ...layout,
-              children: [layout.children[0], secondChild.layout],
-            },
-      removed: true,
-    };
-  }
-
-  return { layout, removed: false };
-}
-
-export interface DetachPaneResult {
-  updatedSourceTab: Tab;
-  movedPaneId: string;
-}
-
-/**
- * Removes `paneId`'s leaf from `sourceTab.layout` and collapses the vacated split, returning the
- * updated tab and the detached pane id. Returns `null` when `paneId` is not referenced by the
- * layout exactly once, or when the tab has fewer than two panes (a tab must never lose its only
- * pane through this path — that case is surfaced as a disabled action in the UI instead).
- *
- * Deliberately takes no `Workspace.panes`: it only reconciles layout and `activePaneId`. Tab-name
- * sync (which needs the pane's `cwd`) is the caller's responsibility, keeping this helper reusable
- * for a future "move to existing tab" attach primitive that has different naming rules.
- */
-export function detachPaneFromTab(sourceTab: Tab, paneId: string): DetachPaneResult | null {
-  const paneOccurrences = collectPaneIds(sourceTab.layout).filter((id) => id === paneId).length;
-  if (paneOccurrences !== 1 || countPaneLeaves(sourceTab.layout) < 2) {
-    return null;
-  }
-
-  const removedLayout = removePaneLayout(sourceTab.layout, paneId);
-  if (!removedLayout.removed || !removedLayout.layout) {
-    return null;
-  }
-
-  const remainingPaneIds = collectPaneIds(removedLayout.layout);
-  const activePaneId =
-    sourceTab.activePaneId !== null && remainingPaneIds.includes(sourceTab.activePaneId)
-      ? sourceTab.activePaneId
-      : findFirstPaneId(removedLayout.layout);
-
-  return {
-    updatedSourceTab: {
-      ...sourceTab,
-      layout: removedLayout.layout,
-      activePaneId,
-    },
-    movedPaneId: paneId,
-  };
-}
-
-function updateSplitRatio(layout: PaneLayout, path: number[], ratio: number): PaneLayout {
-  if (layout.type === 'leaf') {
-    return layout;
-  }
-
-  if (path.length === 0) {
-    return {
-      ...layout,
-      ratio: clampSplitRatio(ratio),
-    };
-  }
-
-  const [childIndex, ...remainingPath] = path;
-  if (childIndex !== 0 && childIndex !== 1) {
-    return layout;
-  }
-
-  return {
-    ...layout,
-    children: layout.children.map((child, index) =>
-      index === childIndex ? updateSplitRatio(child, remainingPath, ratio) : child,
-    ) as [PaneLayout, PaneLayout],
-  };
-}
-
-function rectsTouch(active: PaneRect, candidate: PaneRect, direction: PaneFocusDirection): boolean {
-  switch (direction) {
-    case 'left':
-      return (
-        Math.abs(candidate.leftPct + candidate.widthPct - active.leftPct) <= PANE_EDGE_EPSILON_PCT
-      );
-    case 'right':
-      return (
-        Math.abs(candidate.leftPct - (active.leftPct + active.widthPct)) <= PANE_EDGE_EPSILON_PCT
-      );
-    case 'up':
-      return (
-        Math.abs(candidate.topPct + candidate.heightPct - active.topPct) <= PANE_EDGE_EPSILON_PCT
-      );
-    case 'down':
-      return (
-        Math.abs(candidate.topPct - (active.topPct + active.heightPct)) <= PANE_EDGE_EPSILON_PCT
-      );
-  }
-}
-
-function perpendicularOverlap(
-  active: PaneRect,
-  candidate: PaneRect,
-  direction: PaneFocusDirection,
-): number {
-  if (direction === 'left' || direction === 'right') {
-    const top = Math.max(active.topPct, candidate.topPct);
-    const bottom = Math.min(
-      active.topPct + active.heightPct,
-      candidate.topPct + candidate.heightPct,
-    );
-    return bottom - top;
-  }
-  const left = Math.max(active.leftPct, candidate.leftPct);
-  const right = Math.min(active.leftPct + active.widthPct, candidate.leftPct + candidate.widthPct);
-  return right - left;
-}
-
-function centerDistance(a: PaneRect, b: PaneRect): number {
-  const ax = a.leftPct + a.widthPct / 2;
-  const ay = a.topPct + a.heightPct / 2;
-  const bx = b.leftPct + b.widthPct / 2;
-  const by = b.topPct + b.heightPct / 2;
-  return Math.hypot(ax - bx, ay - by);
-}
-
-/**
- * Returns the pane id geometrically adjacent to `activePaneId` in `direction`, or `null` when no
- * candidate touches the active pane's facing edge. See `focusAdjacentPane`'s JSDoc for the full
- * selection rule.
- */
-export function findAdjacentPaneId(
-  layout: PaneLayout,
-  activePaneId: string,
-  direction: PaneFocusDirection,
-): string | null {
-  const { panes } = flattenLayout(layout);
-  const activeRect = panes.find((rect) => rect.paneId === activePaneId);
-  if (!activeRect) {
-    return null;
-  }
-
-  let best: { paneId: string; overlap: number; distance: number } | null = null;
-  for (const candidate of panes) {
-    if (candidate.paneId === activePaneId) {
-      continue;
-    }
-    if (!rectsTouch(activeRect, candidate, direction)) {
-      continue;
-    }
-    const overlap = perpendicularOverlap(activeRect, candidate, direction);
-    if (overlap <= PANE_EDGE_EPSILON_PCT) {
-      continue;
-    }
-    const distance = centerDistance(activeRect, candidate);
-    if (
-      !best ||
-      overlap > best.overlap + PANE_EDGE_EPSILON_PCT ||
-      (Math.abs(overlap - best.overlap) <= PANE_EDGE_EPSILON_PCT && distance < best.distance)
-    ) {
-      best = { paneId: candidate.paneId, overlap, distance };
-    }
-  }
-
-  return best?.paneId ?? null;
 }
 
 function findActiveTabIndex(workspace: Workspace, tabId: string): number {

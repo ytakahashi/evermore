@@ -1,4 +1,5 @@
 import type { PaneLayout } from './types';
+import { MAX_SPLIT_RATIO, MIN_SPLIT_RATIO } from './pane-layout-constants';
 
 /**
  * Counts terminal pane leaves in a persisted pane layout tree.
@@ -20,6 +21,142 @@ export function collectPaneIds(layout: PaneLayout): string[] {
   }
 
   return [...collectPaneIds(layout.children[0]), ...collectPaneIds(layout.children[1])];
+}
+
+/**
+ * Returns the first leaf pane id in a layout tree.
+ */
+export function findFirstPaneId(layout: PaneLayout): string | null {
+  if (layout.type === 'leaf') {
+    return layout.paneId;
+  }
+
+  return findFirstPaneId(layout.children[0]) ?? findFirstPaneId(layout.children[1]);
+}
+
+function clampSplitRatio(ratio: number): number {
+  return Math.min(MAX_SPLIT_RATIO, Math.max(MIN_SPLIT_RATIO, ratio));
+}
+
+/**
+ * Replaces every matching pane leaf without mutating the input layout.
+ */
+export function replacePaneLayout(
+  layout: PaneLayout,
+  paneId: string,
+  replacement: PaneLayout,
+): PaneLayout {
+  if (layout.type === 'leaf') {
+    return layout.paneId === paneId ? replacement : layout;
+  }
+
+  return {
+    ...layout,
+    children: [
+      replacePaneLayout(layout.children[0], paneId, replacement),
+      replacePaneLayout(layout.children[1], paneId, replacement),
+    ],
+  };
+}
+
+/**
+ * Remaps leaf ids using the supplied mapping, preserving ids absent from the mapping.
+ */
+export function remapPaneLayoutIds(
+  layout: PaneLayout,
+  paneIdByOldId: Map<string, string>,
+): PaneLayout {
+  if (layout.type === 'leaf') {
+    return {
+      ...layout,
+      paneId: paneIdByOldId.get(layout.paneId) ?? layout.paneId,
+    };
+  }
+
+  return {
+    ...layout,
+    children: [
+      remapPaneLayoutIds(layout.children[0], paneIdByOldId),
+      remapPaneLayoutIds(layout.children[1], paneIdByOldId),
+    ],
+  };
+}
+
+/**
+ * Removes the first matching leaf in depth-first order and collapses its vacated split.
+ * Returns a null layout when the root leaf is removed; an absent pane leaves the tree unchanged.
+ */
+export function removePaneLayout(
+  layout: PaneLayout,
+  paneId: string,
+): { layout: PaneLayout | null; removed: boolean } {
+  if (layout.type === 'leaf') {
+    return layout.paneId === paneId ? { layout: null, removed: true } : { layout, removed: false };
+  }
+
+  const firstChild = removePaneLayout(layout.children[0], paneId);
+  if (firstChild.removed) {
+    // Collapse this split only when the direct child was removed. If deletion happened deeper in
+    // that child subtree, keep this split node and replace just the changed child so sibling panes
+    // outside the removed subtree stay visible.
+    return {
+      layout:
+        firstChild.layout === null
+          ? layout.children[1]
+          : {
+              ...layout,
+              children: [firstChild.layout, layout.children[1]],
+            },
+      removed: true,
+    };
+  }
+
+  const secondChild = removePaneLayout(layout.children[1], paneId);
+  if (secondChild.removed) {
+    // Same rule as above for the second child: direct child removal promotes the sibling, while a
+    // nested removal preserves the current split and swaps in the updated child subtree.
+    return {
+      layout:
+        secondChild.layout === null
+          ? layout.children[0]
+          : {
+              ...layout,
+              children: [layout.children[0], secondChild.layout],
+            },
+      removed: true,
+    };
+  }
+
+  return { layout, removed: false };
+}
+
+/**
+ * Updates the split at a child-index path, clamping its ratio to the supported range.
+ * An empty path targets the root; paths ending at a leaf or containing invalid indices do nothing.
+ */
+export function updateSplitRatio(layout: PaneLayout, path: number[], ratio: number): PaneLayout {
+  if (layout.type === 'leaf') {
+    return layout;
+  }
+
+  if (path.length === 0) {
+    return {
+      ...layout,
+      ratio: clampSplitRatio(ratio),
+    };
+  }
+
+  const [childIndex, ...remainingPath] = path;
+  if (childIndex !== 0 && childIndex !== 1) {
+    return layout;
+  }
+
+  return {
+    ...layout,
+    children: layout.children.map((child, index) =>
+      index === childIndex ? updateSplitRatio(child, remainingPath, ratio) : child,
+    ) as [PaneLayout, PaneLayout],
+  };
 }
 
 /**
