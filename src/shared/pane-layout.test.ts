@@ -1,6 +1,16 @@
 import { describe, expect, it } from 'vite-plus/test';
 import type { PaneLayout } from './types';
-import { collectPaneIds, countPaneLeaves, flattenLayout } from './pane-layout';
+import {
+  collectPaneIds,
+  countPaneLeaves,
+  flattenLayout,
+  findFirstPaneId,
+  replacePaneLayout,
+  removePaneLayout,
+  remapPaneLayoutIds,
+  updateSplitRatio,
+} from './pane-layout';
+import { MAX_SPLIT_RATIO, MIN_SPLIT_RATIO } from './pane-layout-constants';
 
 describe('collectPaneIds', () => {
   it('returns pane ids in depth-first layout order', () => {
@@ -264,4 +274,262 @@ describe('flattenLayout', () => {
     ]);
     expect(flattened.splits.map((split) => split.path)).toEqual([[], [0]]);
   });
+});
+
+function leaf(paneId: string): PaneLayout {
+  return { type: 'leaf', paneId };
+}
+
+// Builds a fresh tree per test so an accidental mutation cannot leak into later cases:
+//   vertical 0.4 [ horizontal 0.6 [ a, b ], c ]
+function createNestedLayout(): Extract<PaneLayout, { type: 'split' }> {
+  return {
+    type: 'split',
+    direction: 'vertical',
+    ratio: 0.4,
+    children: [
+      { type: 'split', direction: 'horizontal', ratio: 0.6, children: [leaf('a'), leaf('b')] },
+      leaf('c'),
+    ],
+  };
+}
+
+describe('findFirstPaneId', () => {
+  it('returns the id of a single leaf', () => {
+    // Given: a layout with one leaf.
+    const layout = leaf('c');
+
+    // When: the first pane is resolved.
+    const paneId = findFirstPaneId(layout);
+
+    // Then: the leaf itself is returned.
+    expect(paneId).toBe('c');
+  });
+
+  it('returns the first leaf in depth-first order for a nested tree', () => {
+    // Given: a nested split whose first child is another split.
+    const layout = createNestedLayout();
+
+    // When: the first pane is resolved.
+    const paneId = findFirstPaneId(layout);
+
+    // Then: the deepest first child wins.
+    expect(paneId).toBe('a');
+  });
+});
+
+describe('replacePaneLayout', () => {
+  it('replaces a nested leaf while preserving siblings and split metadata', () => {
+    // Given: a nested tree and a replacement subtree.
+    const layout = createNestedLayout();
+    const before = structuredClone(layout);
+    const replacement: PaneLayout = {
+      type: 'split',
+      direction: 'horizontal',
+      ratio: 0.5,
+      children: [leaf('a'), leaf('d')],
+    };
+
+    // When: the nested leaf is replaced.
+    const updated = replacePaneLayout(layout, 'a', replacement);
+
+    // Then: only the matching leaf changes and the input stays intact.
+    expect(updated).toEqual({
+      ...before,
+      children: [{ ...before.children[0], children: [replacement, leaf('b')] }, leaf('c')],
+    });
+    expect(layout).toEqual(before);
+  });
+
+  it('replaces every matching leaf', () => {
+    // Given: a malformed tree referencing the same pane twice.
+    const layout: PaneLayout = {
+      type: 'split',
+      direction: 'vertical',
+      ratio: 0.5,
+      children: [leaf('a'), leaf('a')],
+    };
+
+    // When: that pane is replaced.
+    const updated = replacePaneLayout(layout, 'a', leaf('b'));
+
+    // Then: both occurrences are replaced.
+    expect(updated).toEqual({ ...layout, children: [leaf('b'), leaf('b')] });
+  });
+
+  it('returns an equal layout when no leaf matches', () => {
+    // Given: a nested tree.
+    const layout = createNestedLayout();
+    const before = structuredClone(layout);
+
+    // When: an absent pane is replaced.
+    const updated = replacePaneLayout(layout, 'missing', leaf('d'));
+
+    // Then: the layout values are unchanged.
+    expect(updated).toEqual(before);
+  });
+});
+
+describe('remapPaneLayoutIds', () => {
+  it('remaps only ids present in the mapping without mutating the input', () => {
+    // Given: a mapping for a nested leaf and an outer sibling.
+    const layout = createNestedLayout();
+    const before = structuredClone(layout);
+    const mapping = new Map([
+      ['a', 'new-a'],
+      ['c', 'new-c'],
+    ]);
+
+    // When: leaf ids are remapped.
+    const updated = remapPaneLayoutIds(layout, mapping);
+
+    // Then: unmapped ids and split metadata are preserved.
+    expect(updated).toEqual({
+      ...before,
+      children: [{ ...before.children[0], children: [leaf('new-a'), leaf('b')] }, leaf('new-c')],
+    });
+    expect(layout).toEqual(before);
+  });
+});
+
+describe('removePaneLayout', () => {
+  it.each([
+    ['a', 'b'],
+    ['b', 'a'],
+  ])('collapses the nested split when leaf %s is removed', (paneId, survivingPaneId) => {
+    // Given: a nested split with an outer sibling.
+    const layout = createNestedLayout();
+    const before = structuredClone(layout);
+
+    // When: one nested leaf is removed.
+    const result = removePaneLayout(layout, paneId);
+
+    // Then: the nested sibling is promoted while the outer split survives.
+    expect(result).toEqual({
+      layout: { ...before, children: [leaf(survivingPaneId), leaf('c')] },
+      removed: true,
+    });
+    expect(layout).toEqual(before);
+  });
+
+  it('preserves the outer split when removal occurs deeper in its second child', () => {
+    // Given: the nested split is the second child of the root.
+    const nested = createNestedLayout();
+    const layout: PaneLayout = { ...nested, children: [nested.children[1], nested.children[0]] };
+
+    // When: a leaf in that subtree is removed.
+    const result = removePaneLayout(layout, 'a');
+
+    // Then: the outer sibling survives and only the nested child is replaced.
+    expect(result).toEqual({
+      layout: { ...layout, children: [leaf('c'), leaf('b')] },
+      removed: true,
+    });
+  });
+
+  it('promotes the sibling subtree when a direct leaf child is removed', () => {
+    // Given: a root containing a nested subtree and a leaf.
+    const layout = createNestedLayout();
+
+    // When: the direct leaf is removed.
+    const result = removePaneLayout(layout, 'c');
+
+    // Then: the complete sibling subtree is promoted by reference.
+    expect(result).toEqual({ layout: layout.children[0], removed: true });
+    expect(result.layout).toBe(layout.children[0]);
+  });
+
+  it('returns a null layout when the root leaf is removed', () => {
+    // Given: a single-leaf layout.
+    const layout = leaf('a');
+
+    // When: that leaf is removed.
+    const result = removePaneLayout(layout, 'a');
+
+    // Then: nothing remains.
+    expect(result).toEqual({ layout: null, removed: true });
+  });
+
+  it('returns the same layout when the pane is absent', () => {
+    // Given: a nested tree.
+    const layout = createNestedLayout();
+
+    // When: an absent pane is removed.
+    const result = removePaneLayout(layout, 'missing');
+
+    // Then: the input layout is returned as-is.
+    expect(result).toEqual({ layout, removed: false });
+    expect(result.layout).toBe(layout);
+  });
+
+  it('removes only the first matching leaf from a duplicate layout', () => {
+    // Given: both children reference the same pane.
+    const layout: PaneLayout = {
+      type: 'split',
+      direction: 'vertical',
+      ratio: 0.5,
+      children: [leaf('a'), leaf('a')],
+    };
+
+    // When: that pane is removed.
+    const result = removePaneLayout(layout, 'a');
+
+    // Then: the second occurrence remains.
+    expect(result).toEqual({ layout: leaf('a'), removed: true });
+  });
+});
+
+describe('updateSplitRatio', () => {
+  it.each([
+    [MIN_SPLIT_RATIO - 0.1, MIN_SPLIT_RATIO],
+    [0.62, 0.62],
+    [MAX_SPLIT_RATIO + 0.1, MAX_SPLIT_RATIO],
+  ])('clamps root ratio %s to %s without mutating the input', (ratio, expected) => {
+    // Given: a split at the layout root.
+    const layout = createNestedLayout();
+    const before = structuredClone(layout);
+
+    // When: the root ratio is updated.
+    const updated = updateSplitRatio(layout, [], ratio);
+
+    // Then: the supported bounds are applied and the input stays intact.
+    expect(updated).toEqual({ ...before, ratio: expected });
+    expect(layout).toEqual(before);
+  });
+
+  it.each([0, 1])('updates a nested split at child %s', (index) => {
+    // Given: a root whose specified child is a split.
+    const nested = createNestedLayout();
+    const layout: PaneLayout =
+      index === 0 ? nested : { ...nested, children: [nested.children[1], nested.children[0]] };
+    const before = structuredClone(layout);
+    const path = [index];
+
+    // When: the nested split is resized.
+    const updated = updateSplitRatio(layout, path, 0.7);
+
+    // Then: only the targeted split ratio changes and neither the input nor the path is mutated.
+    const resized = { ...nested.children[0], ratio: 0.7 };
+    expect(updated).toEqual({
+      ...before,
+      children: index === 0 ? [resized, leaf('c')] : [leaf('c'), resized],
+    });
+    expect(layout).toEqual(before);
+    expect(path).toEqual([index]);
+  });
+
+  it.each([[2], [0, -1], [0, 0], [1], [0, 0, 1]].map((path) => ({ path })))(
+    'preserves layout values for invalid or leaf path $path',
+    ({ path }) => {
+      // Given: a path that cannot target a split.
+      const layout = createNestedLayout();
+      const before = structuredClone(layout);
+
+      // When: resize is requested.
+      const updated = updateSplitRatio(layout, path, 0.7);
+
+      // Then: the layout values are unchanged.
+      expect(updated).toEqual(before);
+    },
+  );
 });

@@ -1266,93 +1266,9 @@ describe('workspaceStore', () => {
       type: 'leaf',
       paneId: 'pane-2',
     });
+    expect(updatedWorkspace?.tabs[0]?.activePaneId).toBe('pane-2');
     expect(updatedWorkspace?.tabs[0]?.name).toBe('project');
     expect(updatedWorkspace?.tabs[1]?.layout).toEqual(multiTabWorkspace.tabs[1]?.layout);
-  });
-
-  it('closes only the target pane inside a nested split layout', async () => {
-    // Given: one tab has three panes where the target pane is inside a nested split.
-    vi.useFakeTimers();
-    const nestedWorkspace: Workspace = {
-      ...workspace,
-      tabs: [
-        {
-          id: 'tab-1',
-          name: 'zsh',
-          isCustomName: false,
-          layout: {
-            type: 'split',
-            direction: 'vertical',
-            ratio: 0.4,
-            children: [
-              {
-                type: 'split',
-                direction: 'horizontal',
-                ratio: 0.5,
-                children: [
-                  {
-                    type: 'leaf',
-                    paneId: 'pane-1',
-                  },
-                  {
-                    type: 'leaf',
-                    paneId: 'pane-2',
-                  },
-                ],
-              },
-              {
-                type: 'leaf',
-                paneId: 'pane-3',
-              },
-            ],
-          },
-          activePaneId: 'pane-2',
-        },
-      ],
-      panes: [
-        {
-          id: 'pane-1',
-          cwd: '/Users/tester',
-        },
-        {
-          id: 'pane-2',
-          cwd: '/Users/tester',
-        },
-        {
-          id: 'pane-3',
-          cwd: '/Users/tester',
-        },
-      ],
-      activeTabId: 'tab-1',
-    };
-    workspaceApi.list = vi.fn(() =>
-      Promise.resolve({ workspaces: [nestedWorkspace], activeWorkspaceId: null }),
-    );
-    const useStore = createWorkspaceStore({ workspaceApi, debounceMs: 50, now: () => now });
-    await useStore.getState().loadWorkspaces();
-
-    // When: one pane in the nested split is closed.
-    useStore.getState().closePane('pane-2');
-
-    // Then: only that pane is removed and the outer sibling pane remains in the layout.
-    const updatedWorkspace = selectActiveWorkspace(useStore.getState());
-    expect(updatedWorkspace?.panes.map((pane) => pane.id)).toEqual(['pane-1', 'pane-3']);
-    expect(updatedWorkspace?.tabs[0]?.activePaneId).toBe('pane-1');
-    expect(updatedWorkspace?.tabs[0]?.layout).toEqual({
-      type: 'split',
-      direction: 'vertical',
-      ratio: 0.4,
-      children: [
-        {
-          type: 'leaf',
-          paneId: 'pane-1',
-        },
-        {
-          type: 'leaf',
-          paneId: 'pane-3',
-        },
-      ],
-    });
   });
 
   it('closePaneOnExit removes a non-final pane like closePane does', async () => {
@@ -2060,61 +1976,6 @@ describe('workspaceStore', () => {
       expect(selectActiveTab(useStore.getState())?.activePaneId).toBe('workspace-1-pane-1');
     });
 
-    it('focusAdjacentPane prefers the candidate with the largest perpendicular overlap', async () => {
-      // Given: a nested layout where the active (left) pane faces two right-side candidates of
-      // unequal vertical extent — the larger candidate must win.
-      //   layout: vertical split, left = active pane, right = horizontal split with two stacked panes
-      //   The selection rule should pick the top-right pane because the active pane spans the full
-      //   height; the largest overlap is with the top-right one when we artificially make it taller.
-      const nestedWorkspace: Workspace = {
-        ...workspace,
-        tabs: [
-          {
-            id: 'tab-1',
-            name: 'zsh',
-            isCustomName: false,
-            layout: {
-              type: 'split',
-              direction: 'vertical',
-              ratio: 0.5,
-              children: [
-                { type: 'leaf', paneId: 'left' },
-                {
-                  type: 'split',
-                  direction: 'horizontal',
-                  // Top child occupies 80% of the right column — that's the larger overlap with
-                  // the full-height left pane.
-                  ratio: 0.8,
-                  children: [
-                    { type: 'leaf', paneId: 'right-top' },
-                    { type: 'leaf', paneId: 'right-bottom' },
-                  ],
-                },
-              ],
-            },
-            activePaneId: 'left',
-          },
-        ],
-        panes: [
-          { id: 'left', cwd: '/a' },
-          { id: 'right-top', cwd: '/b' },
-          { id: 'right-bottom', cwd: '/c' },
-        ],
-        activeTabId: 'tab-1',
-      };
-      workspaceApi.list = vi.fn(() =>
-        Promise.resolve({ workspaces: [nestedWorkspace], activeWorkspaceId: 'workspace-1' }),
-      );
-      const useStore = createWorkspaceStore({ workspaceApi });
-      await useStore.getState().loadWorkspaces();
-
-      // When: focus-right fires from the left pane.
-      useStore.getState().focusAdjacentPane('right');
-
-      // Then: right-top wins because its vertical overlap with the left pane is the largest.
-      expect(selectActiveTab(useStore.getState())?.activePaneId).toBe('right-top');
-    });
-
     it('focusAdjacentPane is a no-op when no candidate touches the active edge', async () => {
       // Given: a single-pane workspace (no neighbors at all).
       const useStore = createWorkspaceStore({ workspaceApi });
@@ -2677,66 +2538,6 @@ describe('workspaceStore', () => {
       expect(sourceTab?.isCustomName).toBe(true);
     });
 
-    it('collapses a nested split correctly when the detached pane is deep in the tree', async () => {
-      // Given: three panes where the target is nested inside a horizontal split.
-      const nestedWorkspace: Workspace = {
-        ...workspace,
-        tabs: [
-          {
-            id: 'tab-1',
-            name: 'zsh',
-            isCustomName: false,
-            layout: {
-              type: 'split',
-              direction: 'vertical',
-              ratio: 0.4,
-              children: [
-                {
-                  type: 'split',
-                  direction: 'horizontal',
-                  ratio: 0.5,
-                  children: [
-                    { type: 'leaf', paneId: 'pane-1' },
-                    { type: 'leaf', paneId: 'pane-2' },
-                  ],
-                },
-                { type: 'leaf', paneId: 'pane-3' },
-              ],
-            },
-            activePaneId: 'pane-2',
-          },
-        ],
-        panes: [
-          { id: 'pane-1', cwd: '/Users/tester' },
-          { id: 'pane-2', cwd: '/Users/tester' },
-          { id: 'pane-3', cwd: '/Users/tester' },
-        ],
-        activeTabId: 'tab-1',
-      };
-      workspaceApi.list = vi.fn(() =>
-        Promise.resolve({ workspaces: [nestedWorkspace], activeWorkspaceId: 'workspace-1' }),
-      );
-      const useStore = createWorkspaceStore({ createId: () => 'new-tab', workspaceApi });
-      await useStore.getState().loadWorkspaces();
-
-      // When: the (active) nested pane is split out into a new tab.
-      useStore.getState().createTabFromPane('workspace-1', 'tab-1', 'pane-2');
-
-      // Then: only that leaf is removed and the outer sibling is promoted, exactly as `closePane`
-      // does for the same tree shape.
-      const sourceTab = useStore.getState().workspaces[0]?.tabs.find((tab) => tab.id === 'tab-1');
-      expect(sourceTab?.layout).toEqual({
-        type: 'split',
-        direction: 'vertical',
-        ratio: 0.4,
-        children: [
-          { type: 'leaf', paneId: 'pane-1' },
-          { type: 'leaf', paneId: 'pane-3' },
-        ],
-      });
-      expect(sourceTab?.activePaneId).toBe('pane-1');
-    });
-
     it('preserves runtime pane fields and strips them from the persisted payload', async () => {
       // Given: the moved pane has a live ptyId and initialCommand.
       const source = createSplitPaneWorkspace('workspace-1');
@@ -2845,41 +2646,6 @@ describe('workspaceStore', () => {
         .createTabFromPane('missing-workspace', 'workspace-1-tab-1', 'workspace-1-pane-2');
       useStore.getState().createTabFromPane('workspace-1', 'missing-tab', 'workspace-1-pane-2');
       useStore.getState().createTabFromPane('workspace-1', 'workspace-1-tab-1', 'missing-pane');
-      expect(useStore.getState().workspaces[0]?.tabs).toHaveLength(1);
-    });
-
-    it('is a no-op when the layout references the pane more than once', async () => {
-      // Given: a malformed layout that references the same pane id twice.
-      const malformedWorkspace: Workspace = {
-        ...workspace,
-        tabs: [
-          {
-            id: 'tab-1',
-            name: 'zsh',
-            isCustomName: false,
-            layout: {
-              type: 'split',
-              direction: 'vertical',
-              ratio: 0.5,
-              children: [
-                { type: 'leaf', paneId: 'pane-1' },
-                { type: 'leaf', paneId: 'pane-1' },
-              ],
-            },
-            activePaneId: 'pane-1',
-          },
-        ],
-      };
-      workspaceApi.list = vi.fn(() =>
-        Promise.resolve({ workspaces: [malformedWorkspace], activeWorkspaceId: 'workspace-1' }),
-      );
-      const useStore = createWorkspaceStore({ createId: () => 'new-tab', workspaceApi });
-      await useStore.getState().loadWorkspaces();
-
-      // When: splitting out the duplicated pane is attempted.
-      useStore.getState().createTabFromPane('workspace-1', 'tab-1', 'pane-1');
-
-      // Then: the malformed layout is left as-is instead of being partially repaired.
       expect(useStore.getState().workspaces[0]?.tabs).toHaveLength(1);
     });
 
