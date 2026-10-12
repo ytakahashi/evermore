@@ -985,58 +985,22 @@ describe('workspaceStore', () => {
     expect(updatedWorkspace?.updatedAt).toBe(now);
     expect(updatedWorkspace?.tabs).toHaveLength(1);
     expect(updatedWorkspace?.panes.map((pane) => pane.id)).toEqual(['workspace-1-pane-1']);
+    await vi.advanceTimersByTimeAsync(50);
+    expect(workspaceApi.update).toHaveBeenCalledWith(updatedWorkspace);
+    vi.mocked(workspaceApi.update).mockClear();
+
+    const beforeFinalClose = useStore.getState();
 
     // When: callers try to close the only remaining tab.
     useStore.getState().closeWorkspaceTab('workspace-1', 'workspace-1-tab-1');
 
-    // Then: the store keeps one tab available.
+    // Then: the store keeps one tab available without publishing a new state.
+    expect(useStore.getState()).toBe(beforeFinalClose);
     updatedWorkspace = selectActiveWorkspace(useStore.getState());
     expect(updatedWorkspace?.tabs).toHaveLength(1);
     expect(updatedWorkspace?.activeTabId).toBe('workspace-1-tab-1');
-  });
-
-  it('closes an inactive tab without changing the active tab', async () => {
-    // Given: tab-1 is active and tab-2 exists.
-    vi.useFakeTimers();
-    const secondTabWorkspace: Workspace = {
-      ...workspace,
-      tabs: [
-        ...workspace.tabs,
-        {
-          id: 'tab-2',
-          name: 'zsh',
-          isCustomName: false,
-          layout: {
-            type: 'leaf',
-            paneId: 'pane-2',
-          },
-          activePaneId: 'pane-2',
-        },
-      ],
-      panes: [
-        ...workspace.panes,
-        {
-          id: 'pane-2',
-          cwd: '/Users/tester/project',
-        },
-      ],
-      activeTabId: 'workspace-1-tab-1',
-    };
-    workspaceApi.list = vi.fn(() =>
-      Promise.resolve({ workspaces: [secondTabWorkspace], activeWorkspaceId: null }),
-    );
-    const useStore = createWorkspaceStore({ workspaceApi, debounceMs: 50, now: () => now });
-    await useStore.getState().loadWorkspaces();
-
-    // When: the inactive tab is closed.
-    useStore.getState().closeWorkspaceTab('workspace-1', 'tab-2');
-
-    // Then: the original active tab remains active while the inactive pane is removed.
-    const updatedWorkspace = selectActiveWorkspace(useStore.getState());
-    expect(updatedWorkspace?.activeTabId).toBe('workspace-1-tab-1');
-    expect(updatedWorkspace?.updatedAt).toBe(now);
-    expect(updatedWorkspace?.tabs.map((tab) => tab.id)).toEqual(['workspace-1-tab-1']);
-    expect(updatedWorkspace?.panes.map((pane) => pane.id)).toEqual(['workspace-1-pane-1']);
+    await vi.advanceTimersByTimeAsync(50);
+    expect(workspaceApi.update).not.toHaveBeenCalled();
   });
 
   it('closes a tab in an inactive workspace without switching workspaces', async () => {
@@ -2102,12 +2066,29 @@ describe('workspaceStore', () => {
       workspaceApi.list = vi.fn(() =>
         Promise.resolve({ workspaces: [source, target], activeWorkspaceId: 'workspace-1' }),
       );
-      const useStore = createWorkspaceStore({ workspaceApi, debounceMs: 50, now: () => now });
+      const createId = vi.fn(() => 'unused-id');
+      const useStore = createWorkspaceStore({
+        createId,
+        workspaceApi,
+        debounceMs: 50,
+        now: () => now,
+      });
       await useStore.getState().loadWorkspaces();
 
+      const snapshots: Workspace[][] = [];
+      const unsubscribe = useStore.subscribe((state) => snapshots.push(state.workspaces));
+
       // When: the active source tab is moved to the target workspace.
-      useStore.getState().moveTabToWorkspace('workspace-1', 'workspace-1-a', 'workspace-2');
+      useStore.getState().moveTabToWorkspace('workspace-1', 'workspace-1-a', 'workspace-2', 0);
+      unsubscribe();
       const [updatedSource, updatedTarget] = useStore.getState().workspaces;
+
+      // Then: subscribers see one complete transition with a shared timestamp and no id allocation.
+      expect(snapshots).toHaveLength(1);
+      expect(snapshots[0]).toEqual([updatedSource, updatedTarget]);
+      expect(updatedSource.updatedAt).toBe(now);
+      expect(updatedTarget.updatedAt).toBe(now);
+      expect(createId).not.toHaveBeenCalled();
 
       // Then: the tab and its pane leave the source, whose active tab advances.
       expect(updatedSource.tabs.map((tab) => tab.id)).toEqual(['workspace-1-b']);
@@ -2115,7 +2096,7 @@ describe('workspaceStore', () => {
       expect(updatedSource.activeTabId).toBe('workspace-1-b');
 
       // And: the tab and its pane arrive in the target and become active there.
-      expect(updatedTarget.tabs.map((tab) => tab.id)).toEqual(['workspace-2-x', 'workspace-1-a']);
+      expect(updatedTarget.tabs.map((tab) => tab.id)).toEqual(['workspace-1-a', 'workspace-2-x']);
       expect(updatedTarget.panes.map((pane) => pane.id)).toEqual([
         'workspace-2-x-pane',
         'workspace-1-a-pane',
@@ -2221,9 +2202,10 @@ describe('workspaceStore', () => {
       workspaceApi.list = vi.fn(() =>
         Promise.resolve({ workspaces: [source, target], activeWorkspaceId: 'workspace-1' }),
       );
-      const generatedIds = ['tab-new', 'pane-new'];
+      const generatedIds = ['tab-shared', 'tab-new', 'pane-shared', 'pane-new'];
+      const createId = vi.fn(() => generatedIds.shift() ?? 'fallback-id');
       const useStore = createWorkspaceStore({
-        createId: () => generatedIds.shift() ?? 'fallback-id',
+        createId,
         workspaceApi,
         debounceMs: 50,
         now: () => now,
@@ -2232,6 +2214,7 @@ describe('workspaceStore', () => {
 
       // When: the source tab is moved into the target workspace.
       useStore.getState().moveTabToWorkspace('workspace-1', 'tab-shared', 'workspace-2');
+      expect(createId).toHaveBeenCalledTimes(4);
 
       // Then: the moved tab and pane are remapped so the target workspace has unique ids.
       const targetWorkspace = useStore.getState().workspaces[1];
@@ -2263,128 +2246,46 @@ describe('workspaceStore', () => {
       );
     });
 
-    it('refuses to move the only remaining tab out of a workspace', async () => {
-      // Given: the source workspace has a single tab.
-      const source = createMultiTabWorkspace('workspace-1', ['a']);
-      const target = createMultiTabWorkspace('workspace-2', ['x']);
+    it('refuses invalid transfers without allocating ids, changing state, or saving', async () => {
+      // Given: a two-tab source and a one-tab target.
+      vi.useFakeTimers();
+      const source: Workspace = {
+        ...workspace,
+        tabs: [
+          ...workspace.tabs,
+          {
+            ...workspace.tabs[0],
+            id: 'second',
+            layout: { type: 'leaf', paneId: 'second-pane' },
+            activePaneId: 'second-pane',
+          },
+        ],
+        panes: [...workspace.panes, { id: 'second-pane', cwd: '/second' }],
+      };
+      const target = createWorkspace('workspace-2', '/target');
       workspaceApi.list = vi.fn(() =>
-        Promise.resolve({ workspaces: [source, target], activeWorkspaceId: 'workspace-1' }),
+        Promise.resolve({ workspaces: [source, target], activeWorkspaceId: source.id }),
       );
-      const useStore = createWorkspaceStore({ workspaceApi });
+      const createId = vi.fn(() => 'unused-id');
+      const clock = vi.fn(() => 100);
+      const useStore = createWorkspaceStore({ workspaceApi, createId, now: clock, debounceMs: 50 });
       await useStore.getState().loadWorkspaces();
+      const before = useStore.getState();
 
-      // When: the last tab is moved out.
-      useStore.getState().moveTabToWorkspace('workspace-1', 'workspace-1-a', 'workspace-2');
+      // When: source, target, or tab is missing, the workspaces coincide, or the final tab would move.
+      useStore.getState().moveTabToWorkspace('missing', source.tabs[0].id, target.id);
+      useStore.getState().moveTabToWorkspace(source.id, source.tabs[0].id, 'missing');
+      useStore.getState().moveTabToWorkspace(source.id, 'missing-tab', target.id);
+      useStore.getState().moveTabToWorkspace(source.id, source.tabs[0].id, source.id);
+      useStore.getState().moveTabToWorkspace(target.id, target.tabs[0].id, source.id);
 
-      // Then: both workspaces keep their tabs unchanged.
-      expect(useStore.getState().workspaces[0]?.tabs).toHaveLength(1);
-      expect(useStore.getState().workspaces[1]?.tabs).toHaveLength(1);
-    });
-
-    it('is a no-op when source and target workspaces are the same', async () => {
-      // Given: a two-tab workspace.
-      const source = createMultiTabWorkspace('workspace-1', ['a', 'b']);
-      workspaceApi.list = vi.fn(() =>
-        Promise.resolve({ workspaces: [source], activeWorkspaceId: 'workspace-1' }),
-      );
-      const useStore = createWorkspaceStore({ workspaceApi });
-      await useStore.getState().loadWorkspaces();
-
-      // When: a tab is "moved" to its own workspace.
-      useStore.getState().moveTabToWorkspace('workspace-1', 'workspace-1-a', 'workspace-1');
-
-      // Then: the tab list is untouched.
-      expect(useStore.getState().workspaces[0]?.tabs.map((tab) => tab.id)).toEqual([
-        'workspace-1-a',
-        'workspace-1-b',
-      ]);
-    });
-
-    it('inserts the moved tab at the given index in the target workspace', async () => {
-      // Given: a two-tab source and a three-tab target workspace.
-      const source = createMultiTabWorkspace('workspace-1', ['a', 'b']);
-      const target = createMultiTabWorkspace('workspace-2', ['x', 'y', 'z']);
-      workspaceApi.list = vi.fn(() =>
-        Promise.resolve({ workspaces: [source, target], activeWorkspaceId: 'workspace-1' }),
-      );
-      const useStore = createWorkspaceStore({ workspaceApi });
-      await useStore.getState().loadWorkspaces();
-
-      // When: a source tab is moved into the middle of the target list.
-      useStore.getState().moveTabToWorkspace('workspace-1', 'workspace-1-a', 'workspace-2', 1);
-
-      // Then: the tab lands at that index and becomes active.
-      const updatedTarget = useStore.getState().workspaces[1];
-      expect(updatedTarget?.tabs.map((tab) => tab.id)).toEqual([
-        'workspace-2-x',
-        'workspace-1-a',
-        'workspace-2-y',
-        'workspace-2-z',
-      ]);
-      expect(updatedTarget?.activeTabId).toBe('workspace-1-a');
-    });
-
-    it('inserts the moved tab at the head when the index is zero', async () => {
-      // Given: a two-tab source and a two-tab target workspace.
-      const source = createMultiTabWorkspace('workspace-1', ['a', 'b']);
-      const target = createMultiTabWorkspace('workspace-2', ['x', 'y']);
-      workspaceApi.list = vi.fn(() =>
-        Promise.resolve({ workspaces: [source, target], activeWorkspaceId: 'workspace-1' }),
-      );
-      const useStore = createWorkspaceStore({ workspaceApi });
-      await useStore.getState().loadWorkspaces();
-
-      // When: a source tab is dropped before the first target tab.
-      useStore.getState().moveTabToWorkspace('workspace-1', 'workspace-1-a', 'workspace-2', 0);
-
-      // Then: the moved tab becomes the first tab in the target.
-      expect(useStore.getState().workspaces[1]?.tabs.map((tab) => tab.id)).toEqual([
-        'workspace-1-a',
-        'workspace-2-x',
-        'workspace-2-y',
-      ]);
-    });
-
-    it('clamps an out-of-range index so the moved tab appends', async () => {
-      // Given: a two-tab source and a two-tab target workspace.
-      const source = createMultiTabWorkspace('workspace-1', ['a', 'b']);
-      const target = createMultiTabWorkspace('workspace-2', ['x', 'y']);
-      workspaceApi.list = vi.fn(() =>
-        Promise.resolve({ workspaces: [source, target], activeWorkspaceId: 'workspace-1' }),
-      );
-      const useStore = createWorkspaceStore({ workspaceApi });
-      await useStore.getState().loadWorkspaces();
-
-      // When: a source tab is dropped with an index past the end of the target list.
-      useStore.getState().moveTabToWorkspace('workspace-1', 'workspace-1-a', 'workspace-2', 99);
-
-      // Then: the index clamps to the tail, matching the default append behaviour.
-      expect(useStore.getState().workspaces[1]?.tabs.map((tab) => tab.id)).toEqual([
-        'workspace-2-x',
-        'workspace-2-y',
-        'workspace-1-a',
-      ]);
-    });
-
-    it('appends the moved tab when no index is given', async () => {
-      // Given: a two-tab source and a two-tab target workspace.
-      const source = createMultiTabWorkspace('workspace-1', ['a', 'b']);
-      const target = createMultiTabWorkspace('workspace-2', ['x', 'y']);
-      workspaceApi.list = vi.fn(() =>
-        Promise.resolve({ workspaces: [source, target], activeWorkspaceId: 'workspace-1' }),
-      );
-      const useStore = createWorkspaceStore({ workspaceApi });
-      await useStore.getState().loadWorkspaces();
-
-      // When: a source tab is moved without specifying an index (menu-driven move).
-      useStore.getState().moveTabToWorkspace('workspace-1', 'workspace-1-a', 'workspace-2');
-
-      // Then: the tab is appended to the end of the target list.
-      expect(useStore.getState().workspaces[1]?.tabs.map((tab) => tab.id)).toEqual([
-        'workspace-2-x',
-        'workspace-2-y',
-        'workspace-1-a',
-      ]);
+      // Then: rejection has no runtime effects.
+      expect(useStore.getState()).toBe(before);
+      expect(createId).not.toHaveBeenCalled();
+      expect(clock).not.toHaveBeenCalled();
+      expect(workspaceApi.setActiveWorkspaceId).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(50);
+      expect(workspaceApi.update).not.toHaveBeenCalled();
     });
   });
 
@@ -2423,120 +2324,6 @@ describe('workspaceStore', () => {
         updatedAt: 1,
       };
     }
-
-    it('detaches the non-active pane into a new tab appended at the end', async () => {
-      // Given: a two-pane tab whose first pane is active.
-      const source = createSplitPaneWorkspace('workspace-1');
-      workspaceApi.list = vi.fn(() =>
-        Promise.resolve({ workspaces: [source], activeWorkspaceId: 'workspace-1' }),
-      );
-      const ids = ['new-tab'];
-      const useStore = createWorkspaceStore({
-        createId: () => ids.shift() ?? 'fallback-id',
-        workspaceApi,
-      });
-      await useStore.getState().loadWorkspaces();
-
-      // When: the inactive second pane is split out into a new tab.
-      useStore
-        .getState()
-        .createTabFromPane('workspace-1', 'workspace-1-tab-1', 'workspace-1-pane-2');
-
-      // Then: the source tab keeps its one remaining pane and unchanged active pane.
-      const updatedWorkspace = useStore.getState().workspaces[0];
-      const sourceTab = updatedWorkspace?.tabs.find((tab) => tab.id === 'workspace-1-tab-1');
-      expect(sourceTab?.layout).toEqual({ type: 'leaf', paneId: 'workspace-1-pane-1' });
-      expect(sourceTab?.activePaneId).toBe('workspace-1-pane-1');
-
-      // And: a new destination tab is appended, named from the moved pane's cwd, and made active.
-      expect(updatedWorkspace?.tabs.map((tab) => tab.id)).toEqual(['workspace-1-tab-1', 'new-tab']);
-      const destinationTab = updatedWorkspace?.tabs[1];
-      expect(destinationTab).toEqual({
-        id: 'new-tab',
-        name: 'right',
-        isCustomName: false,
-        layout: { type: 'leaf', paneId: 'workspace-1-pane-2' },
-        activePaneId: 'workspace-1-pane-2',
-      });
-      expect(updatedWorkspace?.activeTabId).toBe('new-tab');
-
-      // And: the workspace's panes array is untouched (same ids, order, and objects).
-      expect(updatedWorkspace?.panes).toEqual(source.panes);
-    });
-
-    it('falls back the source active pane and syncs its automatic name when the active pane is detached', async () => {
-      // Given: the active pane (pane-1, cwd "left") is the one being split out.
-      const source = createSplitPaneWorkspace('workspace-1');
-      workspaceApi.list = vi.fn(() =>
-        Promise.resolve({ workspaces: [source], activeWorkspaceId: 'workspace-1' }),
-      );
-      const useStore = createWorkspaceStore({ createId: () => 'new-tab', workspaceApi });
-      await useStore.getState().loadWorkspaces();
-
-      // When: the active pane is split out into a new tab.
-      useStore
-        .getState()
-        .createTabFromPane('workspace-1', 'workspace-1-tab-1', 'workspace-1-pane-1');
-
-      // Then: the remaining sibling pane becomes the source tab's active pane, and the automatic
-      // tab name follows it (from "left" to "right").
-      const sourceTab = useStore
-        .getState()
-        .workspaces[0]?.tabs.find((tab) => tab.id === 'workspace-1-tab-1');
-      expect(sourceTab?.activePaneId).toBe('workspace-1-pane-2');
-      expect(sourceTab?.name).toBe('right');
-      expect(sourceTab?.isCustomName).toBe(false);
-    });
-
-    it('repairs an invalid source active pane after detaching another pane', async () => {
-      // Given: the source tab's active pane id is stale and does not occur in its layout.
-      const source = createSplitPaneWorkspace('workspace-1', {
-        name: 'stale-name',
-        activePaneId: 'missing-pane',
-      });
-      workspaceApi.list = vi.fn(() =>
-        Promise.resolve({ workspaces: [source], activeWorkspaceId: 'workspace-1' }),
-      );
-      const useStore = createWorkspaceStore({ createId: () => 'new-tab', workspaceApi });
-      await useStore.getState().loadWorkspaces();
-
-      // When: a different pane is detached from the source layout.
-      useStore
-        .getState()
-        .createTabFromPane('workspace-1', 'workspace-1-tab-1', 'workspace-1-pane-2');
-
-      // Then: the remaining pane becomes active and the automatic tab name follows its cwd.
-      const sourceTab = useStore
-        .getState()
-        .workspaces[0]?.tabs.find((tab) => tab.id === 'workspace-1-tab-1');
-      expect(sourceTab?.activePaneId).toBe('workspace-1-pane-1');
-      expect(sourceTab?.name).toBe('left');
-    });
-
-    it('keeps a custom source tab name after the active pane is detached', async () => {
-      // Given: the source tab has a user-set custom name.
-      const source = createSplitPaneWorkspace('workspace-1', {
-        name: 'my tab',
-        isCustomName: true,
-      });
-      workspaceApi.list = vi.fn(() =>
-        Promise.resolve({ workspaces: [source], activeWorkspaceId: 'workspace-1' }),
-      );
-      const useStore = createWorkspaceStore({ createId: () => 'new-tab', workspaceApi });
-      await useStore.getState().loadWorkspaces();
-
-      // When: the active pane is split out.
-      useStore
-        .getState()
-        .createTabFromPane('workspace-1', 'workspace-1-tab-1', 'workspace-1-pane-1');
-
-      // Then: the custom name is preserved even though the active pane changed.
-      const sourceTab = useStore
-        .getState()
-        .workspaces[0]?.tabs.find((tab) => tab.id === 'workspace-1-tab-1');
-      expect(sourceTab?.name).toBe('my tab');
-      expect(sourceTab?.isCustomName).toBe(true);
-    });
 
     it('preserves runtime pane fields and strips them from the persisted payload', async () => {
       // Given: the moved pane has a live ptyId and initialCommand.
@@ -2619,8 +2406,11 @@ describe('workspaceStore', () => {
 
     it('is a no-op when the source tab has only one pane', async () => {
       // Given: a workspace whose only tab has a single pane (the default fixture).
-      const useStore = createWorkspaceStore({ createId: () => 'new-tab', workspaceApi });
+      vi.useFakeTimers();
+      const createId = vi.fn(() => 'new-tab');
+      const useStore = createWorkspaceStore({ createId, workspaceApi, debounceMs: 50 });
       await useStore.getState().loadWorkspaces();
+      const before = useStore.getState();
 
       // When: splitting out the lone pane is attempted.
       useStore
@@ -2628,7 +2418,11 @@ describe('workspaceStore', () => {
         .createTabFromPane('workspace-1', 'workspace-1-tab-1', 'workspace-1-pane-1');
 
       // Then: nothing changes.
-      expect(useStore.getState().workspaces[0]?.tabs).toHaveLength(1);
+      expect(useStore.getState()).toBe(before);
+      expect(createId).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(50);
+      expect(workspaceApi.update).not.toHaveBeenCalled();
+      expect(workspaceApi.setActiveWorkspaceId).not.toHaveBeenCalled();
     });
 
     it('is a no-op for an unknown workspace, source tab, or pane', async () => {

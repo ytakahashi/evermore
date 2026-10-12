@@ -219,6 +219,13 @@ The renderer is a single React 19 app rendered into `#root` by `main.tsx` with `
   state (workspaces, app settings, etc.) lives behind a main-process IPC and is mirrored into a
   store, while purely transient renderer state (sidebar open/close, active main-area view, etc.)
   lives in a store only and resets on every launch.
+- `workspace/` owns pure tab and pane transitions: closing, reordering, detaching panes into tabs,
+  moving tabs between workspaces, and the automatic tab naming those transitions apply. These
+  functions receive workspace snapshots and explicit ids, return updated snapshots or `null`, and
+  never allocate ids, read a clock, or call IPC; a supplied id that already exists is refused rather
+  than replaced. The store calls the matching `prepare*` function before allocating ids, applies
+  cross-workspace results in one state update, and owns global workspace focus and debounced
+  persistence.
 
 ### Invariants
 

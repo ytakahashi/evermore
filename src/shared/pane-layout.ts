@@ -64,7 +64,7 @@ export function replacePaneLayout(
  */
 export function remapPaneLayoutIds(
   layout: PaneLayout,
-  paneIdByOldId: Map<string, string>,
+  paneIdByOldId: ReadonlyMap<string, string>,
 ): PaneLayout {
   if (layout.type === 'leaf') {
     return {

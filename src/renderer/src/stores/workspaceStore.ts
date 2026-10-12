@@ -4,19 +4,27 @@ import {
   findFirstPaneId,
   replacePaneLayout,
   removePaneLayout,
-  remapPaneLayoutIds,
   updateSplitRatio,
 } from '../../../shared/pane-layout';
 import { findAdjacentPaneId, type PaneFocusDirection } from '../../../shared/pane-navigation';
-import { getPathBasename } from '../../../shared/path-label';
 import type { Pane, PaneLayout, Tab, Workspace } from '../../../shared/types';
 import { MAX_WORKSPACE_TABS } from '../../../shared/workspace-constants';
-import { detachPaneFromTab } from '../workspace/tab-pane-operations';
+import {
+  getAutomaticTabName,
+  syncTabNameWithPane,
+  setTabActivePane,
+} from '../workspace/tab-naming';
+import {
+  extractPaneToTab,
+  preparePaneExtraction,
+  removeTab,
+  reorderTab,
+} from '../workspace/tab-operations';
+import { prepareTabTransfer, transferTab } from '../workspace/tab-transfer';
 
 const DEFAULT_SAVE_DEBOUNCE_MS = 300;
 const DEFAULT_CWD_SAVE_DEBOUNCE_MS = 1000;
 const DEFAULT_SPLIT_RATIO = 0.5;
-const AUTO_TAB_NAME_FALLBACK = 'Tab';
 
 type WorkspaceApi = Window['api']['workspace'];
 type SplitDirection = Extract<PaneLayout, { type: 'split' }>['direction'];
@@ -182,40 +190,8 @@ function replaceTab(workspace: Workspace, tab: Tab): Workspace {
   };
 }
 
-function getAutomaticTabName(cwd: string): string {
-  return getPathBasename(cwd, {
-    emptyFallback: AUTO_TAB_NAME_FALLBACK,
-    rootFallback: AUTO_TAB_NAME_FALLBACK,
-  });
-}
-
 function getTabActivePaneId(tab: Tab): string | null {
   return tab.activePaneId ?? findFirstPaneId(tab.layout);
-}
-
-function syncTabNameWithPane(tab: Tab, pane: Pane): Tab {
-  if (tab.isCustomName) {
-    return tab;
-  }
-
-  const name = getAutomaticTabName(pane.cwd);
-  return tab.name === name ? tab : { ...tab, name };
-}
-
-function setTabActivePane(tab: Tab, pane: Pane): Tab {
-  return syncTabNameWithPane({ ...tab, activePaneId: pane.id }, pane);
-}
-
-function findActiveTabIndex(workspace: Workspace, tabId: string): number {
-  const index = workspace.tabs.findIndex((tab) => tab.id === tabId);
-  return index >= 0 ? index : 0;
-}
-
-function selectNextTabIdAfterClose(workspace: Workspace, closingTabId: string): string | null {
-  const closingIndex = findActiveTabIndex(workspace, closingTabId);
-  const remainingTabs = workspace.tabs.filter((tab) => tab.id !== closingTabId);
-
-  return remainingTabs[Math.min(closingIndex, remainingTabs.length - 1)]?.id ?? null;
 }
 
 function findWorkspaceActivePane(workspace: Workspace): Pane | null {
@@ -661,57 +637,26 @@ export function createWorkspaceStore(
         get().selectWorkspaceTab(workspace.id, tabId);
       },
       closeWorkspaceTab: (workspaceId: string, tabId: string): void => {
-        const workspace = get().workspaces.find(
-          (currentWorkspace) => currentWorkspace.id === workspaceId,
-        );
-        if (!workspace || workspace.tabs.length <= 1) {
-          return;
-        }
-
-        const closingTab = workspace.tabs.find((tab) => tab.id === tabId);
-        if (!closingTab) {
-          return;
-        }
-
-        const removedPaneIds = new Set(collectPaneIds(closingTab.layout));
-        const activeTabId =
-          workspace.activeTabId === tabId
-            ? selectNextTabIdAfterClose(workspace, tabId)
-            : workspace.activeTabId;
-        const updatedWorkspace: Workspace = {
-          ...workspace,
-          tabs: workspace.tabs.filter((tab) => tab.id !== tabId),
-          panes: workspace.panes.filter((pane) => !removedPaneIds.has(pane.id)),
-          activeTabId,
-        };
-
-        get().updateWorkspace(updatedWorkspace);
-      },
-      reorderWorkspaceTab: (workspaceId: string, tabId: string, toIndex: number): void => {
-        const workspace = get().workspaces.find(
-          (currentWorkspace) => currentWorkspace.id === workspaceId,
-        );
+        const workspace = get().workspaces.find((current) => current.id === workspaceId);
         if (!workspace) {
           return;
         }
 
-        const fromIndex = workspace.tabs.findIndex((tab) => tab.id === tabId);
-        if (fromIndex === -1) {
+        const updatedWorkspace = removeTab(workspace, tabId);
+        if (updatedWorkspace) {
+          get().updateWorkspace(updatedWorkspace);
+        }
+      },
+      reorderWorkspaceTab: (workspaceId: string, tabId: string, toIndex: number): void => {
+        const workspace = get().workspaces.find((current) => current.id === workspaceId);
+        if (!workspace) {
           return;
         }
 
-        // Clamp so an out-of-range target (e.g. "move left" on the first tab) is a no-op instead of
-        // throwing the tab off the ends of the list.
-        const clampedIndex = Math.min(Math.max(toIndex, 0), workspace.tabs.length - 1);
-        if (clampedIndex === fromIndex) {
-          return;
+        const updatedWorkspace = reorderTab(workspace, tabId, toIndex);
+        if (updatedWorkspace) {
+          get().updateWorkspace(updatedWorkspace);
         }
-
-        const nextTabs = [...workspace.tabs];
-        const [movedTab] = nextTabs.splice(fromIndex, 1);
-        nextTabs.splice(clampedIndex, 0, movedTab);
-
-        get().updateWorkspace({ ...workspace, tabs: nextTabs });
       },
       moveTabToWorkspace: (
         sourceWorkspaceId: string,
@@ -734,35 +679,24 @@ export function createWorkspaceStore(
           return;
         }
 
-        // A workspace must never become empty; refuse to move out its last remaining tab.
-        if (sourceWorkspace.tabs.length <= 1) {
-          return;
-        }
-
-        const movingTab = sourceWorkspace.tabs.find((tab) => tab.id === tabId);
-        if (!movingTab) {
+        const transfer = prepareTabTransfer(sourceWorkspace, targetWorkspace, tabId);
+        if (!transfer) {
           return;
         }
 
         const shouldFollowMovedTab =
           state.activeWorkspaceId === sourceWorkspace.id && sourceWorkspace.activeTabId === tabId;
-
         const targetTabIds = new Set(targetWorkspace.tabs.map((tab) => tab.id));
         const targetPaneIds = new Set(targetWorkspace.panes.map((pane) => pane.id));
 
-        // A tab owns every pane its layout references; the panes travel with the tab so the target
-        // workspace can resolve the moved layout's `paneId`s. Pane and tab ids are only scoped by
-        // convention, so crossing a workspace boundary must resolve collisions before both sets are
-        // merged into one target workspace. Tab and pane ids retry the same way (keep drawing a
-        // fresh id until it is unique) rather than assuming a single replacement never collides.
-        let movedTabId = movingTab.id;
+        // Allocate only after validation, retrying collisions including ids allocated earlier in
+        // this transfer. The workspace transformation receives values rather than a random factory.
+        let movedTabId = transfer.tabId;
         while (targetTabIds.has(movedTabId)) {
           movedTabId = createStoreId();
         }
-
-        const movingPaneIds = new Set(collectPaneIds(movingTab.layout));
         const paneIdByOldId = new Map<string, string>();
-        for (const paneId of movingPaneIds) {
+        for (const paneId of transfer.paneIds) {
           let nextPaneId = paneId;
           while (targetPaneIds.has(nextPaneId)) {
             nextPaneId = createStoreId();
@@ -770,51 +704,16 @@ export function createWorkspaceStore(
           targetPaneIds.add(nextPaneId);
           paneIdByOldId.set(paneId, nextPaneId);
         }
-        const movedTab: Tab = {
-          ...movingTab,
-          id: movedTabId,
-          layout: remapPaneLayoutIds(movingTab.layout, paneIdByOldId),
-          activePaneId: movingTab.activePaneId
-            ? (paneIdByOldId.get(movingTab.activePaneId) ?? movingTab.activePaneId)
-            : movingTab.activePaneId,
-        };
-        const movingPanes = sourceWorkspace.panes
-          .filter((pane) => movingPaneIds.has(pane.id))
-          .map((pane) => ({
-            // Spread keeps runtime fields (`ptyId` / `initialCommand`); the `ptyId` must stay so the
-            // moved pane keeps matching its still-running terminal. See `moveTabToWorkspace`'s JSDoc.
-            ...pane,
-            id: paneIdByOldId.get(pane.id) ?? pane.id,
-          }));
 
-        const updatedSource: Workspace = {
-          ...sourceWorkspace,
-          tabs: sourceWorkspace.tabs.filter((tab) => tab.id !== tabId),
-          panes: sourceWorkspace.panes.filter((pane) => !movingPaneIds.has(pane.id)),
-          activeTabId:
-            sourceWorkspace.activeTabId === tabId
-              ? selectNextTabIdAfterClose(sourceWorkspace, tabId)
-              : sourceWorkspace.activeTabId,
-        };
-
-        // Clamp to `[0, length]` (inclusive of length so a drop past the last tab appends); an
-        // omitted `toIndex` keeps the historical append behaviour that menu-driven moves depend on.
-        const insertAt =
-          toIndex === undefined
-            ? targetWorkspace.tabs.length
-            : Math.min(Math.max(toIndex, 0), targetWorkspace.tabs.length);
-        const nextTargetTabs = [...targetWorkspace.tabs];
-        nextTargetTabs.splice(insertAt, 0, movedTab);
-
-        const updatedTarget: Workspace = {
-          ...targetWorkspace,
-          tabs: nextTargetTabs,
-          panes: [...targetWorkspace.panes, ...movingPanes],
-          // A moved tab always becomes active in its new home, regardless of whether the move
-          // follows focus there. This keeps the rule simple and matches direct-manipulation (future
-          // drag-and-drop) intuition: the tab you just placed is the one shown when you arrive.
-          activeTabId: movedTab.id,
-        };
+        const result = transferTab(sourceWorkspace, targetWorkspace, tabId, {
+          movedTabId,
+          paneIdByOldId,
+          toIndex,
+        });
+        if (!result) {
+          return;
+        }
+        const { source: updatedSource, target: updatedTarget } = result;
 
         updateWorkspacesState(
           [updatedSource, updatedTarget],
@@ -831,54 +730,16 @@ export function createWorkspaceStore(
         const workspace = get().workspaces.find(
           (currentWorkspace) => currentWorkspace.id === workspaceId,
         );
-        if (!workspace || workspace.tabs.length >= MAX_WORKSPACE_TABS) {
+        // Check before allocating: rejected actions must not consume ids or schedule persistence.
+        if (!workspace || !preparePaneExtraction(workspace, sourceTabId, paneId)) {
           return;
         }
 
-        const sourceTab = workspace.tabs.find((tab) => tab.id === sourceTabId);
-        if (!sourceTab) {
+        const updatedWorkspace = extractPaneToTab(workspace, sourceTabId, paneId, createStoreId());
+        if (!updatedWorkspace) {
           return;
         }
-
-        const movedPane = workspace.panes.find((pane) => pane.id === paneId);
-        if (!movedPane) {
-          return;
-        }
-
-        const detachResult = detachPaneFromTab(sourceTab, paneId);
-        if (!detachResult) {
-          return;
-        }
-
-        const { updatedSourceTab, movedPaneId } = detachResult;
-        // Only re-sync the source tab's automatic name when the detach changed which pane is
-        // active there; `syncTabNameWithPane` is itself a no-op for custom names.
-        const nextActivePane =
-          updatedSourceTab.activePaneId !== sourceTab.activePaneId
-            ? workspace.panes.find((pane) => pane.id === updatedSourceTab.activePaneId)
-            : undefined;
-        const finalSourceTab = nextActivePane
-          ? syncTabNameWithPane(updatedSourceTab, nextActivePane)
-          : updatedSourceTab;
-
-        const destinationTab: Tab = {
-          id: createStoreId(),
-          name: getAutomaticTabName(movedPane.cwd),
-          isCustomName: false,
-          layout: { type: 'leaf', paneId: movedPaneId },
-          activePaneId: movedPaneId,
-        };
-
-        get().updateWorkspace(
-          replaceTab(
-            {
-              ...workspace,
-              tabs: [...workspace.tabs, destinationTab],
-              activeTabId: destinationTab.id,
-            },
-            finalSourceTab,
-          ),
-        );
+        get().updateWorkspace(updatedWorkspace);
 
         if (shouldSwitchWorkspace) {
           set({ activeWorkspaceId: workspaceId });
