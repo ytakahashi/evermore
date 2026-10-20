@@ -32,6 +32,8 @@ function createDataTransfer(): DataTransfer {
 const workspace: Workspace = {
   id: 'workspace-1',
   name: 'Default',
+  kind: 'home',
+  isOpen: true,
   rootPath: '/Users/tester',
   tabs: [
     {

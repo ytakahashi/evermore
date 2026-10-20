@@ -45,6 +45,8 @@ function createDataTransfer(): DataTransfer {
 const workspace1: Workspace = {
   id: 'workspace-1',
   name: 'Default',
+  kind: 'home',
+  isOpen: true,
   rootPath: '/Users/tester',
   tabs: [
     {
@@ -72,6 +74,8 @@ const workspace1: Workspace = {
 const workspace2: Workspace = {
   id: 'workspace-2',
   name: 'Project',
+  kind: 'project',
+  isOpen: true,
   rootPath: '/Users/tester/project',
   tabs: [
     {
@@ -129,6 +133,8 @@ const workspace2: Workspace = {
 const newWorkspace: Workspace = {
   id: 'workspace-new',
   name: 'New',
+  kind: 'project',
+  isOpen: true,
   rootPath: '/Users/tester/new',
   tabs: [
     {
@@ -1090,24 +1096,25 @@ describe('WorkspacesView', () => {
     expect(screen.getByRole('button', { name: 'Close server' })).toBeDisabled();
   });
 
-  it('deletes a workspace when confirmed and switches active to the first remaining', async () => {
-    // Given: the confirmation dialog accepts automatically.
+  it('deletes a project workspace when confirmed and switches active to home', async () => {
+    // Given: the project workspace is active and the confirmation dialog accepts automatically.
+    useWorkspaceStore.setState({ activeWorkspaceId: workspace2.id });
     vi.spyOn(window, 'confirm').mockReturnValue(true);
     render(<WorkspacesView />);
 
-    // When: the delete button for the active workspace is clicked.
-    const deleteButton = screen.getByRole('button', { name: 'Delete Default' });
+    // When: the delete button for the active project is clicked.
+    const deleteButton = screen.getByRole('button', { name: 'Delete Project' });
     fireEvent.click(deleteButton);
 
     // workspaceDelete is invoked synchronously inside the async deleteWorkspace action.
-    expect(workspaceDelete).toHaveBeenCalledWith('workspace-1');
+    expect(workspaceDelete).toHaveBeenCalledWith('workspace-2');
 
     // Flush the resolved Promise so the store's setState completes.
     await vi.advanceTimersByTimeAsync(0);
 
-    // Then: the workspace is removed and the remaining one becomes active.
+    // Then: the project is removed and home becomes active.
     expect(useWorkspaceStore.getState().workspaces).toHaveLength(1);
-    expect(useWorkspaceStore.getState().activeWorkspaceId).toBe('workspace-2');
+    expect(useWorkspaceStore.getState().activeWorkspaceId).toBe('workspace-1');
   });
 
   it('does not delete when the confirmation dialog is dismissed', async () => {
@@ -1116,23 +1123,25 @@ describe('WorkspacesView', () => {
     render(<WorkspacesView />);
 
     // When: the delete button is clicked but the user cancels.
-    fireEvent.click(screen.getByRole('button', { name: 'Delete Default' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Delete Project' }));
 
     // Then: nothing is deleted.
     expect(workspaceDelete).not.toHaveBeenCalled();
     expect(useWorkspaceStore.getState().workspaces).toHaveLength(2);
   });
 
-  it('disables the delete button when only one workspace remains', () => {
-    // Given: a single workspace is loaded.
-    useWorkspaceStore.setState({ workspaces: [workspace1], activeWorkspaceId: workspace1.id });
+  it('disables the delete button only for the home workspace', () => {
+    // Given: home and a project workspace are loaded.
     render(<WorkspacesView />);
 
     // When: the sidebar renders.
-    const deleteButton = screen.getByRole('button', { name: 'Delete Default' });
+    const homeDeleteButton = screen.getByRole('button', { name: 'Delete Default' });
+    const projectDeleteButton = screen.getByRole('button', { name: 'Delete Project' });
 
-    // Then: the delete button is disabled to prevent removing the last workspace.
-    expect(deleteButton).toBeDisabled();
+    // Then: home cannot be deleted while the project can.
+    expect(homeDeleteButton).toBeDisabled();
+    expect(homeDeleteButton).toHaveAttribute('title', 'The home workspace cannot be deleted');
+    expect(projectDeleteButton).toBeEnabled();
   });
 
   it('does not open the right-click menu for a lone tab with no actionable command', () => {
@@ -1405,6 +1414,8 @@ describe('WorkspacesView', () => {
     const splitWorkspace: Workspace = {
       id: 'workspace-1',
       name: 'Default',
+      kind: 'home',
+      isOpen: true,
       rootPath: '/Users/tester',
       tabs: [
         {

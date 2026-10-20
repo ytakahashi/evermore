@@ -9,6 +9,7 @@ import {
 import { findAdjacentPaneId, type PaneFocusDirection } from '../../../shared/pane-navigation';
 import type { Pane, PaneLayout, Tab, Workspace } from '../../../shared/types';
 import { MAX_WORKSPACE_TABS } from '../../../shared/workspace-constants';
+import { canDeleteWorkspace, findFallbackWorkspace } from '../../../shared/workspace-kind';
 import {
   getAutomaticTabName,
   syncTabNameWithPane,
@@ -240,13 +241,12 @@ function createTabWithPane(
 }
 
 /**
- * Returns the workspace selected in renderer state, falling back to the first loaded workspace.
+ * Returns the workspace selected in renderer state, falling back to the home workspace.
  */
 export function selectActiveWorkspace(state: WorkspaceStoreState): Workspace | null {
   return (
     state.workspaces.find((workspace) => workspace.id === state.activeWorkspaceId) ??
-    state.workspaces[0] ??
-    null
+    findFallbackWorkspace(state.workspaces)
   );
 }
 
@@ -389,7 +389,7 @@ export function createWorkspaceStore(
           // Validate that the persisted id still refers to a known workspace.
           const activeWorkspaceId =
             workspaces.find((workspace) => workspace.id === persistedActiveId)?.id ??
-            workspaces[0]?.id ??
+            findFallbackWorkspace(workspaces)?.id ??
             null;
 
           set({ workspaces, activeWorkspaceId, isLoading: false });
@@ -417,7 +417,8 @@ export function createWorkspaceStore(
       },
       deleteWorkspace: async (id: string): Promise<void> => {
         const state = get();
-        if (state.workspaces.length <= 1) {
+        const target = state.workspaces.find((w) => w.id === id);
+        if (!target || !canDeleteWorkspace(target)) {
           return;
         }
         try {
@@ -425,7 +426,7 @@ export function createWorkspaceStore(
           const remainingWorkspaces = state.workspaces.filter((w) => w.id !== id);
           const newActiveId =
             state.activeWorkspaceId === id
-              ? (remainingWorkspaces[0]?.id ?? null)
+              ? (findFallbackWorkspace(remainingWorkspaces)?.id ?? null)
               : state.activeWorkspaceId;
           set({ workspaces: remainingWorkspaces, activeWorkspaceId: newActiveId });
           void getWorkspaceApi().setActiveWorkspaceId(newActiveId);

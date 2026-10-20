@@ -25,6 +25,8 @@ interface TestWorkspaceStore {
 const workspace: Workspace = {
   id: 'workspace-1',
   name: 'Project',
+  kind: 'project',
+  isOpen: true,
   rootPath: '/Users/tester/project',
   tabs: [
     {

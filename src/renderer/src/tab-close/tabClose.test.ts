@@ -21,6 +21,8 @@ function workspace(tabCount = 2): Workspace {
   return {
     id: 'workspace-1',
     name: 'Workspace',
+    kind: 'project',
+    isOpen: true,
     rootPath: '/tmp/workspace',
     activeTabId: 'tab-1',
     createdAt: 1,

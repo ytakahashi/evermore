@@ -10,8 +10,9 @@ import { ChevronRight, Folder, Hash, Plus, Terminal, X, Zap } from 'lucide-react
 import { countPaneLeaves, flattenLayout } from '../../../../shared/pane-layout';
 import { getPaneDisplayLabel } from '../../../../shared/pane-label';
 import { getTruncatedPathLabel } from '../../../../shared/path-label';
-import type { Pane, PaneRuntimeInfo } from '../../../../shared/types';
+import type { Pane, PaneRuntimeInfo, Workspace } from '../../../../shared/types';
 import { MAX_WORKSPACE_TABS } from '../../../../shared/workspace-constants';
+import { canDeleteWorkspace } from '../../../../shared/workspace-kind';
 import { usePaneInfoStore } from '../../stores/paneInfoStore';
 import { useTabDragStore, type TabDragDescriptor } from '../../stores/tabDragStore';
 import { useUiStore } from '../../stores/uiStore';
@@ -261,8 +262,6 @@ export function WorkspacesView(): React.JSX.Element {
   // Keep tree disclosure state local to the sidebar so it never becomes persisted workspace data.
   const [collapsedWorkspaceIds, setCollapsedWorkspaceIds] = useState<Set<string>>(() => new Set());
 
-  const canDelete = workspaces.length > 1;
-
   // Drop disclosure entries for workspaces that no longer exist so stale ids cannot leak across
   // sessions or accidentally collapse a future workspace that happens to reuse the same id.
   // Adjusting state during render (rather than in an effect) is recommended for syncing derived
@@ -407,11 +406,11 @@ export function WorkspacesView(): React.JSX.Element {
 
   // --- Delete handler ---
 
-  const handleDeleteWorkspace = (workspaceId: string, workspaceName: string): void => {
-    if (!canDelete) return;
-    if (!window.confirm(`Delete workspace "${workspaceName}"? This cannot be undone.`)) return;
+  const handleDeleteWorkspace = (workspace: Workspace): void => {
+    if (!canDeleteWorkspace(workspace)) return;
+    if (!window.confirm(`Delete workspace "${workspace.name}"? This cannot be undone.`)) return;
     // Collapsed-state cleanup happens via the `workspaces`-sync effect above; no manual prune here.
-    void deleteWorkspace(workspaceId);
+    void deleteWorkspace(workspace.id);
   };
 
   const handleCreateWorkspaceTab = (workspaceId: string): void => {
@@ -976,13 +975,15 @@ export function WorkspacesView(): React.JSX.Element {
                 <button
                   aria-label={`Delete ${workspace.name}`}
                   className="invisible flex size-5 shrink-0 items-center justify-center rounded text-subtle hover:bg-raised hover:text-danger disabled:cursor-default disabled:opacity-40 group-hover:visible"
-                  disabled={!canDelete || isEditing}
+                  disabled={!canDeleteWorkspace(workspace) || isEditing}
                   title={
-                    canDelete ? `Delete ${workspace.name}` : 'At least one workspace is required'
+                    canDeleteWorkspace(workspace)
+                      ? `Delete ${workspace.name}`
+                      : 'The home workspace cannot be deleted'
                   }
                   type="button"
                   onClick={() => {
-                    handleDeleteWorkspace(workspace.id, workspace.name);
+                    handleDeleteWorkspace(workspace);
                   }}
                 >
                   <X size={12} />

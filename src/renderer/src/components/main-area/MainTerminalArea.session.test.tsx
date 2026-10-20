@@ -55,6 +55,8 @@ describe('MainTerminalArea tab move keeps the session', () => {
     const source: Workspace = {
       id: 'workspace-2',
       name: 'Project',
+      kind: 'project',
+      isOpen: true,
       rootPath: '/Users/tester',
       tabs: [leafTab('tab-a', 'pane-a'), leafTab('tab-b', 'pane-b')],
       panes: [
@@ -68,6 +70,8 @@ describe('MainTerminalArea tab move keeps the session', () => {
     const active: Workspace = {
       id: 'workspace-1',
       name: 'Default',
+      kind: 'home',
+      isOpen: true,
       rootPath: '/Users/tester',
       tabs: [leafTab('tab-1', 'pane-1')],
       panes: [{ id: 'pane-1', cwd: '/Users/tester' }],
@@ -182,6 +186,8 @@ describe('MainTerminalArea tab move keeps the session', () => {
         {
           id: 'workspace-1',
           name: 'Default',
+          kind: 'home',
+          isOpen: true,
           rootPath: '/Users/tester',
           tabs: [
             {

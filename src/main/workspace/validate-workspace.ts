@@ -1,5 +1,5 @@
 import { MAX_SPLIT_RATIO, MIN_SPLIT_RATIO } from '../../shared/pane-layout-constants';
-import type { Pane, PaneLayout, Tab, Workspace } from '../../shared/types';
+import type { Pane, PaneLayout, Tab, Workspace, WorkspaceKind } from '../../shared/types';
 import { MAX_WORKSPACE_TABS } from '../../shared/workspace-constants';
 import {
   MAX_COMMAND_LENGTH,
@@ -45,6 +45,16 @@ function readNameField(object: Record<string, unknown>, key: string, channel: st
   const name = readStringField(object, key, channel, { maxLength: MAX_NAME_LENGTH });
   assertIpcPayloadValid(channel, name.trim().length > 0);
   return name;
+}
+
+function readWorkspaceKindField(
+  object: Record<string, unknown>,
+  key: string,
+  channel: string,
+): WorkspaceKind {
+  const kind = readStringField(object, key, channel);
+  assertIpcPayloadValid(channel, kind === 'home' || kind === 'project');
+  return kind;
 }
 
 function readPane(value: unknown, channel: string): Pane {
@@ -157,6 +167,8 @@ export function readWorkspace(value: unknown, channel: string): Workspace {
   return {
     id: readStringField(object, 'id', channel, { maxLength: MAX_ID_LENGTH }),
     name: readNameField(object, 'name', channel),
+    kind: readWorkspaceKindField(object, 'kind', channel),
+    isOpen: readBooleanField(object, 'isOpen', channel),
     rootPath: readStringField(object, 'rootPath', channel, {
       allowEmpty: true,
       maxLength: MAX_PATH_LENGTH,

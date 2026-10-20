@@ -16,6 +16,8 @@ function createWorkspace(): Workspace {
   return {
     id: 'workspace-1',
     name: 'Project',
+    kind: 'project',
+    isOpen: true,
     rootPath: '/Users/tester/project',
     tabs: [
       {
@@ -204,6 +206,10 @@ describe('readWorkspace', () => {
     ['wrong workspace id type', { id: 1 }],
     ['wrong workspace name type', { name: 1 }],
     ['wrong root path type', { rootPath: 1 }],
+    ['missing kind', { kind: undefined }],
+    ['unknown kind', { kind: 'other' }],
+    ['missing open flag', { isOpen: undefined }],
+    ['wrong open flag type', { isOpen: 'true' }],
     ['wrong tabs type', { tabs: {} }],
     ['wrong panes type', { panes: {} }],
     ['wrong active tab type', { activeTabId: 1 }],

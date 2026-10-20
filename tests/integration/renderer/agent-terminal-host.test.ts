@@ -39,6 +39,8 @@ vi.mock('../../../src/renderer/src/stores/paneInfoStore', async (importOriginal)
 const workspace: Workspace = {
   id: 'ws',
   name: 'Project',
+  kind: 'project',
+  isOpen: true,
   rootPath: '/tmp',
   activeTabId: 'tab',
   createdAt: 0,
