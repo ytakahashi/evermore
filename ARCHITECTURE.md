@@ -251,6 +251,14 @@ The renderer is a single React 19 app rendered into `#root` by `main.tsx` with `
   `workspace/workspace-store.ts`). The renderer keys live terminals by `pane.id` and the tab list by
   `tab.id` across all workspaces, so a duplicate id would bind one pane/tab to another workspace's
   terminal or collide as a React key.
+- **Exactly one `home` workspace exists, and it is always open.** Every other workspace is a
+  `project`. The main-process `WorkspaceStore` enforces this on every read/write the same way it
+  enforces id uniqueness, which is also how data persisted before `kind` existed migrates (see
+  `workspace/home-workspace.ts`). `kind` is owned by main: a renderer update cannot change it, and
+  home cannot be deleted, which replaces the older "keep at least one workspace" rule. The delete
+  rule and the fallback used when the active workspace goes away (home first) live in
+  `shared/workspace-kind.ts` so main and renderer apply the same policy. Home is identified by
+  `kind`, never by `rootPath === homedir`, so `~` opened as a project stays distinct.
 - **All workspaces stay mounted; non-active ones use `display:none`.** This keeps each workspace's
   PTYs alive across workspace switches (the active workspace's inactive tabs use `opacity-0` so a
   tab switch reveals an already-sized terminal). The cost is eager PTY creation for every loaded

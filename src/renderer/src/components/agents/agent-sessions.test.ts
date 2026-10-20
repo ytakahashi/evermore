@@ -40,6 +40,8 @@ function splitLayout(leftPaneId: string, rightPaneId: string): PaneLayout {
 
 function workspace(overrides: Partial<Workspace> & Pick<Workspace, 'id' | 'name'>): Workspace {
   return {
+    kind: 'project',
+    isOpen: true,
     rootPath: '/tmp',
     tabs: [],
     panes: [],

@@ -9,6 +9,8 @@ import { TopBar } from './TopBar';
 const workspace1: Workspace = {
   id: 'workspace-1',
   name: 'My Project',
+  kind: 'project',
+  isOpen: true,
   rootPath: '/Users/tester',
   tabs: [
     {
@@ -28,6 +30,8 @@ const workspace1: Workspace = {
 const workspace2: Workspace = {
   id: 'workspace-2',
   name: 'Side Work',
+  kind: 'project',
+  isOpen: true,
   rootPath: '/Users/tester/side',
   tabs: [
     {

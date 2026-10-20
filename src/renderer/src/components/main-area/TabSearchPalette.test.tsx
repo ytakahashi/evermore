@@ -16,6 +16,8 @@ function createWorkspace(
   return {
     id,
     name,
+    kind: 'project',
+    isOpen: true,
     rootPath: `/tmp/${id}`,
     tabs: tabs.map((tab) => ({
       id: tab.id,
@@ -85,6 +87,8 @@ describe('TabSearchPalette search helpers', () => {
       {
         id: 'workspace-1',
         name: 'Backend',
+        kind: 'project',
+        isOpen: true,
         rootPath: '/Users/tester/project',
         tabs: [
           {

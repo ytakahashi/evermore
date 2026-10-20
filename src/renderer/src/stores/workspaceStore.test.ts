@@ -14,6 +14,8 @@ function createWorkspace(id: string, cwd: string): Workspace {
   return {
     id,
     name: id === 'workspace-1' ? 'Default' : 'Project',
+    kind: id === 'workspace-1' ? 'home' : 'project',
+    isOpen: true,
     rootPath: cwd,
     tabs: [
       {
@@ -96,18 +98,23 @@ describe('workspaceStore', () => {
     expect(workspaceApi.setActiveWorkspaceId).not.toHaveBeenCalled();
   });
 
-  it('falls back to the first workspace when the persisted active id is stale', async () => {
-    // Given: the persisted active id no longer matches any workspace.
+  it('falls back to the home workspace when the persisted active id is stale', async () => {
+    // Given: a project precedes home and the persisted active id no longer matches any workspace.
+    const workspace2 = createWorkspace('workspace-2', '/Users/tester/2');
     workspaceApi.list = vi.fn(() =>
-      Promise.resolve({ workspaces: [workspace], activeWorkspaceId: 'deleted-workspace' }),
+      Promise.resolve({
+        workspaces: [workspace2, workspace],
+        activeWorkspaceId: 'deleted-workspace',
+      }),
     );
     const useStore = createWorkspaceStore({ workspaceApi });
 
     // When: renderer state is loaded.
     await useStore.getState().loadWorkspaces();
 
-    // Then: the first available workspace is selected.
+    // Then: home is selected rather than the first workspace.
     expect(useStore.getState().activeWorkspaceId).toBe('workspace-1');
+    expect(selectActiveWorkspace(useStore.getState())).toBe(workspace);
   });
 
   it('updates local state immediately and persists after the debounce interval', async () => {
@@ -1567,22 +1574,26 @@ describe('workspaceStore', () => {
     expect(useStore.getState().workspaces).toHaveLength(1);
   });
 
-  it('deletes a workspace and falls back to the first remaining workspace when active', async () => {
-    // Given: two workspaces are loaded and the first is active.
+  it('deletes the active workspace and falls back to the home workspace', async () => {
+    // Given: two projects precede home and the first project is active.
     const workspace2 = createWorkspace('workspace-2', '/Users/tester/2');
+    const workspace3 = createWorkspace('workspace-3', '/Users/tester/3');
     workspaceApi.list = vi.fn(() =>
-      Promise.resolve({ workspaces: [workspace, workspace2], activeWorkspaceId: null }),
+      Promise.resolve({
+        workspaces: [workspace2, workspace3, workspace],
+        activeWorkspaceId: 'workspace-2',
+      }),
     );
     const useStore = createWorkspaceStore({ workspaceApi });
     await useStore.getState().loadWorkspaces();
 
     // When: the active workspace is deleted.
-    await useStore.getState().deleteWorkspace('workspace-1');
+    await useStore.getState().deleteWorkspace('workspace-2');
 
-    // Then: it is removed and the remaining workspace becomes active.
-    expect(workspaceApi.delete).toHaveBeenCalledWith('workspace-1');
-    expect(useStore.getState().workspaces).toHaveLength(1);
-    expect(useStore.getState().activeWorkspaceId).toBe('workspace-2');
+    // Then: it is removed and home becomes active rather than the first remaining workspace.
+    expect(workspaceApi.delete).toHaveBeenCalledWith('workspace-2');
+    expect(useStore.getState().workspaces).toHaveLength(2);
+    expect(useStore.getState().activeWorkspaceId).toBe('workspace-1');
   });
 
   it('deletes an inactive workspace without changing the active workspace', async () => {
@@ -1602,17 +1613,21 @@ describe('workspaceStore', () => {
     expect(useStore.getState().workspaces).toHaveLength(1);
   });
 
-  it('does not delete the last remaining workspace', async () => {
-    // Given: only one workspace exists.
+  it('does not delete the home workspace even when projects remain', async () => {
+    // Given: home and a project workspace are loaded.
+    const workspace2 = createWorkspace('workspace-2', '/Users/tester/2');
+    workspaceApi.list = vi.fn(() =>
+      Promise.resolve({ workspaces: [workspace, workspace2], activeWorkspaceId: null }),
+    );
     const useStore = createWorkspaceStore({ workspaceApi });
     await useStore.getState().loadWorkspaces();
 
-    // When: deletion is attempted on the only workspace.
+    // When: deletion is attempted on home.
     await useStore.getState().deleteWorkspace('workspace-1');
 
-    // Then: the workspace is preserved and the API is not called.
+    // Then: both workspaces are preserved and the API is not called.
     expect(workspaceApi.delete).not.toHaveBeenCalled();
-    expect(useStore.getState().workspaces).toHaveLength(1);
+    expect(useStore.getState().workspaces).toHaveLength(2);
   });
 
   it('stores an error when deleteWorkspace fails', async () => {
@@ -1626,7 +1641,7 @@ describe('workspaceStore', () => {
     await useStore.getState().loadWorkspaces();
 
     // When: deletion is attempted.
-    await useStore.getState().deleteWorkspace('workspace-1');
+    await useStore.getState().deleteWorkspace('workspace-2');
 
     // Then: the error is surfaced and the list is unchanged.
     expect(useStore.getState().error).toBe('delete failed');
@@ -1992,6 +2007,8 @@ describe('workspaceStore', () => {
       return {
         id,
         name: id,
+        kind: 'project',
+        isOpen: true,
         rootPath: '/Users/tester',
         tabs,
         panes: tabNames.map((name) => ({ id: `${id}-${name}-pane`, cwd: '/Users/tester' })),
@@ -2156,6 +2173,8 @@ describe('workspaceStore', () => {
       const source: Workspace = {
         id: 'workspace-1',
         name: 'workspace-1',
+        kind: 'project',
+        isOpen: true,
         rootPath: '/Users/tester',
         tabs: [
           {
@@ -2184,6 +2203,8 @@ describe('workspaceStore', () => {
       const target: Workspace = {
         id: 'workspace-2',
         name: 'workspace-2',
+        kind: 'project',
+        isOpen: true,
         rootPath: '/Users/tester',
         tabs: [
           {
@@ -2296,6 +2317,8 @@ describe('workspaceStore', () => {
       return {
         id,
         name: id,
+        kind: 'project',
+        isOpen: true,
         rootPath: '/Users/tester',
         tabs: [
           {

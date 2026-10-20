@@ -66,6 +66,8 @@ describe('useShortcutBridge', () => {
     const workspace: Workspace = {
       id: 'workspace-close',
       name: 'Close',
+      kind: 'project',
+      isOpen: true,
       rootPath: '/tmp',
       tabs: [
         {
@@ -199,6 +201,8 @@ describe('useShortcutBridge', () => {
     const workspace: Workspace = {
       id: 'workspace-1',
       name: 'Default',
+      kind: 'home',
+      isOpen: true,
       rootPath: '/tmp',
       tabs: [
         {

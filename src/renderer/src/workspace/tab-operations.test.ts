@@ -7,6 +7,8 @@ function createWorkspace(): Workspace {
   return {
     id: 'workspace',
     name: 'Workspace',
+    kind: 'project',
+    isOpen: true,
     rootPath: '/project',
     tabs: ['a', 'b', 'c'].map((id) => ({
       id,

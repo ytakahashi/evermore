@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi, type Mock } from 'vite-plus/test';
-import type { Workspace } from '../../shared/types';
+import type { Workspace, WorkspaceKind } from '../../shared/types';
 import type { Logger } from '../logging/logger';
 import { WorkspaceStore } from './workspace-store';
 import type { WorkspaceStorageAdapter } from './types';
@@ -49,17 +49,52 @@ describe('WorkspaceStore', () => {
     });
   });
 
+  function createStore(): WorkspaceStore {
+    return new WorkspaceStore({
+      createId: () => ids.shift() ?? 'fallback-id',
+      getHomeDirectory: () => '/Users/tester',
+      getShellPath: () => '/bin/zsh',
+      now: () => now,
+      storage,
+    });
+  }
+
+  function createPersistedWorkspace(id: string, kind: WorkspaceKind, cwd: string): Workspace {
+    return {
+      id,
+      name: id,
+      kind,
+      isOpen: true,
+      rootPath: cwd,
+      tabs: [
+        {
+          id: `${id}-tab`,
+          name: 'zsh',
+          isCustomName: false,
+          layout: { type: 'leaf', paneId: `${id}-pane` },
+          activePaneId: `${id}-pane`,
+        },
+      ],
+      panes: [{ id: `${id}-pane`, cwd }],
+      activeTabId: `${id}-tab`,
+      createdAt: now,
+      updatedAt: now,
+    };
+  }
+
   it('creates a default workspace when storage is empty', () => {
     // Given: no workspaces have been persisted yet.
 
     // When: callers list available workspaces.
     const workspaces = store.list();
 
-    // Then: the store persists and returns the initial single-tab workspace.
+    // Then: the store persists and returns the initial single-tab home workspace.
     expect(workspaces).toEqual([
       {
         id: 'workspace-1',
         name: 'Default',
+        kind: 'home',
+        isOpen: true,
         rootPath: '/Users/tester',
         tabs: [
           {
@@ -112,6 +147,8 @@ describe('WorkspaceStore', () => {
       expect.objectContaining({
         id: 'workspace-2',
         name: 'Renamed Project',
+        kind: 'project',
+        isOpen: true,
         rootPath: '/Users/tester/project',
         updatedAt: now,
       }),
@@ -151,18 +188,41 @@ describe('WorkspaceStore', () => {
     });
   });
 
-  it('does not delete the final workspace', () => {
-    // Given: one default workspace exists.
-    const defaultWorkspace = store.list()[0];
-    if (!defaultWorkspace) {
+  it('does not delete the home workspace even when projects remain', () => {
+    // Given: the home workspace and a project workspace exist.
+    const homeWorkspace = store.list()[0];
+    if (!homeWorkspace) {
       throw new Error('Expected default workspace to be created.');
     }
+    const projectWorkspace = store.create('Project', '/Users/tester/project');
 
-    // When: it is deleted.
-    store.delete(defaultWorkspace.id);
+    // When: the home workspace is deleted.
+    store.delete(homeWorkspace.id);
 
-    // Then: the store preserves the final workspace.
-    expect(store.list()).toEqual([defaultWorkspace]);
+    // Then: both workspaces are preserved.
+    expect(store.list().map((workspace) => workspace.id)).toEqual([
+      homeWorkspace.id,
+      projectWorkspace.id,
+    ]);
+  });
+
+  it('moves the active workspace id to home even when home is not the first workspace', () => {
+    // Given: a project precedes home in storage and is active.
+    storage = new MemoryWorkspaceStorageAdapter(
+      [
+        createPersistedWorkspace('project-a', 'project', '/Users/tester/a'),
+        createPersistedWorkspace('project-b', 'project', '/Users/tester/b'),
+        createPersistedWorkspace('home', 'home', '/Users/tester'),
+      ],
+      'project-a',
+    );
+    store = createStore();
+
+    // When: the active project is deleted.
+    store.delete('project-a');
+
+    // Then: home becomes active rather than the first remaining workspace.
+    expect(store.getActiveWorkspaceId()).toBe('home');
   });
 
   it('moves the active workspace id when the active workspace is deleted', () => {
@@ -322,11 +382,122 @@ describe('WorkspaceStore', () => {
     expect(storage.workspaces).toEqual(workspaces);
   });
 
+  describe('workspace kind', () => {
+    it('migrates legacy workspaces to one home followed by open projects', () => {
+      // Given: workspaces persisted before `kind` and `isOpen` existed.
+      const legacyWorkspaces = [
+        createPersistedWorkspace('first', 'project', '/Users/tester'),
+        createPersistedWorkspace('second', 'project', '/Users/tester'),
+      ].map(({ kind: _kind, isOpen: _isOpen, ...legacyWorkspace }) => legacyWorkspace);
+      storage = new MemoryWorkspaceStorageAdapter(
+        legacyWorkspaces as unknown as Workspace[],
+        'second',
+      );
+      store = createStore();
+
+      // When: callers load the workspace list.
+      const workspaces = store.list();
+
+      // Then: the first becomes home, the rest become open projects, and the result is persisted.
+      expect(workspaces.map(({ id, kind, isOpen }) => ({ id, kind, isOpen }))).toEqual([
+        { id: 'first', kind: 'home', isOpen: true },
+        { id: 'second', kind: 'project', isOpen: true },
+      ]);
+      expect(storage.workspaces).toEqual(workspaces);
+    });
+
+    it('syncs the home root path with the current home directory', () => {
+      // Given: home was persisted under a home directory that has since changed.
+      storage = new MemoryWorkspaceStorageAdapter([
+        createPersistedWorkspace('home', 'home', '/Users/old-name'),
+      ]);
+      store = createStore();
+
+      // When: callers load the workspace list.
+      const [homeWorkspace] = store.list();
+
+      // Then: the root path follows the current home directory while pane cwds stay untouched.
+      expect(homeWorkspace?.rootPath).toBe('/Users/tester');
+      expect(homeWorkspace?.panes[0]?.cwd).toBe('/Users/old-name');
+      expect(storage.workspaces[0]?.rootPath).toBe('/Users/tester');
+    });
+
+    it('creates new workspaces as open projects', () => {
+      // Given: the default home workspace exists.
+      store.list();
+
+      // When: a workspace is created at the home directory.
+      const workspace = store.create('Home Project', '');
+
+      // Then: it is a project even though its root matches home.
+      expect(workspace).toEqual(
+        expect.objectContaining({ kind: 'project', isOpen: true, rootPath: '/Users/tester' }),
+      );
+    });
+
+    it('keeps the persisted kind when an update tries to change it', () => {
+      // Given: the home workspace and a project workspace exist.
+      const homeWorkspace = store.list()[0];
+      if (!homeWorkspace) {
+        throw new Error('Expected default workspace to be created.');
+      }
+      const projectWorkspace = store.create('Project', '/Users/tester/project');
+
+      // When: updates try to swap their kinds.
+      store.update({ ...homeWorkspace, kind: 'project' });
+      store.update({ ...projectWorkspace, kind: 'home' });
+
+      // Then: both kinds are unchanged.
+      expect(store.get(homeWorkspace.id)?.kind).toBe('home');
+      expect(store.get(projectWorkspace.id)?.kind).toBe('project');
+    });
+
+    it('ignores updates for workspaces that are not persisted', () => {
+      // Given: the home workspace exists and a project was deleted.
+      const homeWorkspace = store.list()[0];
+      if (!homeWorkspace) {
+        throw new Error('Expected default workspace to be created.');
+      }
+      const projectWorkspace = store.create('Project', '/Users/tester/project');
+      store.delete(projectWorkspace.id);
+
+      // When: a stale update for the deleted project arrives.
+      store.update({ ...projectWorkspace, name: 'Renamed Project' });
+
+      // Then: the deleted project is not resurrected.
+      expect(store.list().map((workspace) => workspace.id)).toEqual([homeWorkspace.id]);
+    });
+
+    it('keeps home open and lets projects close through updates', () => {
+      // Given: the home workspace and a project workspace exist.
+      const homeWorkspace = store.list()[0];
+      if (!homeWorkspace) {
+        throw new Error('Expected default workspace to be created.');
+      }
+      const projectWorkspace = store.create('Project', '/Users/tester/project');
+
+      // When: both are updated as closed.
+      store.update({ ...homeWorkspace, isOpen: false });
+      store.update({ ...projectWorkspace, isOpen: false });
+
+      // Then: home stays open while the project is closed.
+      expect(store.get(homeWorkspace.id)?.isOpen).toBe(true);
+      expect(store.get(projectWorkspace.id)?.isOpen).toBe(false);
+    });
+  });
+
   describe('global id uniqueness', () => {
-    function workspaceWithPane(id: string, paneId: string, cwd: string): Workspace {
+    function workspaceWithPane(
+      id: string,
+      paneId: string,
+      cwd: string,
+      kind: WorkspaceKind = 'project',
+    ): Workspace {
       return {
         id,
         name: id,
+        kind,
+        isOpen: true,
         rootPath: cwd,
         tabs: [
           {
@@ -406,13 +577,13 @@ describe('WorkspaceStore', () => {
     });
 
     it('leaves globally unique pane ids untouched and does not write back', () => {
-      // Given: two persisted workspaces whose pane ids are already unique.
+      // Given: two persisted workspaces whose pane ids are already unique, with a valid home.
       const createId = (): string => {
         throw new Error('createId should not be called when no pane id collides.');
       };
       const seededStorage = new MemoryWorkspaceStorageAdapter(
         [
-          workspaceWithPane('workspace-1', 'pane-1', '/Users/tester/one'),
+          workspaceWithPane('workspace-1', 'pane-1', '/Users/tester', 'home'),
           workspaceWithPane('workspace-2', 'pane-2', '/Users/tester/two'),
         ],
         'workspace-1',
@@ -548,6 +719,8 @@ describe('WorkspaceStore', () => {
       const corrupt: Workspace = {
         id: 'workspace-1',
         name: 'workspace-1',
+        kind: 'project',
+        isOpen: true,
         rootPath: '/Users/tester/root',
         tabs: [
           {
@@ -630,6 +803,8 @@ describe('WorkspaceStore', () => {
       const corrupt: Workspace = {
         id: 'workspace-1',
         name: 'workspace-1',
+        kind: 'project',
+        isOpen: true,
         rootPath: '/Users/tester',
         tabs: [
           {

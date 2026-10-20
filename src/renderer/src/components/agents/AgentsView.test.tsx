@@ -50,6 +50,8 @@ vi.mock('./AgentTerminalPanel', () => ({
 const workspace1: Workspace = {
   id: 'workspace-1',
   name: 'Default',
+  kind: 'home',
+  isOpen: true,
   rootPath: '/Users/tester',
   tabs: [
     {
@@ -69,6 +71,8 @@ const workspace1: Workspace = {
 const workspace2: Workspace = {
   id: 'workspace-2',
   name: 'Project',
+  kind: 'project',
+  isOpen: true,
   rootPath: '/Users/tester/project',
   tabs: [
     {

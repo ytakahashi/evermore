@@ -3,8 +3,10 @@ import { homedir } from 'node:os';
 import path from 'node:path';
 import Store from 'electron-store';
 import { getPathBasename } from '../../shared/path-label';
-import type { Pane, PaneLayout, Tab, Workspace } from '../../shared/types';
+import type { Pane, PaneLayout, Tab, Workspace, WorkspaceKind } from '../../shared/types';
+import { canDeleteWorkspace, findFallbackWorkspace } from '../../shared/workspace-kind';
 import { createSilentLogger, type Logger } from '../logging/logger';
+import { ensureSingleHomeWorkspace } from './home-workspace';
 import type { WorkspaceStorageAdapter, WorkspaceStoreOptions } from './types';
 
 interface WorkspaceStoreSchema extends Record<string, unknown> {
@@ -48,7 +50,9 @@ type LegacyTab = Omit<Tab, 'name' | 'isCustomName'> & {
   name?: string;
   title?: string;
 };
-type LegacyWorkspace = Omit<Workspace, 'panes' | 'tabs'> & {
+type LegacyWorkspace = Omit<Workspace, 'isOpen' | 'kind' | 'panes' | 'tabs'> & {
+  isOpen?: unknown;
+  kind?: unknown;
   panes: LegacyPane[];
   tabs: LegacyTab[];
 };
@@ -74,6 +78,10 @@ function sanitizeTab(tab: LegacyTab): Tab {
 function sanitizeWorkspace(workspace: Workspace | LegacyWorkspace): Workspace {
   return {
     ...workspace,
+    // Workspaces persisted before `kind` existed default to an open project here;
+    // `ensureSingleHomeWorkspace` then promotes one of them to home.
+    kind: workspace.kind === 'home' ? 'home' : 'project',
+    isOpen: typeof workspace.isOpen === 'boolean' ? workspace.isOpen : true,
     tabs: workspace.tabs.map(sanitizeTab),
     panes: workspace.panes.map(sanitizePane),
   };
@@ -341,7 +349,12 @@ export class WorkspaceStore {
    */
   public create(name: string, rootPath: string): Workspace {
     const timestamp = this.now();
-    const workspace = this.createWorkspace(name, rootPath || this.getHomeDirectory(), timestamp);
+    const workspace = this.createWorkspace(
+      name,
+      'project',
+      rootPath || this.getHomeDirectory(),
+      timestamp,
+    );
     const workspaces = this.normalizeWorkspacesForStorage([...this.ensureWorkspaces(), workspace]);
     this.storage.setWorkspaces(workspaces);
     return workspaces.find((currentWorkspace) => currentWorkspace.id === workspace.id) ?? workspace;
@@ -349,38 +362,47 @@ export class WorkspaceStore {
 
   /**
    * Replaces a persisted workspace while preserving runtime-only pane state in memory only.
+   * The persisted `kind` always wins over the supplied one, and an unknown id is ignored.
    */
   public update(workspace: Workspace): void {
     const timestamp = this.now();
+    const currentWorkspaces = this.ensureWorkspaces();
+    const persistedWorkspace = currentWorkspaces.find(
+      (currentWorkspace) => currentWorkspace.id === workspace.id,
+    );
+    // Only `create` adds workspaces. The IPC handler already rejects unknown ids, so this is a
+    // store-level rule for direct callers: upserting here would let a stale update for a deleted
+    // workspace resurrect it.
+    if (!persistedWorkspace) {
+      return;
+    }
+
     const updatedWorkspace = sanitizeWorkspace({
       ...workspace,
+      // `kind` is fixed at creation and owned by this store: a renderer update must not be able to
+      // demote home or promote a project, which would break the single-home invariant.
+      kind: persistedWorkspace.kind,
       updatedAt: timestamp,
     });
-    const nextWorkspaces = this.ensureWorkspaces().map((currentWorkspace) =>
+    const nextWorkspaces = currentWorkspaces.map((currentWorkspace) =>
       currentWorkspace.id === updatedWorkspace.id ? updatedWorkspace : currentWorkspace,
     );
-
-    if (!nextWorkspaces.some((currentWorkspace) => currentWorkspace.id === updatedWorkspace.id)) {
-      nextWorkspaces.push(updatedWorkspace);
-    }
 
     this.storage.setWorkspaces(this.normalizeWorkspacesForStorage(nextWorkspaces));
   }
 
   /**
-   * Deletes a workspace while preserving the invariant that at least one workspace remains.
+   * Deletes a project workspace. The home workspace is never deleted, which also guarantees that at
+   * least one workspace remains.
    */
   public delete(id: string): void {
     const currentWorkspaces = this.ensureWorkspaces();
-    if (currentWorkspaces.length <= 1) {
+    const targetWorkspace = currentWorkspaces.find((workspace) => workspace.id === id);
+    if (!targetWorkspace || !canDeleteWorkspace(targetWorkspace)) {
       return;
     }
 
     const remainingWorkspaces = currentWorkspaces.filter((workspace) => workspace.id !== id);
-    if (remainingWorkspaces.length === currentWorkspaces.length) {
-      return;
-    }
-
     const normalizedWorkspaces = this.normalizeWorkspacesForStorage(remainingWorkspaces);
     this.storage.setWorkspaces(normalizedWorkspaces);
 
@@ -389,24 +411,28 @@ export class WorkspaceStore {
       (workspace) => workspace.id === activeWorkspaceId,
     );
     if (!activeWorkspaceExists) {
-      this.storage.setActiveWorkspaceId(normalizedWorkspaces[0]?.id ?? null);
+      this.storage.setActiveWorkspaceId(findFallbackWorkspace(normalizedWorkspaces)?.id ?? null);
     }
   }
 
   private normalizeWorkspacesForStorage(
     workspaces: Array<Workspace | LegacyWorkspace>,
   ): Workspace[] {
-    return ensureGloballyUniqueTabIds(
-      ensureGloballyUniquePaneIds(workspaces.map(sanitizeWorkspace), this.createId, this.logger),
-      this.createId,
+    return ensureSingleHomeWorkspace(
+      ensureGloballyUniqueTabIds(
+        ensureGloballyUniquePaneIds(workspaces.map(sanitizeWorkspace), this.createId, this.logger),
+        this.createId,
+      ),
+      this.getHomeDirectory(),
     );
   }
 
   private ensureWorkspaces(): Workspace[] {
     const storedWorkspaces = this.storage.getWorkspaces() as Array<Workspace | LegacyWorkspace>;
     // Sanitize first (drop runtime-only fields / migrate legacy shapes), then guarantee globally
-    // unique pane ids. Both are durable-model normalizations, so any change is written back here
-    // and the renderer always receives data the terminal-runtime layer can key by `pane.id`.
+    // unique pane ids and a single home workspace. All are durable-model normalizations, so any
+    // change is written back here and the renderer always receives data the terminal-runtime layer
+    // can key by `pane.id`.
     const workspaces = this.normalizeWorkspacesForStorage(storedWorkspaces);
 
     if (workspaces.length > 0) {
@@ -422,10 +448,15 @@ export class WorkspaceStore {
   }
 
   private createDefaultWorkspace(): Workspace {
-    return this.createWorkspace('Default', this.getHomeDirectory(), this.now());
+    return this.createWorkspace('Default', 'home', this.getHomeDirectory(), this.now());
   }
 
-  private createWorkspace(name: string, rootPath: string, timestamp: number): Workspace {
+  private createWorkspace(
+    name: string,
+    kind: WorkspaceKind,
+    rootPath: string,
+    timestamp: number,
+  ): Workspace {
     const workspaceId = this.createId();
     const tabId = this.createId();
     const paneId = this.createId();
@@ -437,6 +468,8 @@ export class WorkspaceStore {
     return {
       id: workspaceId,
       name,
+      kind,
+      isOpen: true,
       rootPath,
       tabs: [
         {

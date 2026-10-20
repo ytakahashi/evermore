@@ -1,6 +1,22 @@
+/**
+ * `home` is the single permanent workspace for work that belongs to no project; every other
+ * workspace is a `project` rooted at one directory. Home is identified by this field rather than by
+ * `rootPath === homedir` so that opening `~` as a project stays distinguishable from home.
+ */
+export type WorkspaceKind = 'home' | 'project';
+
 export interface Workspace {
   id: string;
   name: string;
+  /** Owned by the main process: fixed at creation and never changed by a renderer update. */
+  kind: WorkspaceKind;
+  /**
+   * Closed workspaces keep their layout but run no PTYs. The home workspace is always open: the
+   * main-process store silently re-opens it on every read and write without notifying the
+   * renderer, so any renderer action that closes a workspace must reject home itself to stay in
+   * sync.
+   */
+  isOpen: boolean;
   rootPath: string; // workspace root directory (absolute path)
   tabs: Tab[];
   panes: Pane[];

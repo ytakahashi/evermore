@@ -22,6 +22,8 @@ function createWorkspaceWithPane(ptyId: string | undefined): Workspace {
   return {
     id: 'workspace-1',
     name: 'Default',
+    kind: 'home',
+    isOpen: true,
     rootPath: '/Users/tester',
     tabs: [
       {
