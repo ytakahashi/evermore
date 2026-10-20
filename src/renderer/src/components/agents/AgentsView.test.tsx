@@ -104,7 +104,14 @@ function agentInfo(ptyId: string, overrides: Partial<PaneRuntimeInfo> = {}): Pan
 }
 
 describe('AgentsView', () => {
+  const scrollIntoView = vi.fn();
+
   beforeEach(() => {
+    // jsdom has no layout or scrolling implementation.
+    Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
+      configurable: true,
+      value: scrollIntoView,
+    });
     useWorkspaceStore.setState({
       workspaces: [workspace1, workspace2],
       activeWorkspaceId: workspace1.id,
@@ -116,6 +123,8 @@ describe('AgentsView', () => {
   });
 
   afterEach(() => {
+    scrollIntoView.mockClear();
+    Reflect.deleteProperty(HTMLElement.prototype, 'scrollIntoView');
     useWorkspaceStore.setState({
       workspaces: [],
       activeWorkspaceId: null,
@@ -124,6 +133,269 @@ describe('AgentsView', () => {
     });
     usePaneInfoStore.setState({ infosByPtyId: {}, isLoading: false, error: null });
     useUiStore.setState({ activeView: 'workspace' });
+  });
+
+  it.each([
+    { key: 'ArrowDown', endpoint: /Default \/ zsh/, overshoot: 'ArrowUp' },
+    { key: 'ArrowUp', endpoint: /Project \/ server/, overshoot: 'ArrowDown' },
+  ])(
+    'focuses an endpoint from the list with $key and clamps there',
+    ({ key, endpoint, overshoot }) => {
+      // Given: two sessions and an initially focused, unselected list.
+      usePaneInfoStore.setState({
+        infosByPtyId: { 'pty-1': agentInfo('pty-1'), 'pty-2': agentInfo('pty-2') },
+      });
+      render(<AgentsView />);
+      const list = screen.getByLabelText('Agent sessions');
+      expect(list).toHaveFocus();
+      expect(screen.getByText(/In the list:/)).toHaveTextContent('Space Preview');
+
+      // When: the first arrow picks an endpoint and a second arrow tries to pass it.
+      fireEvent.keyDown(list, { key });
+      const card = screen.getByRole('button', { name: endpoint });
+      fireEvent.keyDown(card, { key: overshoot });
+
+      // Then: focus stays on that endpoint, which is scrolled into view without being selected.
+      expect(card).toHaveFocus();
+      expect(card).toHaveAttribute('aria-pressed', 'false');
+      expect(scrollIntoView).toHaveBeenLastCalledWith({ block: 'nearest' });
+      expect(scrollIntoView.mock.contexts.at(-1)).toBe(card);
+    },
+  );
+
+  it('moves focus between cards without opening the terminal panel', () => {
+    // Given: two sessions and a focused list.
+    usePaneInfoStore.setState({
+      infosByPtyId: { 'pty-1': agentInfo('pty-1'), 'pty-2': agentInfo('pty-2') },
+    });
+    render(<AgentsView />);
+    const list = screen.getByLabelText('Agent sessions');
+
+    // When: ArrowDown is pressed twice.
+    fireEvent.keyDown(list, { key: 'ArrowDown' });
+    fireEvent.keyDown(screen.getByRole('button', { name: /Default \/ zsh/ }), {
+      key: 'ArrowDown',
+    });
+
+    // Then: the last card has focus, and no session is selected or previewed.
+    expect(screen.getByRole('button', { name: /Project \/ server/ })).toHaveFocus();
+    expect(screen.queryByRole('button', { pressed: true })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('region', { name: 'Selected agent terminal' }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('starts list-level navigation from the selected session', () => {
+    // Given: the last session is selected, and focus returns to the list container.
+    usePaneInfoStore.setState({
+      infosByPtyId: { 'pty-1': agentInfo('pty-1'), 'pty-2': agentInfo('pty-2') },
+    });
+    render(<AgentsView />);
+    const last = screen.getByRole('button', { name: /Project \/ server/ });
+    fireEvent.click(last);
+    const list = screen.getByLabelText('Agent sessions');
+    list.focus();
+
+    // When: ArrowUp is pressed on the list.
+    fireEvent.keyDown(list, { key: 'ArrowUp' });
+
+    // Then: focus moves up from the selected card instead of jumping to the last endpoint, and the
+    // selection is left unchanged.
+    expect(screen.getByRole('button', { name: /Default \/ zsh/ })).toHaveFocus();
+    expect(last).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('opens the focused card in its workspace on Enter', () => {
+    // Given: a focused, unselected session in another workspace.
+    usePaneInfoStore.setState({ infosByPtyId: { 'pty-2': agentInfo('pty-2') } });
+    render(<AgentsView />);
+    const card = screen.getByRole('button', { name: /Project \/ server/ });
+    card.focus();
+
+    // When: Enter is pressed on the card.
+    const event = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true });
+    fireEvent(card, event);
+
+    // Then: the native button click is suppressed and workspace navigation completes.
+    expect(event.defaultPrevented).toBe(true);
+    expect(useUiStore.getState().activeView).toBe('workspace');
+    const state = useWorkspaceStore.getState();
+    expect(state.activeWorkspaceId).toBe(workspace2.id);
+    expect(state.workspaces[1].activeTabId).toBe(workspace2.activeTabId);
+    expect(state.workspaces[1].tabs[0].activePaneId).toBe(workspace2.panes[0].id);
+  });
+
+  it('opens the selected session in its workspace on Enter from the list', () => {
+    // Given: a selected session in another workspace, with focus on the list container.
+    usePaneInfoStore.setState({ infosByPtyId: { 'pty-2': agentInfo('pty-2') } });
+    render(<AgentsView />);
+    fireEvent.click(screen.getByRole('button', { name: /Project \/ server/ }));
+    const list = screen.getByLabelText('Agent sessions');
+    list.focus();
+
+    // When: Enter is pressed on the list.
+    fireEvent.keyDown(list, { key: 'Enter' });
+
+    // Then: navigation targets the selected session.
+    expect(useUiStore.getState().activeView).toBe('workspace');
+    expect(useWorkspaceStore.getState().activeWorkspaceId).toBe(workspace2.id);
+  });
+
+  it.each([
+    { metaKey: true },
+    { ctrlKey: true },
+    { altKey: true },
+    { shiftKey: true },
+    { isComposing: true },
+  ])('ignores modified or composing navigation: %j', (options) => {
+    // Given: a focused list with one session.
+    usePaneInfoStore.setState({ infosByPtyId: { 'pty-1': agentInfo('pty-1') } });
+    render(<AgentsView />);
+    const list = screen.getByLabelText('Agent sessions');
+
+    // When: a modified arrow or Enter reaches the list.
+    for (const key of ['ArrowDown', 'Enter']) fireEvent.keyDown(list, { key, ...options });
+
+    // Then: neither focus movement nor navigation occurs.
+    expect(list).toHaveFocus();
+    expect(useUiStore.getState().activeView).toBe('agents');
+  });
+
+  it.each([
+    {
+      source: 'an already-prevented event',
+      dispatch: (card: HTMLElement): void => {
+        const event = new KeyboardEvent('keydown', {
+          key: 'ArrowDown',
+          bubbles: true,
+          cancelable: true,
+        });
+        event.preventDefault();
+        fireEvent(card, event);
+      },
+    },
+    {
+      source: 'an editable descendant',
+      dispatch: (card: HTMLElement): void => {
+        const input = document.createElement('input');
+        card.appendChild(input);
+        fireEvent.keyDown(input, { key: 'ArrowDown' });
+        input.remove();
+      },
+    },
+    {
+      source: 'outside the list',
+      dispatch: (): void => {
+        fireEvent.keyDown(window, { key: 'ArrowDown' });
+      },
+    },
+  ])('ignores navigation keys from $source', ({ dispatch }) => {
+    // Given: a focused list with one session.
+    usePaneInfoStore.setState({ infosByPtyId: { 'pty-1': agentInfo('pty-1') } });
+    render(<AgentsView />);
+    const list = screen.getByLabelText('Agent sessions');
+
+    // When: ArrowDown arrives from an excluded source.
+    dispatch(screen.getByRole('button', { name: /Default \/ zsh/ }));
+
+    // Then: focus does not move to a card.
+    expect(list).toHaveFocus();
+    expect(scrollIntoView).not.toHaveBeenCalled();
+  });
+
+  it('leaves Space to native button activation', () => {
+    // Given: a focused card.
+    usePaneInfoStore.setState({ infosByPtyId: { 'pty-1': agentInfo('pty-1') } });
+    render(<AgentsView />);
+    const card = screen.getByRole('button', { name: /Default \/ zsh/ });
+    card.focus();
+
+    // When: Space is pressed on the card.
+    const event = new KeyboardEvent('keydown', { key: ' ', bubbles: true, cancelable: true });
+    fireEvent(card, event);
+
+    // Then: the list does not prevent the default that clicks the button to open the preview.
+    expect(event.defaultPrevented).toBe(false);
+  });
+
+  it('does not intercept keys from the terminal panel controls', () => {
+    // Given: a selected session whose panel close button has focus.
+    usePaneInfoStore.setState({ infosByPtyId: { 'pty-1': agentInfo('pty-1') } });
+    render(<AgentsView />);
+    const card = screen.getByRole('button', { name: /Default \/ zsh/ });
+    fireEvent.click(card);
+    const close = screen.getByRole('button', { name: 'Close agent terminal' });
+    close.focus();
+
+    // When: navigation keys are pressed on the panel button.
+    fireEvent.keyDown(close, { key: 'ArrowUp' });
+    fireEvent.keyDown(close, { key: 'Enter' });
+
+    // Then: the list neither moves focus nor navigates away.
+    expect(close).toHaveFocus();
+    expect(card).toHaveAttribute('aria-pressed', 'true');
+    expect(useUiStore.getState().activeView).toBe('agents');
+  });
+
+  it('leaves empty-list and settings-button keys alone', () => {
+    // Given: an empty view.
+    render(<AgentsView />);
+    const list = screen.getByLabelText('Agent sessions');
+    expect(list).toHaveFocus();
+
+    // When: arrows and Enter are pressed without a session.
+    for (const key of ['ArrowUp', 'ArrowDown', 'Enter']) fireEvent.keyDown(list, { key });
+    const button = screen.getByRole('button', { name: 'Open AI Integration settings' });
+    const event = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true });
+    fireEvent(button, event);
+
+    // Then: Enter remains available for native activation of the settings button.
+    expect(event.defaultPrevented).toBe(false);
+    expect(useUiStore.getState().activeView).toBe('agents');
+  });
+
+  it('restores list focus when an unselected focused card disappears', () => {
+    // Given: a Tab-focused card without a terminal selection.
+    usePaneInfoStore.setState({ infosByPtyId: { 'pty-1': agentInfo('pty-1') } });
+    render(<AgentsView />);
+    screen.getByRole('button', { name: /Default \/ zsh/ }).focus();
+
+    // When: agent detection removes that unselected row.
+    act(() => usePaneInfoStore.setState({ infosByPtyId: {} }));
+
+    // Then: focus has a durable destination and no terminal is selected.
+    expect(screen.getByLabelText('Agent sessions')).toHaveFocus();
+    expect(
+      screen.queryByRole('region', { name: 'Selected agent terminal' }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('preserves external focus during polling and pane removal', () => {
+    // Given: a selected card followed by focus outside the view.
+    usePaneInfoStore.setState({ infosByPtyId: { 'pty-1': agentInfo('pty-1') } });
+    const { getByLabelText } = render(
+      <>
+        <button aria-label="Sidebar control" />
+        <AgentsView />
+      </>,
+    );
+    const card = screen.getByRole('button', { name: /Default \/ zsh/ });
+    fireEvent.click(card);
+    card.focus();
+    const external = getByLabelText('Sidebar control');
+    external.focus();
+
+    // When: runtime polling updates, followed by structural removal.
+    act(() =>
+      usePaneInfoStore.setState({
+        infosByPtyId: { 'pty-1': agentInfo('pty-1', { userPrompt: 'Updated' }) },
+      }),
+    );
+    act(() => useWorkspaceStore.setState({ workspaces: [] }));
+
+    // Then: asynchronous updates neither steal external focus nor scroll the list.
+    expect(external).toHaveFocus();
+    expect(scrollIntoView).not.toHaveBeenCalled();
   });
 
   it('renders the activity summary and the submitted prompt on one card', () => {

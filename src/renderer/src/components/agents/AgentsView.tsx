@@ -35,7 +35,8 @@ function AgentCard({
   return (
     <button
       aria-pressed={selected}
-      className={`flex w-full rounded-lg border px-4 py-3 text-left hover:border-border-strong ${compact ? 'flex-col gap-2' : 'gap-4'} ${selected ? 'border-border-strong bg-raised hover:bg-raised' : 'border-border bg-panel hover:bg-raised/50'}`}
+      data-agent-pane-id={session.paneId}
+      className={`flex w-full rounded-lg border px-4 py-3 text-left hover:border-border-strong focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand ${compact ? 'flex-col gap-2' : 'gap-4'} ${selected ? 'border-border-strong bg-raised hover:bg-raised' : 'border-border bg-panel hover:bg-raised/50'}`}
       type="button"
       onClick={onSelect}
     >
@@ -138,7 +139,8 @@ function AgentSessionsView(): React.JSX.Element {
   const showWorkspaceView = useUiStore((state) => state.showWorkspaceView);
   const [selectedPaneId, setSelectedPaneId] = useState<string | null>(null);
   const listRef = useRef<HTMLDivElement | null>(null);
-  const previousSelectionRef = useRef<string | null>(null);
+  const viewRef = useRef<HTMLElement | null>(null);
+  const focusedElementRef = useRef<HTMLElement | null>(null);
   const sessions = collectAgentSessions(workspaces, infosByPtyId, {
     retainPaneId: selectedPaneId ?? undefined,
   });
@@ -148,17 +150,80 @@ function AgentSessionsView(): React.JSX.Element {
   if (selectedPaneId && !selectedSession) setSelectedPaneId(null);
 
   useLayoutEffect(() => {
-    // A retained ended-agent row disappears on deselection. Keep keyboard focus in the list
-    // when that removal (or a pane close) would otherwise leave it on the document body.
+    listRef.current?.focus();
+  }, []);
+
+  const focusCard = (paneId: string): void => {
+    const card = Array.from(
+      listRef.current?.querySelectorAll<HTMLButtonElement>('[data-agent-pane-id]') ?? [],
+    ).find((element) => element.dataset.agentPaneId === paneId);
+    card?.focus({ preventScroll: true });
+    card?.scrollIntoView({ block: 'nearest' });
+  };
+
+  useLayoutEffect(() => {
+    // Removing even an unselected, Tab-focused card must not strand focus on the body.
     if (
-      previousSelectionRef.current &&
-      !selectedPaneId &&
+      focusedElementRef.current &&
+      !viewRef.current?.contains(focusedElementRef.current) &&
       document.activeElement === document.body
     ) {
       listRef.current?.focus();
     }
-    previousSelectionRef.current = selectedPaneId;
-  }, [selectedPaneId]);
+  });
+
+  const openWorkspace = (session: AgentSession): void => {
+    // Layout cleanup returns xterm before the selected workspace paints.
+    selectWorkspacePane(session.workspaceId, session.tabId, session.paneId);
+    showWorkspaceView();
+  };
+
+  const handleListKeyDown = (event: React.KeyboardEvent<HTMLDivElement>): void => {
+    if (
+      event.defaultPrevented ||
+      event.nativeEvent.isComposing ||
+      event.metaKey ||
+      event.ctrlKey ||
+      event.altKey ||
+      event.shiftKey ||
+      !(event.target instanceof HTMLElement)
+    )
+      return;
+
+    // Only the list itself and its cards participate; empty-state buttons retain native keys.
+    const card = event.target.closest<HTMLButtonElement>('button[data-agent-pane-id]');
+    if (
+      event.target.closest(
+        'input, textarea, select, [contenteditable]:not([contenteditable="false"])',
+      )
+    )
+      return;
+    if (!card && event.target !== event.currentTarget) return;
+    const paneId = card?.dataset.agentPaneId ?? selectedPaneId;
+
+    if (event.key === 'Enter') {
+      const session = sessions.find((candidate) => candidate.paneId === paneId);
+      if (!session) return;
+      // Enter normally clicks the button, which would also toggle selection after navigation.
+      event.preventDefault();
+      openWorkspace(session);
+    } else if (event.key === 'ArrowUp' || event.key === 'ArrowDown') {
+      if (sessions.length === 0) return;
+      event.preventDefault();
+      // Arrows move focus only; Space (the native button click) opens the terminal panel.
+      // Selecting on every arrow would borrow each passed terminal, refitting and resizing its
+      // PTY so every agent TUI redraws, and would collapse the full-width prompts into compact rows.
+      const step = event.key === 'ArrowDown' ? 1 : -1;
+      const index = sessions.findIndex((session) => session.paneId === paneId);
+      const nextIndex =
+        index < 0
+          ? step > 0
+            ? 0
+            : sessions.length - 1
+          : Math.max(0, Math.min(sessions.length - 1, index + step));
+      focusCard(sessions[nextIndex].paneId);
+    }
+  };
 
   const closeSelection = (): void => {
     setSelectedPaneId(null);
@@ -168,17 +233,30 @@ function AgentSessionsView(): React.JSX.Element {
 
   return (
     <section
+      ref={viewRef}
       aria-label="Agents"
+      onFocusCapture={(event) => {
+        focusedElementRef.current = event.target;
+      }}
+      onBlurCapture={(event) => {
+        // DOM removal may omit blur or its next target; retain the node until layout cleanup.
+        if (event.relatedTarget) focusedElementRef.current = null;
+      }}
       className="flex h-full min-h-0 w-full flex-col bg-background text-foreground"
     >
-      <header className="flex items-center justify-between border-b border-border px-4 py-2">
+      <header className="flex flex-wrap items-center justify-between gap-2 border-b border-border px-4 py-2">
         <h1 className="text-sm font-semibold">Agents</h1>
+        <p className="text-xs text-muted">
+          In the list: <kbd>Esc</kbd> Back · <kbd>↑↓</kbd> Move · <kbd>Space</kbd> Preview ·{' '}
+          <kbd>Enter</kbd> Open in workspace
+        </p>
       </header>
       <div className="flex min-h-0 min-w-0 flex-1">
         <div
           ref={listRef}
           tabIndex={-1}
           aria-label="Agent sessions"
+          onKeyDown={handleListKeyDown}
           className={`min-h-0 overflow-y-auto p-4 ${selectedSession ? 'w-80 shrink-0' : 'min-w-0 flex-1'}`}
         >
           {sessions.length === 0 ? (
@@ -206,16 +284,7 @@ function AgentSessionsView(): React.JSX.Element {
             key={selectedSession.paneId}
             session={selectedSession}
             onClose={closeSelection}
-            onOpenWorkspace={() => {
-              // Selecting resolves the latest workspace/tab location; layout cleanup returns xterm
-              // in the same commit as the workspace reveal, before paint.
-              selectWorkspacePane(
-                selectedSession.workspaceId,
-                selectedSession.tabId,
-                selectedSession.paneId,
-              );
-              showWorkspaceView();
-            }}
+            onOpenWorkspace={() => openWorkspace(selectedSession)}
           />
         )}
       </div>
