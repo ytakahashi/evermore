@@ -121,6 +121,51 @@ describe('Agents view terminal borrowing', () => {
     vi.restoreAllMocks();
   });
 
+  it('moves focus by keyboard without borrowing and returns a previewed terminal before a pane jump', () => {
+    // Given: existing terminal owners and a focused, unselected list.
+    const first = register('p1');
+    const second = register('p2');
+    render(createElement(StrictMode, null, createElement(AgentsView)));
+    const list = screen.getByLabelText('Agent sessions');
+    const firstRow = row('Claude');
+    const secondRow = row('Codex');
+    firstRow.scrollIntoView = vi.fn();
+    secondRow.scrollIntoView = vi.fn();
+
+    // When: arrows move through both cards.
+    fireEvent.keyDown(list, { key: 'ArrowDown' });
+    fireEvent.keyDown(firstRow, { key: 'ArrowDown' });
+
+    // Then: focus reaches the second card while both terminals stay home and unresized.
+    expect(secondRow).toHaveFocus();
+    expect(first.element.parentElement).toBe(first.home);
+    expect(second.element.parentElement).toBe(second.home);
+    expect(first.fit).not.toHaveBeenCalled();
+    expect(second.fit).not.toHaveBeenCalled();
+    expect(terminalHostRegistry.getBorrowedHost()).toBeUndefined();
+
+    // When: the focused card is activated (as Space would), and terminal-originated keys bubble.
+    fireEvent.click(secondRow);
+    const input = second.element.querySelector('textarea')!;
+    input.focus();
+    for (const key of ['ArrowUp', 'ArrowDown', 'Enter']) fireEvent.keyDown(input, { key });
+
+    // Then: only the second terminal is borrowed, and the list ignores the terminal's keys.
+    expect(second.element.closest('[aria-label="Selected agent terminal"]')).not.toBeNull();
+    expect(input).toHaveFocus();
+    expect(useUiStore.getState().activeView).toBe('agents');
+
+    // When: Enter is pressed back on the second card.
+    secondRow.focus();
+    fireEvent.keyDown(secondRow, { key: 'Enter' });
+
+    // Then: navigation selects the other pane in the same tab and returns its original root.
+    expect(useWorkspaceStore.getState().workspaces[0].tabs[0].activePaneId).toBe('p2');
+    expect(useUiStore.getState().activeView).toBe('workspace');
+    expect(second.element.parentElement).toBe(second.home);
+    expect(terminalHostRegistry.getBorrowedHost()).toBeUndefined();
+  });
+
   it('returns the first root before borrowing another and preserves focus until terminal click', () => {
     // Given: two existing xterm roots and StrictMode lifecycle replay.
     const first = register('p1');
