@@ -64,6 +64,7 @@ function mergePatchIntoSettings(current: AppSettings, patch: SettingsUpdate): Ap
     notifications: patch.notifications
       ? { ...current.notifications, ...patch.notifications }
       : current.notifications,
+    projects: patch.projects ? { ...current.projects, ...patch.projects } : current.projects,
   };
 }
 
@@ -159,6 +160,9 @@ export function createSettingsStore(
           notifications: patch.notifications
             ? { ...pendingPatch.notifications, ...patch.notifications }
             : pendingPatch.notifications,
+          projects: patch.projects
+            ? { ...pendingPatch.projects, ...patch.projects }
+            : pendingPatch.projects,
         };
 
         const flushPromise = new Promise<AppSettings | null>((resolve) => {

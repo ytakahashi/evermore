@@ -78,6 +78,11 @@ export interface Api {
     isFullScreen: () => Promise<boolean>;
     /** Shows the native tab-close sheet and resolves to whether the user confirmed the close. */
     confirmCloseTab: (payload: { runningProcesses: boolean }) => Promise<boolean>;
+    /**
+     * Shows the native directory picker and resolves to the selected absolute path, or `null` when
+     * the user cancels or another picker is already open.
+     */
+    pickDirectory: () => Promise<string | null>;
     onFullScreenChanged: (cb: (isFullScreen: boolean) => void) => () => void;
   };
   shortcuts: {

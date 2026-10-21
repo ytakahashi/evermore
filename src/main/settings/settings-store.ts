@@ -54,6 +54,7 @@ const CURSOR_STYLES: readonly CursorStyle[] = ['block', 'bar', 'underline'];
 const CONFIRM_MODE_VALUES: readonly ConfirmMode[] = ['always', 'never', 'running-only'];
 export const MAX_SETTINGS_STRING_LENGTH = 4_096;
 export const MAX_ACCELERATOR_LENGTH = 1_024;
+export const MAX_PROJECT_DIRECTORIES = 500;
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -115,6 +116,59 @@ function pickStringOrNull(
   return fallback;
 }
 
+function normalizeProjectDirectory(value: unknown, homeDirectory: string): string | null {
+  if (typeof value !== 'string' || value.length === 0) {
+    return null;
+  }
+
+  // Only `~` and `~/...` are expanded; `~user` forms are left as-is and then rejected as relative,
+  // because resolving another user's home directory is not worth the extra lookup here.
+  const expanded =
+    value === '~'
+      ? homeDirectory
+      : value.startsWith('~/')
+        ? path.join(homeDirectory, value.slice(2))
+        : value;
+  if (!path.isAbsolute(expanded)) {
+    return null;
+  }
+
+  // `path.normalize` keeps a trailing slash, which would let `/a/b` and `/a/b/` coexist as two
+  // entries. The root directory is the one path whose trailing slash must survive.
+  const normalized = path.normalize(expanded).replace(/(.)\/+$/, '$1');
+  return normalized.length <= MAX_SETTINGS_STRING_LENGTH ? normalized : null;
+}
+
+/**
+ * Normalizes the registered project directories. Unlike scalar fields, invalid entries are dropped
+ * one by one instead of resetting the whole list, so a single typo in a hand-edited file does not
+ * discard the user's other registrations. Only a non-array value falls back to the default.
+ */
+function pickProjectDirectories(
+  value: unknown,
+  fallback: readonly string[],
+  homeDirectory: string,
+): string[] {
+  if (!Array.isArray(value)) {
+    return [...fallback];
+  }
+
+  const result: string[] = [];
+  const seen = new Set<string>();
+  for (const entry of value) {
+    if (result.length >= MAX_PROJECT_DIRECTORIES) {
+      break;
+    }
+    const directory = normalizeProjectDirectory(entry, homeDirectory);
+    if (directory === null || seen.has(directory)) {
+      continue;
+    }
+    seen.add(directory);
+    result.push(directory);
+  }
+  return result;
+}
+
 function pickKeybindings(value: unknown): Record<string, string> {
   if (!isPlainObject(value)) {
     return {};
@@ -172,7 +226,7 @@ function pickFontWeight(value: unknown, fallback: FontWeight): FontWeight {
   return fallback;
 }
 
-function readCurrentSettings(raw: unknown): AppSettings {
+function readCurrentSettings(raw: unknown, homeDirectory: string): AppSettings {
   if (!isPlainObject(raw)) {
     return cloneDefaultSettings();
   }
@@ -184,6 +238,7 @@ function readCurrentSettings(raw: unknown): AppSettings {
   const appRaw = isPlainObject(raw.app) ? raw.app : {};
   const shellIntegrationRaw = isPlainObject(raw.shellIntegration) ? raw.shellIntegration : {};
   const notificationsRaw = isPlainObject(raw.notifications) ? raw.notifications : {};
+  const projectsRaw = isPlainObject(raw.projects) ? raw.projects : {};
 
   const terminal: AppSettings['terminal'] = {
     cursorStyle: pickCursorStyle(terminalRaw.cursorStyle, defaults.terminal.cursorStyle),
@@ -238,6 +293,13 @@ function readCurrentSettings(raw: unknown): AppSettings {
         defaults.notifications.aiAgentAwaitingInputEnabled,
       ),
     },
+    projects: {
+      directories: pickProjectDirectories(
+        projectsRaw.directories,
+        defaults.projects.directories,
+        homeDirectory,
+      ),
+    },
   };
 }
 
@@ -267,6 +329,10 @@ function diffPrimitives<T extends object>(current: T, defaultValue: T): Partial<
     }
   }
   return result;
+}
+
+function areStringListsEqual(left: readonly string[], right: readonly string[]): boolean {
+  return left.length === right.length && left.every((value, index) => value === right[index]);
 }
 
 /**
@@ -349,6 +415,12 @@ function diffAgainstDefaults(settings: AppSettings): PersistedSettings {
     result.notifications = notifications;
   }
 
+  // `diffPrimitives` compares by identity, which would treat every array as changed. The list is
+  // persisted whole because entry order is meaningful to the user.
+  if (!areStringListsEqual(settings.projects.directories, defaults.projects.directories)) {
+    result.projects = { directories: [...settings.projects.directories] };
+  }
+
   return result;
 }
 
@@ -390,6 +462,12 @@ function applySettingsPatch(current: AppSettings, patch: SettingsUpdate): AppSet
           patch.notifications as Record<string, unknown>,
         ) as AppSettings['notifications'])
       : current.notifications,
+    projects: patch.projects
+      ? (mergeSection(
+          current.projects as Record<string, unknown>,
+          patch.projects as Record<string, unknown>,
+        ) as AppSettings['projects'])
+      : current.projects,
   };
 }
 
@@ -403,13 +481,15 @@ function applySettingsPatch(current: AppSettings, patch: SettingsUpdate): AppSet
 export class SettingsStore {
   private readonly storage: SettingsStorageAdapter;
   private readonly logger: Logger;
+  private readonly getHomeDirectory: () => string;
   private settings: AppSettings;
   private readonly subscribers = new Set<(settings: AppSettings) => void>();
 
   public constructor(options: SettingsStoreOptions = {}) {
     this.storage = options.storage ?? new ElectronSettingsStorageAdapter();
     this.logger = options.logger ?? createSilentLogger();
-    this.settings = readCurrentSettings(this.storage.getSettings());
+    this.getHomeDirectory = options.getHomeDirectory ?? homedir;
+    this.settings = readCurrentSettings(this.storage.getSettings(), this.getHomeDirectory());
     // Persist the normalized diff so a hand-edited settings.json with typoed or default-valued keys
     // gets canonicalized to its sparse form on first launch. Legacy shape migrations are
     // intentionally not supported.
@@ -428,7 +508,10 @@ export class SettingsStore {
    * patch shape. Sections not present in `patch` are preserved as-is.
    */
   public update(patch: SettingsUpdate): AppSettings {
-    const next = readCurrentSettings(applySettingsPatch(this.settings, patch));
+    const next = readCurrentSettings(
+      applySettingsPatch(this.settings, patch),
+      this.getHomeDirectory(),
+    );
     this.settings = next;
     this.storage.setSettings(diffAgainstDefaults(next));
     this.notify();
@@ -452,7 +535,7 @@ export class SettingsStore {
    * file directly. It re-reads the current settings shape and normalizes typoed keys.
    */
   public reload(): AppSettings {
-    this.settings = readCurrentSettings(this.storage.getSettings());
+    this.settings = readCurrentSettings(this.storage.getSettings(), this.getHomeDirectory());
     // Re-canonicalize the file to its sparse form so an external edit containing default-valued
     // fields or typos is cleaned up on the next reload.
     this.storage.setSettings(diffAgainstDefaults(this.settings));

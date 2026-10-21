@@ -7,6 +7,7 @@ import { AIIntegrationSection } from './sections/AIIntegrationSection';
 import { ApplicationSection } from './sections/ApplicationSection';
 import { NotificationsSection } from './sections/NotificationsSection';
 import { PaneInfoSection } from './sections/PaneInfoSection';
+import { ProjectsSection } from './sections/ProjectsSection';
 import { RecommendedSetupSection } from './sections/RecommendedSetupSection';
 import { ShortcutsSection } from './sections/ShortcutsSection';
 import { TerminalSection } from './sections/TerminalSection';
@@ -16,6 +17,7 @@ type SettingsSectionId =
   | 'paneInfo'
   | 'shortcuts'
   | 'application'
+  | 'projects'
   | 'recommendedSetup'
   | 'aiIntegration'
   | 'notifications'
@@ -33,6 +35,7 @@ const SECTIONS: readonly SectionDefinition[] = [
   { id: 'paneInfo', label: 'Pane info', Component: PaneInfoSection },
   { id: 'shortcuts', label: 'Shortcuts', Component: ShortcutsSection },
   { id: 'application', label: 'Application', Component: ApplicationSection },
+  { id: 'projects', label: 'Projects', Component: ProjectsSection },
   { id: 'recommendedSetup', label: 'Recommended setup', Component: RecommendedSetupSection },
   { id: 'aiIntegration', label: 'AI Integration', Component: AIIntegrationSection },
   { id: 'notifications', label: 'Notifications', Component: NotificationsSection },

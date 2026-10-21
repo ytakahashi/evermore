@@ -209,6 +209,7 @@ export function registerIpcHandlers(options: RegisterIpcHandlersOptions): Regist
   const disposeWindowHandlers = registerWindowHandlers({
     getWindow: options.getWindow,
     showMessageBox: (window, dialogOptions) => dialog.showMessageBox(window, dialogOptions),
+    showOpenDialog: (window, dialogOptions) => dialog.showOpenDialog(window, dialogOptions),
   });
 
   return {

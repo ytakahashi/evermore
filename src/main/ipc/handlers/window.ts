@@ -1,4 +1,9 @@
-import { ipcMain, type BrowserWindow, type MessageBoxOptions } from 'electron';
+import {
+  ipcMain,
+  type BrowserWindow,
+  type MessageBoxOptions,
+  type OpenDialogOptions,
+} from 'electron';
 import { IPC } from '../../../shared/ipc-channels';
 
 interface RegisterWindowHandlersOptions {
@@ -7,6 +12,10 @@ interface RegisterWindowHandlersOptions {
     window: BrowserWindow,
     options: MessageBoxOptions,
   ) => Promise<{ response: number }>;
+  showOpenDialog: (
+    window: BrowserWindow,
+    options: OpenDialogOptions,
+  ) => Promise<{ canceled: boolean; filePaths: string[] }>;
 }
 
 function parseConfirmCloseTabPayload(payload: unknown): { runningProcesses: boolean } {
@@ -23,6 +32,11 @@ function parseConfirmCloseTabPayload(payload: unknown): { runningProcesses: bool
     runningProcesses: (payload as Record<string, unknown>)['runningProcesses'] as boolean,
   };
 }
+
+// The picker takes no renderer input, so its copy and properties stay fixed in main.
+const PICK_DIRECTORY_DIALOG_OPTIONS: OpenDialogOptions = {
+  properties: ['openDirectory', 'createDirectory'],
+};
 
 function createCloseTabDialogOptions(runningProcesses: boolean): MessageBoxOptions {
   return {
@@ -44,6 +58,7 @@ function createCloseTabDialogOptions(runningProcesses: boolean): MessageBoxOptio
  */
 export function registerWindowHandlers(options: RegisterWindowHandlersOptions): () => void {
   let closeTabPromptOpen = false;
+  let directoryPickerOpen = false;
 
   ipcMain.handle(IPC.WINDOW_IS_FULLSCREEN, () => {
     const window = options.getWindow();
@@ -72,8 +87,26 @@ export function registerWindowHandlers(options: RegisterWindowHandlersOptions): 
     }
   });
 
+  ipcMain.handle(IPC.WINDOW_PICK_DIRECTORY, async () => {
+    const window = options.getWindow();
+    // Unlike tab-close confirmation, there is no safe default selection, so an unavailable window
+    // and an overlapping request both resolve as a cancel.
+    if (!window || window.isDestroyed() || directoryPickerOpen) {
+      return null;
+    }
+
+    directoryPickerOpen = true;
+    try {
+      const result = await options.showOpenDialog(window, PICK_DIRECTORY_DIALOG_OPTIONS);
+      return result.canceled ? null : (result.filePaths[0] ?? null);
+    } finally {
+      directoryPickerOpen = false;
+    }
+  });
+
   return () => {
     ipcMain.removeHandler(IPC.WINDOW_IS_FULLSCREEN);
     ipcMain.removeHandler(IPC.WINDOW_CONFIRM_CLOSE_TAB);
+    ipcMain.removeHandler(IPC.WINDOW_PICK_DIRECTORY);
   };
 }

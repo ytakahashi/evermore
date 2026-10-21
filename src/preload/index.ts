@@ -173,6 +173,7 @@ const api = {
     isFullScreen: (): Promise<boolean> => ipcRenderer.invoke(IPC.WINDOW_IS_FULLSCREEN),
     confirmCloseTab: (payload: { runningProcesses: boolean }): Promise<boolean> =>
       ipcRenderer.invoke(IPC.WINDOW_CONFIRM_CLOSE_TAB, payload),
+    pickDirectory: (): Promise<string | null> => ipcRenderer.invoke(IPC.WINDOW_PICK_DIRECTORY),
     onFullScreenChanged: (cb: (isFullScreen: boolean) => void): (() => void) => {
       const token = Symbol();
       windowFullScreenChangedSubscribers.set(token, cb);

@@ -31,6 +31,9 @@ function makeSettingsApi(initial: AppSettings = structuredClone(DEFAULT_APP_SETT
         notifications: patch.notifications
           ? { ...state.current.notifications, ...patch.notifications }
           : state.current.notifications,
+        projects: patch.projects
+          ? { ...state.current.projects, ...patch.projects }
+          : state.current.projects,
       };
       return Promise.resolve(structuredClone(state.current));
     }),
@@ -124,6 +127,26 @@ describe('createSettingsStore', () => {
       expect.objectContaining({ shellIntegration: { autoInject: false } }),
     );
     expect(confirmed?.shellIntegration.autoInject).toBe(false);
+  });
+
+  it('replaces the projects directory list as a whole when patches are coalesced', async () => {
+    // Given: a loaded store with no registered directories.
+    const { api } = makeSettingsApi();
+    const useStore = createSettingsStore({ settingsApi: api, debounceMs: 20 });
+    await useStore.getState().loadSettings();
+
+    // When: two list edits land within one debounce window.
+    void useStore.getState().updateSettings({ projects: { directories: ['/work/a', '/work/b'] } });
+    const flush = useStore.getState().updateSettings({ projects: { directories: ['/work/b'] } });
+    await vi.advanceTimersByTimeAsync(40);
+    await flush;
+
+    // Then: the latest list wins instead of being merged element-wise with the earlier one.
+    expect(useStore.getState().settings?.projects.directories).toEqual(['/work/b']);
+    expect(api.update).toHaveBeenCalledOnce();
+    expect(api.update).toHaveBeenCalledWith(
+      expect.objectContaining({ projects: { directories: ['/work/b'] } }),
+    );
   });
 
   it('reconciles local state with the post-write settings returned by main', async () => {

@@ -111,6 +111,21 @@ describe('registerSettingsHandlers', () => {
     expect(settingsStore.get().notifications.aiAgentAwaitingInputEnabled).toBe(true);
   });
 
+  it('persists a projects.directories update across the IPC boundary', async () => {
+    // Given: handlers are registered with defaults (no registered directories).
+    registerSettingsHandlers({ settingsStore });
+
+    // When: the renderer invokes settings:update with a directory list.
+    const result = (await findHandler(IPC.SETTINGS_UPDATE)?.(
+      {},
+      { settings: { projects: { directories: ['/work/project'] } } },
+    )) as AppSettings;
+
+    // Then: the projects section is not dropped by the payload whitelist.
+    expect(result.projects.directories).toEqual(['/work/project']);
+    expect(settingsStore.get().projects.directories).toEqual(['/work/project']);
+  });
+
   it('returns runtime-reconciled settings after update', async () => {
     // Given: runtime settings application falls back to a different hotkey value.
     const applyRuntimeSettings = vi.fn((_settings: AppSettings) => {
