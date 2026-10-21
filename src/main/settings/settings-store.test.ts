@@ -4,6 +4,7 @@ import type { AppSettings } from '../../shared/types';
 import { createLogger, type LogRecord, type LogTransport } from '../logging/logger';
 import {
   MAX_ACCELERATOR_LENGTH,
+  MAX_PROJECT_DIRECTORIES,
   MAX_SETTINGS_STRING_LENGTH,
   SettingsStore,
 } from './settings-store';
@@ -101,6 +102,7 @@ describe('SettingsStore', () => {
     // which forces a deliberate review of the renderer-visible payload contract.
     expect(MAX_SETTINGS_STRING_LENGTH).toBe(4_096);
     expect(MAX_ACCELERATOR_LENGTH).toBe(1_024);
+    expect(MAX_PROJECT_DIRECTORIES).toBe(500);
   });
 
   it('accepts settings strings and keybinding accelerators at their maximum lengths', () => {
@@ -658,5 +660,116 @@ describe('SettingsStore', () => {
 
     // Then: the section is populated with defaults so downstream consumers can read it.
     expect(next.notifications).toEqual(DEFAULT_APP_SETTINGS.notifications);
+  });
+
+  describe('projects.directories', () => {
+    function createStoreWithHome(payload: unknown): SettingsStore {
+      storage = new MemorySettingsStorageAdapter(payload);
+      return new SettingsStore({ storage, getHomeDirectory: () => '/Users/me' });
+    }
+
+    it('defaults to an empty list and keeps it off disk', () => {
+      // Given: a freshly created store on top of an empty payload.
+
+      // When: the renderer reads settings.
+      const result = store.get();
+
+      // Then: no directories are registered and nothing is persisted for the section.
+      expect(result.projects.directories).toEqual([]);
+      expect(storage.payload).toEqual({});
+    });
+
+    it('persists the full list in registration order on update', () => {
+      // Given: defaults are in storage.
+
+      // When: the renderer registers two directories.
+      const next = store.update({ projects: { directories: ['/work/b', '/work/a'] } });
+
+      // Then: the list keeps its order both in memory and on disk.
+      expect(next.projects.directories).toEqual(['/work/b', '/work/a']);
+      expect(storage.payload).toEqual({ projects: { directories: ['/work/b', '/work/a'] } });
+    });
+
+    it('drops the section from disk once the last directory is removed', () => {
+      // Given: one registered directory.
+      store.update({ projects: { directories: ['/work/a'] } });
+
+      // When: the renderer removes it.
+      store.update({ projects: { directories: [] } });
+
+      // Then: the sparse file no longer carries the section.
+      expect(storage.payload).toEqual({});
+    });
+
+    it('normalizes hand-edited entries and drops invalid ones individually', () => {
+      // Given: a hand-edited list mixing tilde paths, trailing slashes, duplicates, and junk.
+      const local = createStoreWithHome({
+        projects: {
+          directories: [
+            '~/ghq/project',
+            '/work/a/',
+            '/work/a',
+            '/work/./b/../c',
+            '~',
+            '/',
+            'relative/path',
+            '~other/project',
+            '',
+            42,
+            null,
+          ],
+        },
+      });
+
+      // When: the store reads the file.
+      const result = local.get().projects.directories;
+
+      // Then: valid entries are canonicalized in order, and invalid ones vanish without discarding
+      // their valid siblings.
+      expect(result).toEqual(['/Users/me/ghq/project', '/work/a', '/work/c', '/Users/me', '/']);
+      expect(storage.payload).toEqual({ projects: { directories: result } });
+    });
+
+    it('falls back to the default when the list is not an array', () => {
+      // Given: a hand-edited file with a scalar instead of a list.
+      const local = createStoreWithHome({ projects: { directories: '/work/a' } });
+
+      // When: the store reads the file.
+      const result = local.get().projects.directories;
+
+      // Then: the default empty list is used and the malformed field is removed from disk.
+      expect(result).toEqual([]);
+      expect(storage.payload).toEqual({});
+    });
+
+    it('drops entries over the string limit and caps the list length', () => {
+      // Given: an over-limit path followed by more entries than the cap allows.
+      const overLimit = `/${'a'.repeat(MAX_SETTINGS_STRING_LENGTH)}`;
+      const many = Array.from(
+        { length: MAX_PROJECT_DIRECTORIES + 1 },
+        (_value, index) => `/work/${index}`,
+      );
+      const local = createStoreWithHome({ projects: { directories: [overLimit, ...many] } });
+
+      // When: the store reads the file.
+      const result = local.get().projects.directories;
+
+      // Then: the over-limit entry is dropped and only the first entries up to the cap survive.
+      expect(result).toHaveLength(MAX_PROJECT_DIRECTORIES);
+      expect(result[0]).toBe('/work/0');
+      expect(result.at(-1)).toBe(`/work/${MAX_PROJECT_DIRECTORIES - 1}`);
+    });
+
+    it('does not share the default list between reset snapshots', () => {
+      // Given: a store reset to defaults.
+      const first = store.reset();
+
+      // When: the returned snapshot is mutated.
+      first.projects.directories.push('/work/leak');
+
+      // Then: neither the defaults nor a later reset observe the mutation.
+      expect(DEFAULT_APP_SETTINGS.projects.directories).toEqual([]);
+      expect(store.reset().projects.directories).toEqual([]);
+    });
   });
 });

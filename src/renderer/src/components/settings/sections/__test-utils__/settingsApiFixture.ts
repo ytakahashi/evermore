@@ -33,6 +33,11 @@ export interface CreateSettingsApiFixtureOptions {
    * Defaults to a section-aware shallow merge.
    */
   updateImpl?: (current: AppSettings, patch: SettingsUpdate) => AppSettings;
+  /**
+   * Fake `window.api.window` members for sections that open native dialogs. Members left out are
+   * absent, so a section reaching for an unexpected window API fails loudly.
+   */
+  windowApi?: Partial<Api['window']>;
 }
 
 function defaultMerge(current: AppSettings, patch: SettingsUpdate): AppSettings {
@@ -47,6 +52,7 @@ function defaultMerge(current: AppSettings, patch: SettingsUpdate): AppSettings 
     notifications: patch.notifications
       ? { ...current.notifications, ...patch.notifications }
       : current.notifications,
+    projects: patch.projects ? { ...current.projects, ...patch.projects } : current.projects,
   };
 }
 
@@ -82,7 +88,7 @@ export function createSettingsApiFixture(
 
   Object.defineProperty(window, 'api', {
     configurable: true,
-    value: { settings: api } as unknown as Window['api'],
+    value: { settings: api, window: options.windowApi ?? {} } as unknown as Window['api'],
   });
   useSettingsStore.setState({
     settings: structuredClone(initial),

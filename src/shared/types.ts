@@ -269,4 +269,14 @@ export interface AppSettings {
      */
     aiAgentAwaitingInputEnabled: boolean;
   };
+  projects: {
+    /**
+     * Directories the user registered as projects, in registration order. Each entry is an
+     * absolute, normalized path without a trailing slash; the main-process settings layer expands
+     * a leading `~` and drops relative or duplicate entries so hand-edited files converge to the
+     * same shape. Entries are not checked for existence, so a removed directory stays listed until
+     * the user unregisters it.
+     */
+    directories: string[];
+  };
 }

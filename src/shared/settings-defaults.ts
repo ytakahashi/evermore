@@ -48,6 +48,9 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   notifications: {
     aiAgentAwaitingInputEnabled: false,
   },
+  projects: {
+    directories: [],
+  },
 };
 
 /**
@@ -65,5 +68,6 @@ export function cloneDefaultSettings(): AppSettings {
     app: { ...DEFAULT_APP_SETTINGS.app },
     shellIntegration: { ...DEFAULT_APP_SETTINGS.shellIntegration },
     notifications: { ...DEFAULT_APP_SETTINGS.notifications },
+    projects: { directories: [...DEFAULT_APP_SETTINGS.projects.directories] },
   };
 }

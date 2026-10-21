@@ -22,7 +22,11 @@ describe('registerWindowHandlers', () => {
     // Given: a live window currently in fullscreen mode.
     const window = createWindow();
     window.isFullScreen.mockReturnValue(true);
-    registerWindowHandlers({ getWindow: () => window as never, showMessageBox: vi.fn() });
+    registerWindowHandlers({
+      getWindow: () => window as never,
+      showMessageBox: vi.fn(),
+      showOpenDialog: vi.fn(),
+    });
 
     // When: the renderer asks for window state.
     const isFullScreen = requireHandler(IPC.WINDOW_IS_FULLSCREEN)({});
@@ -38,7 +42,11 @@ describe('registerWindowHandlers', () => {
     // Given: an available window and a dialog that selects Close Tab.
     const window = createWindow();
     const showMessageBox = vi.fn(() => Promise.resolve({ response: 0 }));
-    registerWindowHandlers({ getWindow: () => window as never, showMessageBox });
+    registerWindowHandlers({
+      getWindow: () => window as never,
+      showMessageBox,
+      showOpenDialog: vi.fn(),
+    });
 
     // When: the renderer requests tab-close confirmation.
     const confirmed = await requireHandler(IPC.WINDOW_CONFIRM_CLOSE_TAB)({}, { runningProcesses });
@@ -60,7 +68,11 @@ describe('registerWindowHandlers', () => {
     // Given: a dialog that selects Cancel.
     const window = createWindow();
     const showMessageBox = vi.fn(() => Promise.resolve({ response: 1 }));
-    registerWindowHandlers({ getWindow: () => window as never, showMessageBox });
+    registerWindowHandlers({
+      getWindow: () => window as never,
+      showMessageBox,
+      showOpenDialog: vi.fn(),
+    });
 
     // When: confirmation is requested.
     const confirmed = await requireHandler(IPC.WINDOW_CONFIRM_CLOSE_TAB)(
@@ -75,7 +87,7 @@ describe('registerWindowHandlers', () => {
   it('allows the close without showing a dialog when the window is unavailable', async () => {
     // Given: there is no live window that can own a native sheet.
     const showMessageBox = vi.fn();
-    registerWindowHandlers({ getWindow: () => null, showMessageBox });
+    registerWindowHandlers({ getWindow: () => null, showMessageBox, showOpenDialog: vi.fn() });
 
     // When: confirmation is requested with a valid payload.
     const confirmed = await requireHandler(IPC.WINDOW_CONFIRM_CLOSE_TAB)(
@@ -92,7 +104,11 @@ describe('registerWindowHandlers', () => {
     // Given: the renderer request races with destruction of its native window.
     const window = createWindow(true);
     const showMessageBox = vi.fn();
-    registerWindowHandlers({ getWindow: () => window as never, showMessageBox });
+    registerWindowHandlers({
+      getWindow: () => window as never,
+      showMessageBox,
+      showOpenDialog: vi.fn(),
+    });
 
     // When: confirmation is requested with a valid payload.
     const confirmed = await requireHandler(IPC.WINDOW_CONFIRM_CLOSE_TAB)(
@@ -110,7 +126,7 @@ describe('registerWindowHandlers', () => {
     async (payload) => {
       // Given: a window resolver whose use is observable.
       const getWindow = vi.fn(() => null);
-      registerWindowHandlers({ getWindow, showMessageBox: vi.fn() });
+      registerWindowHandlers({ getWindow, showMessageBox: vi.fn(), showOpenDialog: vi.fn() });
 
       // When / Then: invalid renderer input is rejected without consulting native state.
       await expect(requireHandler(IPC.WINDOW_CONFIRM_CLOSE_TAB)({}, payload)).rejects.toThrow(
@@ -133,7 +149,11 @@ describe('registerWindowHandlers', () => {
           }),
       )
       .mockResolvedValue({ response: 0 });
-    registerWindowHandlers({ getWindow: () => window as never, showMessageBox });
+    registerWindowHandlers({
+      getWindow: () => window as never,
+      showMessageBox,
+      showOpenDialog: vi.fn(),
+    });
     const handler = requireHandler(IPC.WINDOW_CONFIRM_CLOSE_TAB);
 
     // When: another request arrives before the first sheet settles.
@@ -148,9 +168,107 @@ describe('registerWindowHandlers', () => {
     expect(showMessageBox).toHaveBeenCalledTimes(2);
   });
 
-  it('removes both window handlers during teardown', () => {
+  it('returns the directory selected in the native picker', async () => {
+    // Given: an available window and a picker that selects one directory.
+    const window = createWindow();
+    const showOpenDialog = vi.fn(() =>
+      Promise.resolve({ canceled: false, filePaths: ['/work/project'] }),
+    );
+    registerWindowHandlers({
+      getWindow: () => window as never,
+      showMessageBox: vi.fn(),
+      showOpenDialog,
+    });
+
+    // When: the renderer requests a directory.
+    const picked = await requireHandler(IPC.WINDOW_PICK_DIRECTORY)({});
+
+    // Then: the selected path is returned and the picker is restricted to directories.
+    expect(picked).toBe('/work/project');
+    expect(showOpenDialog).toHaveBeenCalledWith(
+      window,
+      expect.objectContaining({ properties: expect.arrayContaining(['openDirectory']) }),
+    );
+  });
+
+  it.each([
+    ['the user cancels', { canceled: true, filePaths: [] }],
+    ['the dialog reports no selection', { canceled: false, filePaths: [] }],
+  ])('returns null when %s', async (_label, result) => {
+    // Given: a picker that settles without a usable selection.
+    const window = createWindow();
+    registerWindowHandlers({
+      getWindow: () => window as never,
+      showMessageBox: vi.fn(),
+      showOpenDialog: vi.fn(() => Promise.resolve(result)),
+    });
+
+    // When: the renderer requests a directory.
+    const picked = await requireHandler(IPC.WINDOW_PICK_DIRECTORY)({});
+
+    // Then: the request resolves as a cancel.
+    expect(picked).toBeNull();
+  });
+
+  it.each([
+    ['unavailable', null],
+    ['destroyed', createWindow(true)],
+  ])('returns null without a picker when the window is %s', async (_label, window) => {
+    // Given: no live window that can own the native sheet.
+    const showOpenDialog = vi.fn();
+    registerWindowHandlers({
+      getWindow: () => window as never,
+      showMessageBox: vi.fn(),
+      showOpenDialog,
+    });
+
+    // When: the renderer requests a directory.
+    const picked = await requireHandler(IPC.WINDOW_PICK_DIRECTORY)({});
+
+    // Then: the request resolves as a cancel without calling Electron's dialog API.
+    expect(picked).toBeNull();
+    expect(showOpenDialog).not.toHaveBeenCalled();
+  });
+
+  it('suppresses a second picker while the first is open and recovers after rejection', async () => {
+    // Given: a first picker request that remains pending.
+    const window = createWindow();
+    let rejectFirst: ((reason: Error) => void) | undefined;
+    const showOpenDialog = vi
+      .fn<() => Promise<{ canceled: boolean; filePaths: string[] }>>()
+      .mockImplementationOnce(
+        () =>
+          new Promise((_resolve, reject) => {
+            rejectFirst = reject;
+          }),
+      )
+      .mockResolvedValue({ canceled: false, filePaths: ['/work/project'] });
+    registerWindowHandlers({
+      getWindow: () => window as never,
+      showMessageBox: vi.fn(),
+      showOpenDialog,
+    });
+    const handler = requireHandler(IPC.WINDOW_PICK_DIRECTORY);
+
+    // When: another request arrives before the first picker settles.
+    const first = handler({}) as Promise<string | null>;
+    const overlapping = await handler({});
+
+    // Then: the overlapping request is cancelled, and a failed first picker releases the guard.
+    expect(overlapping).toBeNull();
+    rejectFirst?.(new Error('dialog unavailable'));
+    await expect(first).rejects.toThrow('dialog unavailable');
+    await expect(handler({})).resolves.toBe('/work/project');
+    expect(showOpenDialog).toHaveBeenCalledTimes(2);
+  });
+
+  it('removes every window handler during teardown', () => {
     // Given: registered window handlers.
-    const dispose = registerWindowHandlers({ getWindow: () => null, showMessageBox: vi.fn() });
+    const dispose = registerWindowHandlers({
+      getWindow: () => null,
+      showMessageBox: vi.fn(),
+      showOpenDialog: vi.fn(),
+    });
 
     // When: registration is disposed.
     dispose();
@@ -158,5 +276,6 @@ describe('registerWindowHandlers', () => {
     // Then: no stale invoke handler remains.
     expect(ipcMainMock.removeHandler).toHaveBeenCalledWith(IPC.WINDOW_IS_FULLSCREEN);
     expect(ipcMainMock.removeHandler).toHaveBeenCalledWith(IPC.WINDOW_CONFIRM_CLOSE_TAB);
+    expect(ipcMainMock.removeHandler).toHaveBeenCalledWith(IPC.WINDOW_PICK_DIRECTORY);
   });
 });
