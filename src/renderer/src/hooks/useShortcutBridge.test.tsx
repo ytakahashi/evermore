@@ -36,11 +36,48 @@ describe('useShortcutBridge', () => {
       } as unknown as Window['api'],
     });
     // Reset transient ui state that other tests may have left behind.
-    useUiStore.setState({ activeView: 'workspace', fullscreenPaneId: null, sidebarOpen: true });
+    useUiStore.setState({
+      activeView: 'workspace',
+      fullscreenPaneId: null,
+      sidebarOpen: true,
+      tabSearchOpen: false,
+      projectPaletteOpen: false,
+    });
   });
 
   afterEach(() => {
     Reflect.deleteProperty(window, 'api');
+  });
+
+  it('opens the project picker from Settings through the menu action', () => {
+    // Given: Settings is visible and tab search is open.
+    useUiStore.setState({ activeView: 'settings', tabSearchOpen: true, projectPaletteOpen: false });
+    render(<TestBridge />);
+    // When: the main menu invokes Open Project.
+    emit('ui.openProject');
+    // Then: the picker opens without changing the backing view.
+    expect(useUiStore.getState()).toMatchObject({
+      activeView: 'settings',
+      projectPaletteOpen: true,
+      tabSearchOpen: false,
+    });
+    useUiStore.setState({ projectPaletteOpen: false });
+  });
+
+  it('does not mutate the workspace behind an open picker', () => {
+    // Given: a picker overlays the workspace and tab creation is observable.
+    const previous = useWorkspaceStore.getState().addTab;
+    const addTab = vi.fn();
+    useWorkspaceStore.setState({ addTab });
+    useUiStore.getState().openProjectPalette();
+    render(<TestBridge />);
+
+    // When: the application menu invokes a workspace command.
+    emit('workspace.newTab');
+
+    // Then: modal input owns the interaction until dismissal.
+    expect(addTab).not.toHaveBeenCalled();
+    useWorkspaceStore.setState({ addTab: previous });
   });
 
   it('dispatches workspace.newTab to the workspace store addTab action', () => {

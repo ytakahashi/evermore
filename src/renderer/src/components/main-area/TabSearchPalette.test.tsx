@@ -50,6 +50,23 @@ function createRuntimeInfo(ptyId: string, foregroundCommand: string): PaneRuntim
 }
 
 describe('TabSearchPalette search helpers', () => {
+  it('excludes closed workspace tabs until the project is reopened', () => {
+    // Given: an open workspace and a closed project with a saved tab.
+    const open = createWorkspace('open', 'Open', [{ id: 'open-tab', name: 'Shell' }], 'open-tab');
+    const closed = {
+      ...createWorkspace('closed', 'Closed', [{ id: 'closed-tab', name: 'Server' }], 'closed-tab'),
+      isOpen: false,
+    };
+
+    // When: tabs are collected before and after reopening the project.
+    const before = createTabSearchEntries([open, closed], open.id);
+    const after = createTabSearchEntries([open, { ...closed, isOpen: true }], open.id);
+
+    // Then: only tabs whose terminals can be displayed are selectable.
+    expect(before.map((entry) => entry.tabId)).toEqual(['open-tab']);
+    expect(after.map((entry) => entry.tabId)).toEqual(['open-tab', 'closed-tab']);
+  });
+
   it('creates entries for every tab across all workspaces with pane titles', () => {
     // Given: two loaded workspaces with one active tab in the second workspace.
     const workspaces = [

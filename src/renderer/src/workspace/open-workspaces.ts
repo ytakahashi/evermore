@@ -1,0 +1,24 @@
+import type { Workspace } from '../../../shared/types';
+
+/**
+ * Returns the workspaces whose terminals are mounted, preserving storage order.
+ *
+ * Closed workspaces keep their layout and cwd but have no mounted panes, so every navigation surface
+ * (sidebar, tab search, move destinations) lists only these. Reopening goes through Open Project.
+ */
+export function getOpenWorkspaces(workspaces: readonly Workspace[]): Workspace[] {
+  return workspaces.filter((workspace) => workspace.isOpen);
+}
+
+/**
+ * Finds a workspace that may be activated or receive tabs.
+ *
+ * A closed workspace is rejected even when the id matches: activating it would show an empty
+ * terminal area, and moving a tab into it would unmount the tab's terminals and dispose live PTYs.
+ */
+export function findOpenWorkspace(
+  workspaces: readonly Workspace[],
+  id: string | null,
+): Workspace | undefined {
+  return workspaces.find((workspace) => workspace.id === id && workspace.isOpen);
+}

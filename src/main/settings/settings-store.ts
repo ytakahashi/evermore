@@ -1,6 +1,7 @@
 import { homedir } from 'node:os';
 import path from 'node:path';
 import Store from 'electron-store';
+import { normalizeAbsolutePath } from '../../shared/absolute-path';
 import type { SettingsUpdate } from '../../shared/api-types';
 import { isKeyboardShortcutActionId } from '../../shared/keyboard-shortcuts';
 import { cloneDefaultSettings, DEFAULT_APP_SETTINGS } from '../../shared/settings-defaults';
@@ -133,9 +134,9 @@ function normalizeProjectDirectory(value: unknown, homeDirectory: string): strin
     return null;
   }
 
-  // `path.normalize` keeps a trailing slash, which would let `/a/b` and `/a/b/` coexist as two
-  // entries. The root directory is the one path whose trailing slash must survive.
-  const normalized = path.normalize(expanded).replace(/(.)\/+$/, '$1');
+  // Shared with workspace creation and the renderer's project matching so `/a/b` and `/a/b/` are
+  // one directory everywhere.
+  const normalized = normalizeAbsolutePath(expanded);
   return normalized.length <= MAX_SETTINGS_STRING_LENGTH ? normalized : null;
 }
 

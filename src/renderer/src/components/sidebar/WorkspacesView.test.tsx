@@ -232,6 +232,49 @@ describe('WorkspacesView', () => {
     );
   });
 
+  it('hides closed projects and their tabs', () => {
+    // Given: home is open and a project retains a closed layout.
+    useWorkspaceStore.setState({ workspaces: [workspace1, { ...workspace2, isOpen: false }] });
+
+    // When: the sidebar is rendered.
+    render(<WorkspacesView />);
+
+    // Then: only the open workspace and its tabs are navigable.
+    expect(screen.getByRole('button', { name: 'Default' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Project' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'server (2 panes)' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'logs (1 pane)' })).not.toBeInTheDocument();
+  });
+
+  it('shows a project and its tabs again once it is reopened', () => {
+    // Given: the sidebar is rendered while a project is closed.
+    useWorkspaceStore.setState({ workspaces: [workspace1, { ...workspace2, isOpen: false }] });
+    render(<WorkspacesView />);
+
+    // When: Open Project restores the project's open state.
+    act(() => useWorkspaceStore.setState({ workspaces: [workspace1, workspace2] }));
+
+    // Then: its existing workspace and tab controls become available again.
+    expect(screen.getByRole('button', { name: 'Project' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'server (2 panes)' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'logs (1 pane)' })).toBeInTheDocument();
+  });
+
+  it('does not offer closed projects as tab move destinations', () => {
+    // Given: two open workspaces and one closed project.
+    useWorkspaceStore.setState({
+      workspaces: [workspace1, workspace2, { ...newWorkspace, isOpen: false }],
+    });
+    render(<WorkspacesView />);
+
+    // When: a tab's context menu offers workspace destinations.
+    fireEvent.contextMenu(screen.getByRole('button', { name: 'server (2 panes)' }));
+
+    // Then: moving a tab cannot activate a project whose terminals are unmounted.
+    expect(screen.getByRole('menuitem', { name: 'Default' })).toBeInTheDocument();
+    expect(screen.queryByRole('menuitem', { name: 'New' })).not.toBeInTheDocument();
+  });
+
   it('shows running pane info when runtime state is available', () => {
     // Given: one pane has a PTY runtime info snapshot.
     usePaneInfoStore.setState({
@@ -911,83 +954,18 @@ describe('WorkspacesView', () => {
     ).toHaveLength(2);
   });
 
-  it('creates a workspace from the inline input and calls the API', async () => {
+  it('opens the project picker without creating a workspace directly', () => {
     // Given: the sidebar is rendered with two workspaces.
+    useUiStore.setState({ projectPaletteOpen: false });
     render(<WorkspacesView />);
 
-    // When: the user opens the create input and submits a name.
-    fireEvent.click(screen.getByRole('button', { name: 'New workspace' }));
-    const input = screen.getByPlaceholderText('Workspace name');
-    fireEvent.change(input, { target: { value: 'My Project' } });
-    fireEvent.keyDown(input, { key: 'Enter' });
+    // When: the user opens a project from the sidebar header.
+    fireEvent.click(screen.getByRole('button', { name: 'Open Project' }));
 
-    // workspaceCreate is invoked synchronously inside the async createWorkspace action.
-    expect(workspaceCreate).toHaveBeenCalledWith('My Project', '');
-
-    // Flush the resolved Promise so the store's setState completes.
-    await vi.advanceTimersByTimeAsync(0);
-
-    // Then: the new workspace appears in the sidebar and becomes active.
-    expect(useWorkspaceStore.getState().workspaces).toHaveLength(3);
-    expect(useWorkspaceStore.getState().activeWorkspaceId).toBe('workspace-new');
-  });
-
-  it('uses the default name when the create input is submitted empty', async () => {
-    // Given: the sidebar is rendered.
-    render(<WorkspacesView />);
-
-    // When: the user opens the create input and presses Enter without typing.
-    fireEvent.click(screen.getByRole('button', { name: 'New workspace' }));
-    const input = screen.getByPlaceholderText('Workspace name');
-    fireEvent.keyDown(input, { key: 'Enter' });
-
-    // Then: the default name is sent to the API.
-    expect(workspaceCreate).toHaveBeenCalledWith('Workspace', '');
-  });
-
-  it('cancels workspace creation with Escape and does not call the API', async () => {
-    // Given: the create input is shown.
-    render(<WorkspacesView />);
-    fireEvent.click(screen.getByRole('button', { name: 'New workspace' }));
-    const input = screen.getByPlaceholderText('Workspace name');
-    fireEvent.change(input, { target: { value: 'Draft' } });
-
-    // When: Escape is pressed.
-    fireEvent.keyDown(input, { key: 'Escape' });
-
-    // Then: the input disappears without creating a workspace.
-    expect(screen.queryByPlaceholderText('Workspace name')).not.toBeInTheDocument();
+    // Then: project selection owns creation and no blank-root workspace is created.
+    expect(useUiStore.getState().projectPaletteOpen).toBe(true);
     expect(workspaceCreate).not.toHaveBeenCalled();
-  });
-
-  it('cancels workspace creation when the input loses focus without Enter/Escape', () => {
-    // Given: the create input is open with a draft.
-    render(<WorkspacesView />);
-    fireEvent.click(screen.getByRole('button', { name: 'New workspace' }));
-    const input = screen.getByPlaceholderText('Workspace name');
-    fireEvent.change(input, { target: { value: 'Draft' } });
-
-    // When: the input loses focus without an explicit confirmation.
-    fireEvent.blur(input);
-
-    // Then: no workspace is created.
-    expect(workspaceCreate).not.toHaveBeenCalled();
-    expect(screen.queryByPlaceholderText('Workspace name')).not.toBeInTheDocument();
-  });
-
-  it('does not create a workspace when Escape fires a blur on DOM removal', async () => {
-    // Given: the create input is open.
-    render(<WorkspacesView />);
-    fireEvent.click(screen.getByRole('button', { name: 'New workspace' }));
-    const input = screen.getByPlaceholderText('Workspace name');
-    fireEvent.change(input, { target: { value: 'Draft' } });
-
-    // When: Escape is pressed and a blur fires immediately after (simulating browser DOM removal).
-    fireEvent.keyDown(input, { key: 'Escape' });
-    fireEvent.blur(input);
-
-    // Then: no workspace is created.
-    expect(workspaceCreate).not.toHaveBeenCalled();
+    useUiStore.setState({ projectPaletteOpen: false });
   });
 
   it('renames a workspace with Enter and persists the new name', async () => {

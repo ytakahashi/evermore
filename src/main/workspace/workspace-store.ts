@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { homedir } from 'node:os';
 import path from 'node:path';
 import Store from 'electron-store';
+import { normalizeAbsolutePath } from '../../shared/absolute-path';
 import { getPathBasename } from '../../shared/path-label';
 import type { Pane, PaneLayout, Tab, Workspace, WorkspaceKind } from '../../shared/types';
 import { canDeleteWorkspace, findFallbackWorkspace } from '../../shared/workspace-kind';
@@ -349,10 +350,15 @@ export class WorkspaceStore {
    */
   public create(name: string, rootPath: string): Workspace {
     const timestamp = this.now();
+    // Absolute roots are normalized here rather than trusted from the renderer, so equivalent
+    // spellings (`/a/b/`, `/a/./b`) persist as the one key the Open Project picker matches on.
+    const normalizedRootPath = rootPath.startsWith('/')
+      ? normalizeAbsolutePath(rootPath)
+      : rootPath;
     const workspace = this.createWorkspace(
       name,
       'project',
-      rootPath || this.getHomeDirectory(),
+      normalizedRootPath || this.getHomeDirectory(),
       timestamp,
     );
     const workspaces = this.normalizeWorkspacesForStorage([...this.ensureWorkspaces(), workspace]);

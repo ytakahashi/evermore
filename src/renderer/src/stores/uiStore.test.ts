@@ -1,5 +1,11 @@
 import { afterEach, describe, expect, it } from 'vite-plus/test';
-import { SIDEBAR_DEFAULT_WIDTH, SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH, useUiStore } from './uiStore';
+import {
+  SIDEBAR_DEFAULT_WIDTH,
+  SIDEBAR_MAX_WIDTH,
+  SIDEBAR_MIN_WIDTH,
+  selectIsWorkspaceInteractive,
+  useUiStore,
+} from './uiStore';
 
 describe('useUiStore', () => {
   afterEach(() => {
@@ -10,6 +16,10 @@ describe('useUiStore', () => {
       sidebarWidth: SIDEBAR_DEFAULT_WIDTH,
       activeView: 'workspace',
       tabSearchOpen: false,
+      projectPaletteOpen: false,
+      projectPaletteFocusRequest: 0,
+      settingsSection: 'terminal',
+      terminalFocusRequest: 0,
     });
   });
 
@@ -155,6 +165,31 @@ describe('useUiStore', () => {
     expect(useUiStore.getState().tabSearchOpen).toBe(false);
   });
 
+  it('opens settings at an explicit section and retains it for ordinary navigation', () => {
+    // Given: a different section is selected.
+    useUiStore.getState().openSettings('about');
+    // When: a deep link arrives while Settings is already visible.
+    useUiStore.getState().openSettings('projects');
+    useUiStore.getState().showWorkspaceView();
+    useUiStore.getState().openSettings();
+    // Then: Projects remains selected.
+    expect(useUiStore.getState().settingsSection).toBe('projects');
+    expect(useUiStore.getState().activeView).toBe('settings');
+  });
+
+  it('keeps project and tab palettes mutually exclusive', () => {
+    // Given: tab search is open.
+    useUiStore.getState().openTabSearch();
+    // When: project search opens, then tab search replaces it.
+    useUiStore.getState().openProjectPalette();
+    expect(useUiStore.getState().tabSearchOpen).toBe(false);
+    expect(useUiStore.getState().projectPaletteOpen).toBe(true);
+    useUiStore.getState().openTabSearch();
+    // Then: only tab search remains visible.
+    expect(useUiStore.getState().projectPaletteOpen).toBe(false);
+    expect(useUiStore.getState().tabSearchOpen).toBe(true);
+  });
+
   it('updates the active sidebar view', () => {
     // Given: the default workspaces view is selected.
 
@@ -248,5 +283,20 @@ describe('useUiStore', () => {
 
     // Then: the sidebar width falls back to the default.
     expect(useUiStore.getState().sidebarWidth).toBe(SIDEBAR_DEFAULT_WIDTH);
+  });
+
+  it('treats the workspace as interactive only when it is visible and no picker covers it', () => {
+    // Given: each picker open over the workspace, and the workspace hidden behind Settings.
+    const closed = {
+      activeView: 'workspace',
+      projectPaletteOpen: false,
+      tabSearchOpen: false,
+    } as const;
+
+    // When / Then: only the uncovered, visible workspace accepts workspace input.
+    expect(selectIsWorkspaceInteractive(closed)).toBe(true);
+    expect(selectIsWorkspaceInteractive({ ...closed, projectPaletteOpen: true })).toBe(false);
+    expect(selectIsWorkspaceInteractive({ ...closed, tabSearchOpen: true })).toBe(false);
+    expect(selectIsWorkspaceInteractive({ ...closed, activeView: 'settings' })).toBe(false);
   });
 });

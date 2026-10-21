@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef } from 'react';
 import { flattenLayout } from '../../../../shared/pane-layout';
 import { useUiStore } from '../../stores/uiStore';
 import { useWorkspaceStore } from '../../stores/workspaceStore';
+import { getOpenWorkspaces } from '../../workspace/open-workspaces';
 import { PaneCell } from './PaneCell';
 import { PaneSplitters } from './PaneSplitters';
 import { TabBar } from './TabBar';
@@ -37,7 +38,7 @@ export function MainTerminalArea(): React.JSX.Element {
   const isFullscreenLayout = activeFullscreenPaneId !== null;
   const renderedPanes = useMemo(
     () =>
-      workspaces.flatMap((workspace) => {
+      getOpenWorkspaces(workspaces).flatMap((workspace) => {
         const isActiveWorkspace = workspace.id === activeWorkspaceId;
 
         return workspace.tabs.flatMap((tab) => {
@@ -112,7 +113,7 @@ export function MainTerminalArea(): React.JSX.Element {
   } else if (workspaces.length > 0) {
     content = (
       <div className="relative h-full min-h-0 w-full">
-        {/* Every pane of every workspace is mounted in one flat list keyed by `pane.id`. Keeping a
+        {/* Every pane of every open workspace is mounted in one flat list keyed by `pane.id`. Keeping a
             pane at a stable position in the React tree (independent of which tab or workspace owns
             it) means React preserves the live PTY/xterm when its layout ownership changes.
             `pane.id` is guaranteed globally unique by the main-process `WorkspaceStore`.

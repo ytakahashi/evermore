@@ -162,6 +162,18 @@ describe('WorkspaceStore', () => {
     expect(store.list()).toEqual([defaultWorkspace]);
   });
 
+  it('normalizes an absolute root path before persisting a created workspace', () => {
+    // Given: the default workspace exists.
+    store.list();
+
+    // When: a project is created with a redundant spelling of its root.
+    const projectWorkspace = store.create('Project', '/Users/tester//project/./');
+
+    // Then: the stored root and initial pane cwd use the normalized path.
+    expect(store.get(projectWorkspace.id)?.rootPath).toBe('/Users/tester/project');
+    expect(store.get(projectWorkspace.id)?.panes[0]?.cwd).toBe('/Users/tester/project');
+  });
+
   it('does not persist runtime pane state', () => {
     // Given: a workspace update includes runtime pane state from the renderer.
     const workspace = store.list()[0];

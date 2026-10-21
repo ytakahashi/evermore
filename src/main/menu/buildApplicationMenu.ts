@@ -96,6 +96,7 @@ export function buildApplicationMenu(
   const fileMenu: MenuItemConstructorOptions = {
     label: 'File',
     submenu: [
+      actionItem('ui.openProject', options),
       actionItem('workspace.newTab', options),
       actionItem('workspace.closeTab', options),
       { type: 'separator' },

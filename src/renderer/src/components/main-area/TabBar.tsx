@@ -10,6 +10,7 @@ import { Plus, X } from 'lucide-react';
 import { useTabDragStore } from '../../stores/tabDragStore';
 import { selectActiveWorkspace, useWorkspaceStore } from '../../stores/workspaceStore';
 import { requestTabClose } from '../../tab-close/tabClose';
+import { getOpenWorkspaces } from '../../workspace/open-workspaces';
 import { ContextMenu } from '../common/ContextMenu';
 import { hasActionableItem, type ContextMenuItem } from '../common/contextMenuItems';
 import { resolveDropEdge, toReorderIndex, TAB_DND_MIME, type DropEdge } from '../common/tabDnd';
@@ -70,7 +71,10 @@ export function TabBar(): React.JSX.Element {
       },
     ];
 
-    const otherWorkspaces = workspaces.filter((workspace) => workspace.id !== activeWorkspace.id);
+    // Closed projects are not destinations: moving a tab there would unmount its live terminals.
+    const otherWorkspaces = getOpenWorkspaces(workspaces).filter(
+      (workspace) => workspace.id !== activeWorkspace.id,
+    );
     // Moving out the last tab would leave the workspace empty, so the destinations are only offered
     // when another tab remains behind.
     if (otherWorkspaces.length > 0 && activeWorkspace.tabs.length > 1) {

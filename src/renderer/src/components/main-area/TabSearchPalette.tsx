@@ -9,9 +9,16 @@ const MAX_VISIBLE_RESULTS = 12;
 
 /**
  * Renders a VS Code-style quick picker for jumping to any loaded tab by tab name.
+ *
+ * The picker is mounted only while open so each session starts with a fresh query and selection,
+ * including when another picker replaces it without going through `close`.
  */
 export function TabSearchPalette(): React.JSX.Element | null {
   const isOpen = useUiStore((state) => state.tabSearchOpen);
+  return isOpen ? <TabPicker /> : null;
+}
+
+function TabPicker(): React.JSX.Element {
   const closeTabSearch = useUiStore((state) => state.closeTabSearch);
   const setActiveView = useUiStore((state) => state.setActiveView);
   const workspaces = useWorkspaceStore((state) => state.workspaces);
@@ -32,22 +39,14 @@ export function TabSearchPalette(): React.JSX.Element | null {
   );
 
   useEffect(() => {
-    if (isOpen) {
-      inputRef.current?.focus();
-    }
-  }, [isOpen]);
-
-  if (!isOpen) {
-    return null;
-  }
+    inputRef.current?.focus();
+  }, []);
 
   const clampedSelectedIndex =
     filteredEntries.length === 0 ? 0 : Math.min(selectedIndex, filteredEntries.length - 1);
   const selectedEntry = filteredEntries[clampedSelectedIndex] ?? null;
 
   const close = (): void => {
-    setQuery('');
-    setSelectedIndex(0);
     closeTabSearch();
   };
 

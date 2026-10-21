@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import type { KeyboardShortcutActionId } from '../../../shared/keyboard-shortcuts';
-import { useUiStore } from '../stores/uiStore';
+import { selectIsWorkspaceInteractive, useUiStore } from '../stores/uiStore';
 import { requestTabClose } from '../tab-close/tabClose';
 import {
   selectActivePane,
@@ -19,7 +19,8 @@ import {
  *
  * Context guards:
  *  - `workspace.*` and `pane.*` actions are no-ops while the Settings view is active so a stray
- *    `Cmd+T` does not silently create tabs the user cannot see.
+ *    `Cmd+T` does not silently create tabs the user cannot see. Open pickers also suspend these
+ *    actions to keep workspace mutations from running behind modal input.
  *  - `pane.split*` and `pane.focus*` are no-ops while a pane is in fullscreen so the layout cannot
  *    mutate underneath the focused pane.
  *  - `pane.toggleFullscreen` runs in either fullscreen state (that is the toggle), but is still
@@ -38,7 +39,7 @@ export function useShortcutBridge(): void {
 
 function handleShortcut(actionId: KeyboardShortcutActionId): void {
   const uiState = useUiStore.getState();
-  const isWorkspaceView = uiState.activeView === 'workspace';
+  const isWorkspaceView = selectIsWorkspaceInteractive(uiState);
   const isFullscreen = uiState.fullscreenPaneId !== null;
   const workspace = useWorkspaceStore.getState();
 
@@ -105,6 +106,9 @@ function handleShortcut(actionId: KeyboardShortcutActionId): void {
       uiState.setFullscreenPaneId(activePane.id);
       return;
     }
+    case 'ui.openProject':
+      uiState.openProjectPalette();
+      return;
     case 'ui.openTabSearch':
       uiState.openTabSearch();
       return;

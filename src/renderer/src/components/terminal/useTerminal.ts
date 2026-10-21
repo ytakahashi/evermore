@@ -6,6 +6,7 @@ import { Terminal } from '@xterm/xterm';
 import { terminalHostRegistry } from '../../terminal-host/terminalHostRegistry';
 import { useResizeObserver } from '../../hooks/useResizeObserver';
 import { DEFAULT_APP_SETTINGS } from '../../../../shared/settings-defaults';
+import { selectIsWorkspaceInteractive, useUiStore } from '../../stores/uiStore';
 import { useSettingsStore } from '../../stores/settingsStore';
 import { attachCommandBlocks } from './command-blocks';
 import { terminalTheme } from './theme';
@@ -33,6 +34,10 @@ interface UseTerminalResult {
  * reports the PTY id to the caller and never interprets the terminal input stream.
  */
 export function useTerminal(options: UseTerminalOptions): UseTerminalResult {
+  // Subscribe to a boolean rather than `activeView` so unrelated view changes do not re-render
+  // every mounted terminal.
+  const isWorkspaceView = useUiStore((state) => state.activeView === 'workspace');
+  const terminalFocusRequest = useUiStore((state) => state.terminalFocusRequest);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const terminalRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
@@ -78,7 +83,8 @@ export function useTerminal(options: UseTerminalOptions): UseTerminalResult {
   });
 
   const focusIfActive = useCallback((): void => {
-    if (isActiveRef.current) {
+    // Delayed PTY creation and resize callbacks must not steal a palette or settings focus.
+    if (isActiveRef.current && selectIsWorkspaceInteractive(useUiStore.getState())) {
       terminalRef.current?.focus();
     }
   }, []);
@@ -316,9 +322,11 @@ export function useTerminal(options: UseTerminalOptions): UseTerminalResult {
     };
   }, [copyOnSelect]);
 
+  // Closing a picker is deliberately not a trigger: a canceled picker restores the focus it found,
+  // and only a completed selection asks for terminal focus via `terminalFocusRequest`.
   useEffect(() => {
     focusIfActive();
-  }, [focusIfActive, options.isActive]);
+  }, [focusIfActive, options.isActive, isWorkspaceView, terminalFocusRequest]);
 
   return { containerRef };
 }

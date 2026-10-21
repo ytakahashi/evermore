@@ -259,11 +259,16 @@ The renderer is a single React 19 app rendered into `#root` by `main.tsx` with `
   rule and the fallback used when the active workspace goes away (home first) live in
   `shared/workspace-kind.ts` so main and renderer apply the same policy. Home is identified by
   `kind`, never by `rootPath === homedir`, so `~` opened as a project stays distinct.
-- **All workspaces stay mounted; non-active ones use `display:none`.** This keeps each workspace's
-  PTYs alive across workspace switches (the active workspace's inactive tabs use `opacity-0` so a
-  tab switch reveals an already-sized terminal). The cost is eager PTY creation for every loaded
-  workspace, and `display:none` can let a hidden xterm drift to the fallback PTY size; both are
-  accepted because keeping PTYs alive is the higher priority.
+- **All open workspaces stay mounted; non-active ones use `display:none`.** This keeps each
+  workspace's PTYs alive across workspace switches (the active workspace's inactive tabs use
+  `opacity-0` so a tab switch reveals an already-sized terminal). The cost is eager PTY creation for
+  every open workspace, and `display:none` can let a hidden xterm drift to the fallback PTY size;
+  both are accepted because keeping PTYs alive is the higher priority. Closed workspaces retain
+  their layout and cwd in state but mount terminals only when reopened.
+- **Only Open Project reopens a closed workspace.** Navigation surfaces (sidebar, tab search, tab
+  move destinations) list open workspaces only, and `workspaceStore` refuses to activate, select
+  into, or move tabs into a closed one. Activating it would show an empty terminal area, and moving
+  a tab into it would unmount the tab's terminals and dispose their live PTYs.
 - **The renderer must not block on IPC errors.** Connection / tunnel stores preserve the last
   successful snapshot on failure so the sidebar keeps showing usable controls.
 - **Workspace persistence is debounced** in the renderer (`workspaceStore`) and flushed via
