@@ -367,7 +367,7 @@ export default defineConfig({
     include: [
       'build/**/*.test.ts',
       'src/{main,renderer/src,shared}/**/*.test.{ts,tsx}',
-      'tests/**/*.test.ts',
+      'tests/**/*.test.{ts,tsx}',
     ],
     setupFiles: ['./tests/setup.ts'],
   },

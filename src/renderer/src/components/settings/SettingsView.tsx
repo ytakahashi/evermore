@@ -1,6 +1,5 @@
-import { useState } from 'react';
 import { X } from 'lucide-react';
-import { useUiStore } from '../../stores/uiStore';
+import { useUiStore, type SettingsSectionId } from '../../stores/uiStore';
 import { AboutSection } from './sections/AboutSection';
 import { AdvancedFeaturesSection } from './sections/AdvancedFeaturesSection';
 import { AIIntegrationSection } from './sections/AIIntegrationSection';
@@ -11,18 +10,6 @@ import { ProjectsSection } from './sections/ProjectsSection';
 import { RecommendedSetupSection } from './sections/RecommendedSetupSection';
 import { ShortcutsSection } from './sections/ShortcutsSection';
 import { TerminalSection } from './sections/TerminalSection';
-
-type SettingsSectionId =
-  | 'terminal'
-  | 'paneInfo'
-  | 'shortcuts'
-  | 'application'
-  | 'projects'
-  | 'recommendedSetup'
-  | 'aiIntegration'
-  | 'notifications'
-  | 'advancedFeatures'
-  | 'about';
 
 interface SectionDefinition {
   id: SettingsSectionId;
@@ -46,14 +33,13 @@ const SECTIONS: readonly SectionDefinition[] = [
 /**
  * Settings panel rendered in the main pane area when `activeView === 'settings'`.
  *
- * Currently only the panel shell, the section navigation, and the About section are wired up; the
- * remaining sections render placeholder copy until their controls are added. The visibility of the
- * panel is owned by `AppShell` (display:none toggle), so this component does not gate its own
- * rendering on `activeView`.
+ * Section navigation is renderer UI state so other views can link directly to a section.
+ * AppShell owns visibility while preserving this view across navigation.
  */
 export function SettingsView(): React.JSX.Element {
   const showWorkspaceView = useUiStore((state) => state.showWorkspaceView);
-  const [activeSection, setActiveSection] = useState<SettingsSectionId>('terminal');
+  const activeSection = useUiStore((state) => state.settingsSection);
+  const setActiveSection = useUiStore((state) => state.setSettingsSection);
   const ActiveComponent =
     SECTIONS.find((section) => section.id === activeSection)?.Component ?? TerminalSection;
 

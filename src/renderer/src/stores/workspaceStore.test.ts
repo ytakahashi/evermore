@@ -399,7 +399,7 @@ describe('workspaceStore', () => {
     expect(useStore.getState().isLoading).toBe(false);
   });
 
-  it('adds a tab with a new pane rooted at the current active pane cwd', async () => {
+  it('adds a tab rooted at the workspace even after the active pane changes directories', async () => {
     // Given: a loaded workspace with a deterministic id generator.
     vi.useFakeTimers();
     const ids = ['tab-2', 'pane-2'];
@@ -411,11 +411,12 @@ describe('workspaceStore', () => {
     });
     await useStore.getState().loadWorkspaces();
 
-    // When: a new tab is added.
+    // When: a pane moves outside the project and a new tab is added.
+    useStore.getState().updatePaneCwd('workspace-1-pane-1', '/elsewhere');
     useStore.getState().addTab();
     const updatedWorkspace = selectActiveWorkspace(useStore.getState());
 
-    // Then: the tab becomes active and its pane starts from the previous active cwd.
+    // Then: the new tab starts at rootPath rather than inheriting the changed cwd.
     expect(updatedWorkspace?.activeTabId).toBe('tab-2');
     expect(updatedWorkspace?.updatedAt).toBe(now);
     expect(updatedWorkspace?.tabs).toHaveLength(2);
@@ -1530,48 +1531,170 @@ describe('workspaceStore', () => {
     );
   });
 
-  it('creates a workspace, adds it to the list, and makes it active', async () => {
-    // Given: a loaded store and a mock that returns a new workspace.
-    const newWorkspace = createWorkspace('workspace-2', '/Users/tester/new');
-    workspaceApi.create = vi.fn(() => Promise.resolve(newWorkspace));
-    const useStore = createWorkspaceStore({ workspaceApi });
-    await useStore.getState().loadWorkspaces();
+  it('creates a project at its normalized root and makes it active', async () => {
+    // Given: a loaded store and a new durable project.
+    const project = createWorkspace('workspace-2', '/Users/tester/new');
+    workspaceApi.create = vi.fn().mockResolvedValue(project);
+    const store = createWorkspaceStore({ workspaceApi });
+    await store.getState().loadWorkspaces();
 
-    // When: a new workspace is created.
-    await useStore.getState().createWorkspace('new');
+    // When: the same directory is opened concurrently with equivalent spellings.
+    await Promise.all([
+      store.getState().openProject('/Users/tester/new/'),
+      store.getState().openProject('/Users/tester/./new'),
+    ]);
 
-    // Then: the store appends the workspace and switches to it.
-    expect(workspaceApi.create).toHaveBeenCalledWith('new', '');
-    expect(useStore.getState().workspaces).toHaveLength(2);
-    expect(useStore.getState().activeWorkspaceId).toBe('workspace-2');
+    // Then: only one project is created and activated.
+    expect(workspaceApi.create).toHaveBeenCalledExactlyOnceWith('new', '/Users/tester/new');
+    expect(store.getState().workspaces).toHaveLength(2);
+    expect(store.getState().activeWorkspaceId).toBe(project.id);
   });
 
-  it('trims the name and falls back to "Workspace" when the name is blank', async () => {
-    // Given: a store where create resolves to any workspace.
-    const newWorkspace = createWorkspace('workspace-2', '/Users/tester/new');
-    workspaceApi.create = vi.fn(() => Promise.resolve(newWorkspace));
-    const useStore = createWorkspaceStore({ workspaceApi });
-    await useStore.getState().loadWorkspaces();
+  it('switches to an open project without recreating or updating it', async () => {
+    // Given: a project with a live pane alongside home.
+    const project = createWorkspace('workspace-2', '/project');
+    project.panes[0].ptyId = 'live';
+    const store = createWorkspaceStore({ workspaceApi });
+    store.setState({ workspaces: [workspace, project], activeWorkspaceId: workspace.id });
 
-    // When: createWorkspace is called with a blank name.
-    await useStore.getState().createWorkspace('   ');
+    // When: an already open project is selected.
+    await store.getState().openProject('/project');
 
-    // Then: the main process receives the default name.
-    expect(workspaceApi.create).toHaveBeenCalledWith('Workspace', '');
+    // Then: the existing object and PTY survive.
+    expect(store.getState().workspaces[1]).toBe(project);
+    expect(store.getState().activeWorkspaceId).toBe(project.id);
+    expect(workspaceApi.create).not.toHaveBeenCalled();
+    expect(workspaceApi.update).not.toHaveBeenCalled();
   });
 
-  it('stores an error when createWorkspace fails', async () => {
-    // Given: the workspace API rejects on create.
-    workspaceApi.create = vi.fn(() => Promise.reject(new Error('create failed')));
-    const useStore = createWorkspaceStore({ workspaceApi });
-    await useStore.getState().loadWorkspaces();
+  it('reopens a closed project while retaining edits made during IPC', async () => {
+    // Given: a closed project with a saved pane cwd and a deferred update.
+    vi.useFakeTimers();
+    const project = createWorkspace('workspace-2', '/project');
+    project.isOpen = false;
+    project.panes[0].cwd = '/project/subdir';
+    let finish!: () => void;
+    workspaceApi.update = vi
+      .fn()
+      .mockImplementationOnce(
+        () =>
+          new Promise<void>((resolve) => {
+            finish = resolve;
+          }),
+      )
+      .mockResolvedValue(undefined);
+    const store = createWorkspaceStore({ workspaceApi });
+    store.setState({ workspaces: [workspace, project], activeWorkspaceId: workspace.id });
 
-    // When: creation is attempted.
-    await useStore.getState().createWorkspace('new');
+    // When: the project is renamed while the reopen request is in flight.
+    const pending = store.getState().openProject('/project');
+    store.getState().renameWorkspace(project.id, 'Renamed');
+    finish();
+    await pending;
+    await vi.advanceTimersByTimeAsync(300);
 
-    // Then: the error is surfaced and no workspace is added.
-    expect(useStore.getState().error).toBe('create failed');
-    expect(useStore.getState().workspaces).toHaveLength(1);
+    // Then: reopening preserves layout, cwd, identity, and the newer name in memory and storage.
+    const reopened = store.getState().workspaces[1];
+    expect(reopened).toMatchObject({
+      id: project.id,
+      isOpen: true,
+      name: 'Renamed',
+      tabs: project.tabs,
+      panes: project.panes,
+    });
+    expect(workspaceApi.update).toHaveBeenLastCalledWith(
+      expect.objectContaining({ isOpen: true, name: 'Renamed' }),
+    );
+  });
+
+  it('retains a created project when activation fails so retry does not duplicate it', async () => {
+    // Given: create succeeds but active-ID persistence fails once.
+    const project = createWorkspace('workspace-2', '/project');
+    workspaceApi.create = vi.fn().mockResolvedValue(project);
+    workspaceApi.setActiveWorkspaceId = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('activation failed'))
+      .mockResolvedValue(undefined);
+    const store = createWorkspaceStore({ workspaceApi });
+    store.setState({ workspaces: [workspace], activeWorkspaceId: workspace.id });
+
+    // When: the failed selection is retried.
+    await expect(store.getState().openProject('/project')).rejects.toThrow('activation failed');
+    expect(store.getState().activeWorkspaceId).toBe(workspace.id);
+    await store.getState().openProject('/project');
+
+    // Then: the durable create is reused.
+    expect(workspaceApi.create).toHaveBeenCalledOnce();
+    expect(store.getState().activeWorkspaceId).toBe(project.id);
+  });
+
+  it('preserves selection and closed state when reopening fails', async () => {
+    // Given: the update API rejects the reopen request.
+    const project = { ...createWorkspace('workspace-2', '/project'), isOpen: false };
+    workspaceApi.update = vi.fn().mockRejectedValue(new Error('save failed'));
+    const store = createWorkspaceStore({ workspaceApi });
+    store.setState({ workspaces: [workspace, project], activeWorkspaceId: workspace.id });
+
+    // When: reopening fails.
+    await expect(store.getState().openProject('/project')).rejects.toThrow('save failed');
+
+    // Then: selection and durable mirror remain unchanged.
+    expect(store.getState().workspaces[1]).toBe(project);
+    expect(store.getState().activeWorkspaceId).toBe(workspace.id);
+    expect(store.getState().error).toBe('save failed');
+  });
+
+  it('stores an error when project creation fails', async () => {
+    // Given: creation rejects.
+    workspaceApi.create = vi.fn().mockRejectedValue(new Error('create failed'));
+    const store = createWorkspaceStore({ workspaceApi });
+    await store.getState().loadWorkspaces();
+
+    // When: opening requires a new project.
+    await expect(store.getState().openProject('/new')).rejects.toThrow('create failed');
+
+    // Then: the error is available without adding a workspace.
+    expect(store.getState().error).toBe('create failed');
+    expect(store.getState().workspaces).toHaveLength(1);
+  });
+
+  it('falls back to home when the persisted active workspace is closed', async () => {
+    // Given: main reports a closed project as the active workspace.
+    const closed = { ...createWorkspace('workspace-2', '/project'), isOpen: false };
+    workspaceApi.list = vi.fn(() =>
+      Promise.resolve({ workspaces: [closed, workspace], activeWorkspaceId: closed.id }),
+    );
+    const store = createWorkspaceStore({ workspaceApi });
+
+    // When: workspaces are loaded.
+    await store.getState().loadWorkspaces();
+
+    // Then: the open home workspace is selected instead.
+    expect(store.getState().activeWorkspaceId).toBe(workspace.id);
+    expect(selectActiveWorkspace(store.getState())).toBe(workspace);
+  });
+
+  it('refuses to activate or target a closed workspace outside Open Project', () => {
+    // Given: home is active with two tabs, and a project is closed.
+    const home = {
+      ...workspace,
+      tabs: [...workspace.tabs, { ...workspace.tabs[0], id: 'workspace-1-tab-2' }],
+    };
+    const closed = { ...createWorkspace('workspace-2', '/project'), isOpen: false };
+    const store = createWorkspaceStore({ workspaceApi });
+    store.setState({ workspaces: [home, closed], activeWorkspaceId: home.id });
+
+    // When: navigation and move actions name the closed workspace directly.
+    store.getState().setActiveWorkspace(closed.id);
+    store.getState().selectWorkspaceTab(closed.id, closed.tabs[0].id);
+    store.getState().selectWorkspacePane(closed.id, closed.tabs[0].id, closed.panes[0].id);
+    store.getState().addWorkspaceTab(closed.id);
+    store.getState().moveTabToWorkspace(home.id, home.tabs[0].id, closed.id);
+
+    // Then: selection, the closed layout, and the source tabs are unchanged.
+    expect(store.getState().activeWorkspaceId).toBe(home.id);
+    expect(store.getState().workspaces).toEqual([home, closed]);
+    expect(workspaceApi.setActiveWorkspaceId).not.toHaveBeenCalled();
   });
 
   it('deletes the active workspace and falls back to the home workspace', async () => {
@@ -1776,6 +1899,34 @@ describe('workspaceStore', () => {
       // Then: nothing changes.
       expect(selectActiveTab(useStore.getState())?.id).toBe('workspace-1-tab-1');
     });
+
+    it.each(['next', 'previous'] as const)(
+      'selectAdjacentTabGlobal skips closed workspaces when moving %s',
+      (direction) => {
+        // Given: closed projects separate the active home and another open project in both directions.
+        const closed = { ...createWorkspace('closed', '/closed'), isOpen: false };
+        const open = createWorkspace('open', '/open');
+        const lastClosed = { ...createWorkspace('last-closed', '/last-closed'), isOpen: false };
+        const useStore = createWorkspaceStore({ workspaceApi });
+        useStore.setState({
+          workspaces: [workspace, closed, open, lastClosed],
+          activeWorkspaceId: workspace.id,
+        });
+
+        // When: global tab navigation crosses a closed project.
+        useStore.getState().selectAdjacentTabGlobal(direction);
+
+        // Then: navigation reaches the open project without reopening either closed project.
+        expect(useStore.getState().activeWorkspaceId).toBe(open.id);
+        expect(selectActiveTab(useStore.getState())?.id).toBe(open.activeTabId);
+        expect(workspaceApi.setActiveWorkspaceId).toHaveBeenCalledExactlyOnceWith(open.id);
+        expect(workspaceApi.update).not.toHaveBeenCalled();
+        expect(useStore.getState().workspaces.filter((entry) => !entry.isOpen)).toEqual([
+          closed,
+          lastClosed,
+        ]);
+      },
+    );
 
     it('selectAdjacentTabGlobal crosses into the next workspace when at the end of the current one', async () => {
       // Given: two single-tab workspaces with the first workspace active.

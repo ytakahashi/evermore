@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { AgentsView } from '../agents/AgentsView';
 import { MainTerminalArea } from '../main-area/MainTerminalArea';
+import { OpenProjectPalette } from '../projects/OpenProjectPalette';
 import { TabSearchPalette } from '../main-area/TabSearchPalette';
 import { SettingsView } from '../settings/SettingsView';
 import { useUiStore } from '../../stores/uiStore';
@@ -74,6 +75,7 @@ export function AppShell(): React.JSX.Element {
             <AgentsView />
           </div>
           <TabSearchPalette />
+          <OpenProjectPalette />
         </div>
       </div>
     </div>

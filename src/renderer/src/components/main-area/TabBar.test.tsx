@@ -407,6 +407,25 @@ describe('TabBar', () => {
     expect(useWorkspaceStore.getState().activeWorkspaceId).toBe('workspace-2');
   });
 
+  it('does not offer a closed project as a move destination', () => {
+    // Given: a two-tab workspace, one open destination, and one closed project.
+    useWorkspaceStore.setState({
+      workspaces: [
+        twoTabWorkspace,
+        { ...workspace, id: 'workspace-2', name: 'Project', tabs: [], panes: [] },
+        { ...workspace, id: 'workspace-3', name: 'Closed', isOpen: false, tabs: [], panes: [] },
+      ],
+    });
+    render(<TabBar />);
+
+    // When: the tab's right-click menu lists destinations.
+    fireEvent.contextMenu(screen.getByRole('button', { name: 'zsh' }));
+
+    // Then: only the open workspace is offered, so live terminals cannot be moved out of view.
+    expect(screen.getByRole('menuitem', { name: 'Project' })).toBeInTheDocument();
+    expect(screen.queryByRole('menuitem', { name: 'Closed' })).not.toBeInTheDocument();
+  });
+
   it('reorders a tab by dragging it onto the trailing half of another tab', () => {
     // Given: a two-tab workspace rendered in the tab bar.
     useWorkspaceStore.setState({ workspaces: [twoTabWorkspace] });

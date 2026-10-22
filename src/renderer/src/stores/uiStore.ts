@@ -15,6 +15,19 @@ export type SidebarView = 'workspaces' | 'connections';
  */
 export type ActiveView = 'workspace' | 'settings' | 'agents';
 
+/** Settings navigation identifiers shared by the shell and settings view. */
+export type SettingsSectionId =
+  | 'terminal'
+  | 'paneInfo'
+  | 'shortcuts'
+  | 'application'
+  | 'projects'
+  | 'recommendedSetup'
+  | 'aiIntegration'
+  | 'notifications'
+  | 'advancedFeatures'
+  | 'about';
+
 interface UiStoreState {
   windowFullScreen: boolean;
   fullscreenPaneId: string | null;
@@ -24,6 +37,14 @@ interface UiStoreState {
   activeView: ActiveView;
   tabBarOpen: boolean;
   tabSearchOpen: boolean;
+  projectPaletteOpen: boolean;
+  projectPaletteFocusRequest: number;
+  settingsSection: SettingsSectionId;
+  terminalFocusRequest: number;
+  openProjectPalette: () => void;
+  closeProjectPalette: () => void;
+  focusWorkspace: () => void;
+  setSettingsSection: (section: SettingsSectionId) => void;
   clearFullscreen: () => void;
   setFullscreenPaneId: (paneId: string | null) => void;
   setSidebarView: (view: SidebarView) => void;
@@ -36,8 +57,8 @@ interface UiStoreState {
   openTabSearch: () => void;
   closeTabSearch: () => void;
   setWindowFullScreen: (isFullScreen: boolean) => void;
-  /** Switches the main pane to the SettingsView. Idempotent; no-op when already active. */
-  openSettings: () => void;
+  /** Opens Settings, retaining its last section unless an explicit destination is supplied. */
+  openSettings: (section?: SettingsSectionId) => void;
   /** Switches the main pane to the AgentsView. Idempotent; no-op when already active. */
   openAgents: () => void;
   /** Returns the main pane to the workspace view. Idempotent; no-op when already active. */
@@ -49,6 +70,23 @@ interface UiStoreState {
  * active main-area view). Nothing in this store is persisted to disk: persisted preferences live
  * in `useSettingsStore` and are written through the main-process settings file.
  */
+/**
+ * Returns whether a modal picker owns keyboard input. Every new picker must be added here so
+ * workspace commands and delayed terminal focus stay suspended behind it.
+ */
+export function selectIsPaletteOpen(
+  state: Pick<UiStoreState, 'projectPaletteOpen' | 'tabSearchOpen'>,
+): boolean {
+  return state.projectPaletteOpen || state.tabSearchOpen;
+}
+
+/** Returns whether the workspace is visible and not covered by a modal picker. */
+export function selectIsWorkspaceInteractive(
+  state: Pick<UiStoreState, 'activeView' | 'projectPaletteOpen' | 'tabSearchOpen'>,
+): boolean {
+  return state.activeView === 'workspace' && !selectIsPaletteOpen(state);
+}
+
 export const useUiStore = create<UiStoreState>((set, get) => ({
   windowFullScreen: false,
   fullscreenPaneId: null,
@@ -58,6 +96,23 @@ export const useUiStore = create<UiStoreState>((set, get) => ({
   activeView: 'workspace',
   tabBarOpen: false,
   tabSearchOpen: false,
+  projectPaletteOpen: false,
+  projectPaletteFocusRequest: 0,
+  settingsSection: 'terminal',
+  terminalFocusRequest: 0,
+  openProjectPalette: () =>
+    set((state) => ({
+      projectPaletteOpen: true,
+      tabSearchOpen: false,
+      projectPaletteFocusRequest: state.projectPaletteFocusRequest + 1,
+    })),
+  closeProjectPalette: () => set({ projectPaletteOpen: false }),
+  focusWorkspace: () =>
+    set((state) => ({
+      activeView: 'workspace',
+      terminalFocusRequest: state.terminalFocusRequest + 1,
+    })),
+  setSettingsSection: (settingsSection) => set({ settingsSection }),
   clearFullscreen: () => {
     set({ fullscreenPaneId: null });
   },
@@ -102,7 +157,7 @@ export const useUiStore = create<UiStoreState>((set, get) => ({
     set((state) => ({ tabBarOpen: !state.tabBarOpen }));
   },
   openTabSearch: () => {
-    set({ tabSearchOpen: true });
+    set({ tabSearchOpen: true, projectPaletteOpen: false });
   },
   closeTabSearch: () => {
     set({ tabSearchOpen: false });
@@ -110,10 +165,8 @@ export const useUiStore = create<UiStoreState>((set, get) => ({
   setWindowFullScreen: (isFullScreen) => {
     set({ windowFullScreen: isFullScreen });
   },
-  openSettings: () => {
-    if (get().activeView !== 'settings') {
-      set({ activeView: 'settings' });
-    }
+  openSettings: (section) => {
+    set({ activeView: 'settings', settingsSection: section ?? get().settingsSection });
   },
   openAgents: () => {
     if (get().activeView !== 'agents') {

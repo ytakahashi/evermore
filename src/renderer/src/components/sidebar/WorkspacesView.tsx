@@ -1,5 +1,6 @@
 import {
   useEffect,
+  useMemo,
   useRef,
   useState,
   type DragEvent,
@@ -18,6 +19,7 @@ import { useTabDragStore, type TabDragDescriptor } from '../../stores/tabDragSto
 import { useUiStore } from '../../stores/uiStore';
 import { useWorkspaceStore } from '../../stores/workspaceStore';
 import { requestTabClose } from '../../tab-close/tabClose';
+import { getOpenWorkspaces } from '../../workspace/open-workspaces';
 import { ContextMenu } from '../common/ContextMenu';
 import { hasActionableItem, type ContextMenuItem } from '../common/contextMenuItems';
 import { getPaneRunningIndicator } from '../common/pane-running-indicator';
@@ -191,10 +193,12 @@ function PaneSummary({
 
 export function WorkspacesView(): React.JSX.Element {
   const workspaces = useWorkspaceStore((state) => state.workspaces);
+  // Closed projects must be reopened through Open Project before navigation or tab moves.
+  const openWorkspaces = useMemo(() => getOpenWorkspaces(workspaces), [workspaces]);
   const paneInfosByPtyId = usePaneInfoStore((state) => state.infosByPtyId);
   const activeWorkspaceId = useWorkspaceStore((state) => state.activeWorkspaceId);
   const addWorkspaceTab = useWorkspaceStore((state) => state.addWorkspaceTab);
-  const createWorkspace = useWorkspaceStore((state) => state.createWorkspace);
+  const openProjectPalette = useUiStore((state) => state.openProjectPalette);
   const deleteWorkspace = useWorkspaceStore((state) => state.deleteWorkspace);
   const renameWorkspace = useWorkspaceStore((state) => state.renameWorkspace);
   const renameWorkspaceTab = useWorkspaceStore((state) => state.renameWorkspaceTab);
@@ -238,13 +242,6 @@ export function WorkspacesView(): React.JSX.Element {
     | null
   >(null);
 
-  // Inline workspace creation state
-  const [isCreating, setIsCreating] = useState(false);
-  const [createDraft, setCreateDraft] = useState('');
-  const createInputRef = useRef<HTMLInputElement | null>(null);
-  // Tracks whether Enter/Escape already handled the create action so onBlur skips it.
-  const createHandledRef = useRef(false);
-
   // Workspace inline rename state (mirrors the TabBar rename pattern)
   const [editingWorkspaceId, setEditingWorkspaceId] = useState<string | null>(null);
   const [renameDraft, setRenameDraft] = useState('');
@@ -282,11 +279,6 @@ export function WorkspacesView(): React.JSX.Element {
   }
 
   useEffect(() => {
-    if (!isCreating) return;
-    createInputRef.current?.focus();
-  }, [isCreating]);
-
-  useEffect(() => {
     if (!editingWorkspaceId) return;
     renameInputRef.current?.focus();
     renameInputRef.current?.select();
@@ -297,48 +289,6 @@ export function WorkspacesView(): React.JSX.Element {
     tabRenameInputRef.current?.focus();
     tabRenameInputRef.current?.select();
   }, [editingTab]);
-
-  // --- Create handlers ---
-
-  const startCreating = (): void => {
-    setIsCreating(true);
-    setCreateDraft('');
-  };
-
-  const cancelCreating = (): void => {
-    createHandledRef.current = false;
-    setIsCreating(false);
-    setCreateDraft('');
-  };
-
-  const commitCreating = (): void => {
-    const name = createDraft.trim() || 'Workspace';
-    void createWorkspace(name);
-    // Mark as handled before calling cancelCreating so the blur that fires on DOM removal skips it.
-    createHandledRef.current = true;
-    cancelCreating();
-  };
-
-  const handleCreateKeyDown = (event: KeyboardEvent<HTMLInputElement>): void => {
-    if (event.key === 'Enter') {
-      event.preventDefault();
-      commitCreating();
-    } else if (event.key === 'Escape') {
-      event.preventDefault();
-      // Mark as handled so the blur that fires on DOM removal does not also cancel.
-      createHandledRef.current = true;
-      cancelCreating();
-    }
-  };
-
-  const handleCreateBlur = (): void => {
-    if (createHandledRef.current) {
-      createHandledRef.current = false;
-      return;
-    }
-    // Blur without Enter/Escape: cancel (don't create unexpectedly on accidental focus loss).
-    cancelCreating();
-  };
 
   // --- Rename handlers ---
 
@@ -470,7 +420,7 @@ export function WorkspacesView(): React.JSX.Element {
       },
     ];
 
-    const otherWorkspaces = workspaces.filter(
+    const otherWorkspaces = openWorkspaces.filter(
       (currentWorkspace) => currentWorkspace.id !== workspaceId,
     );
     // Moving out the last tab would leave the workspace empty, so the destinations are only offered
@@ -884,15 +834,16 @@ export function WorkspacesView(): React.JSX.Element {
         <span>Workspaces</span>
         <button
           className="flex size-4 items-center justify-center rounded hover:bg-raised hover:text-foreground"
-          title="New workspace"
+          aria-label="Open Project"
+          title="Open Project"
           type="button"
-          onClick={startCreating}
+          onClick={openProjectPalette}
         >
           <Plus size={12} />
         </button>
       </div>
       <div className="space-y-0.5">
-        {workspaces.map((workspace) => {
+        {openWorkspaces.map((workspace) => {
           const isActive = workspace.id === activeWorkspaceId;
           const isEditing = workspace.id === editingWorkspaceId;
           const isExpanded = !collapsedWorkspaceIds.has(workspace.id);
@@ -1152,22 +1103,6 @@ export function WorkspacesView(): React.JSX.Element {
             </div>
           );
         })}
-        {isCreating && (
-          <div className="flex items-center gap-2 rounded-md px-2 py-1">
-            <Plus size={14} className="shrink-0 text-subtle" />
-            <input
-              ref={createInputRef}
-              className="min-w-0 flex-1 rounded border border-brand/60 bg-panel px-1.5 py-0.5 text-sm text-foreground outline-none"
-              placeholder="Workspace name"
-              value={createDraft}
-              onBlur={handleCreateBlur}
-              onChange={(event) => {
-                setCreateDraft(event.target.value);
-              }}
-              onKeyDown={handleCreateKeyDown}
-            />
-          </div>
-        )}
       </div>
       {tabMenu && (
         <ContextMenu

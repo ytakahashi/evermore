@@ -1,6 +1,7 @@
 import { flattenLayout } from '../../../../shared/pane-layout';
 import { getPaneDisplayLabel } from '../../../../shared/pane-label';
 import type { PaneRuntimeInfo, Workspace } from '../../../../shared/types';
+import { getOpenWorkspaces } from '../../workspace/open-workspaces';
 
 export interface TabSearchEntry {
   workspaceId: string;
@@ -18,7 +19,7 @@ interface ScoredTabSearchEntry {
 }
 
 /**
- * Flattens loaded workspaces into searchable tab entries while retaining workspace metadata for
+ * Flattens open workspaces into searchable tab entries while retaining workspace metadata for
  * cross-workspace navigation and result disambiguation.
  */
 export function createTabSearchEntries(
@@ -26,7 +27,8 @@ export function createTabSearchEntries(
   activeWorkspaceId: string | null,
   paneInfosByPtyId: Record<string, PaneRuntimeInfo> = {},
 ): TabSearchEntry[] {
-  return workspaces.flatMap((workspace) =>
+  // Tab selection does not reopen projects; closed layouts belong to the Open Project picker.
+  return getOpenWorkspaces(workspaces).flatMap((workspace) =>
     workspace.tabs.map((tab) => ({
       workspaceId: workspace.id,
       workspaceName: workspace.name,

@@ -1,4 +1,5 @@
 import { create, type StoreApi, type UseBoundStore } from 'zustand';
+import { normalizeAbsolutePath } from '../../../shared/absolute-path';
 import {
   collectPaneIds,
   findFirstPaneId,
@@ -7,6 +8,7 @@ import {
   updateSplitRatio,
 } from '../../../shared/pane-layout';
 import { findAdjacentPaneId, type PaneFocusDirection } from '../../../shared/pane-navigation';
+import { getPathBasename } from '../../../shared/path-label';
 import type { Pane, PaneLayout, Tab, Workspace } from '../../../shared/types';
 import { MAX_WORKSPACE_TABS } from '../../../shared/workspace-constants';
 import { canDeleteWorkspace, findFallbackWorkspace } from '../../../shared/workspace-kind';
@@ -22,6 +24,8 @@ import {
   reorderTab,
 } from '../workspace/tab-operations';
 import { prepareTabTransfer, transferTab } from '../workspace/tab-transfer';
+import { findProjectWorkspace } from '../projects/projectCandidates';
+import { findOpenWorkspace, getOpenWorkspaces } from '../workspace/open-workspaces';
 
 const DEFAULT_SAVE_DEBOUNCE_MS = 300;
 const DEFAULT_CWD_SAVE_DEBOUNCE_MS = 1000;
@@ -46,7 +50,8 @@ export interface WorkspaceStoreState {
   error: string | null;
   loadWorkspaces: () => Promise<void>;
   setActiveWorkspace: (id: string) => void;
-  createWorkspace: (name: string) => Promise<void>;
+  /** Opens or creates a project, retaining successful durable writes if active-ID persistence fails. */
+  openProject: (rootPath: string, signal?: AbortSignal) => Promise<Workspace>;
   deleteWorkspace: (id: string) => Promise<void>;
   renameWorkspace: (id: string, name: string) => void;
   addTab: () => void;
@@ -70,7 +75,8 @@ export interface WorkspaceStoreState {
    * at `toIndex` in the target's tab list and making it the target's active tab. When `toIndex` is
    * omitted the tab is appended (menu-driven moves rely on this default); when given it is clamped
    * to `[0, targetTabs.length]` so drag-and-drop can drop the tab at any position. No-op when either
-   * workspace or the tab is missing, when source equals target, or when the tab is the only one left
+   * workspace or the tab is missing, when either workspace is closed, when source equals target, or
+   * when the tab is the only one left
    * in the source workspace (the "at least one tab" invariant mirrors {@link closeWorkspaceTab}).
    * The source's active tab advances by the same rule as a tab close, and both workspaces are
    * persisted in a single update.
@@ -140,8 +146,8 @@ export interface WorkspaceStoreState {
    *
    * Bridge code that receives `PaneRuntimeInfo` from the main process does not know which workspace
    * owns the PTY, so it cannot use {@link updatePaneCwd} directly. This helper scans all loaded
-   * workspaces (every workspace stays mounted, see `MainTerminalArea`) and forwards to the same
-   * cwd update path as {@link updatePaneCwd}.
+   * workspaces (every open workspace stays mounted, see `MainTerminalArea`; closed ones hold no PTY
+   * ids) and forwards to the same cwd update path as {@link updatePaneCwd}.
    */
   updatePaneCwdByPtyId: (ptyId: string, cwd: string) => void;
   updateWorkspace: (workspace: Workspace) => void;
@@ -195,14 +201,6 @@ function getTabActivePaneId(tab: Tab): string | null {
   return tab.activePaneId ?? findFirstPaneId(tab.layout);
 }
 
-function findWorkspaceActivePane(workspace: Workspace): Pane | null {
-  const activeTab = workspace.tabs.find((tab) => tab.id === workspace.activeTabId);
-  const activePaneId =
-    activeTab?.activePaneId ?? (activeTab ? findFirstPaneId(activeTab.layout) : null);
-
-  return workspace.panes.find((pane) => pane.id === activePaneId) ?? null;
-}
-
 function shellQuote(value: string): string {
   return `'${value.replaceAll("'", "'\\''")}'`;
 }
@@ -241,11 +239,12 @@ function createTabWithPane(
 }
 
 /**
- * Returns the workspace selected in renderer state, falling back to the home workspace.
+ * Returns the workspace selected in renderer state, falling back to the home workspace when the
+ * selection is missing or closed.
  */
 export function selectActiveWorkspace(state: WorkspaceStoreState): Workspace | null {
   return (
-    state.workspaces.find((workspace) => workspace.id === state.activeWorkspaceId) ??
+    findOpenWorkspace(state.workspaces, state.activeWorkspaceId) ??
     findFallbackWorkspace(state.workspaces)
   );
 }
@@ -294,6 +293,7 @@ export function createWorkspaceStore(
   const now = options.now ?? Date.now;
   let persistTimer: ReturnType<typeof globalThis.setTimeout> | null = null;
   const dirtyWorkspaceIds = new Set<string>();
+  const openingProjects = new Map<string, Promise<Workspace>>();
 
   const getWorkspaceApi = (): WorkspaceApi => options.workspaceApi ?? window.api.workspace;
 
@@ -386,9 +386,10 @@ export function createWorkspaceStore(
         try {
           const { workspaces, activeWorkspaceId: persistedActiveId } =
             await getWorkspaceApi().list();
-          // Validate that the persisted id still refers to a known workspace.
+          // Validate that the persisted id still refers to a known, open workspace; main does not
+          // check `isOpen` when it stores the active id.
           const activeWorkspaceId =
-            workspaces.find((workspace) => workspace.id === persistedActiveId)?.id ??
+            findOpenWorkspace(workspaces, persistedActiveId)?.id ??
             findFallbackWorkspace(workspaces)?.id ??
             null;
 
@@ -398,21 +399,61 @@ export function createWorkspaceStore(
         }
       },
       setActiveWorkspace: (id: string): void => {
+        // Closed workspaces are activated only by `openProject`, which reopens them first.
+        if (!findOpenWorkspace(get().workspaces, id)) return;
         set({ activeWorkspaceId: id });
         void getWorkspaceApi().setActiveWorkspaceId(id);
       },
-      createWorkspace: async (name: string): Promise<void> => {
-        const trimmedName = name.trim() || 'Workspace';
+      openProject: async (rootPath: string, signal?: AbortSignal): Promise<Workspace> => {
+        if (!rootPath.startsWith('/')) throw new Error('Project path must be absolute');
+        const key = normalizeAbsolutePath(rootPath);
         try {
-          // Pass empty rootPath so the main process defaults to the home directory.
-          const workspace = await getWorkspaceApi().create(trimmedName, '');
-          set((state) => ({
-            workspaces: [...state.workspaces, workspace],
-            activeWorkspaceId: workspace.id,
-          }));
-          void getWorkspaceApi().setActiveWorkspaceId(workspace.id);
+          let opening = openingProjects.get(key);
+          if (!opening) {
+            opening = (async (): Promise<Workspace> => {
+              const state = get();
+              let workspace = findProjectWorkspace(state.workspaces, key, state.activeWorkspaceId);
+              if (!workspace) {
+                workspace = await getWorkspaceApi().create(getPathBasename(key), key);
+                const created = workspace;
+                set((current) => ({ workspaces: replaceWorkspace(current.workspaces, created) }));
+              } else if (!workspace.isOpen) {
+                await getWorkspaceApi().update(
+                  toWorkspaceUpdatePayload({ ...workspace, isOpen: true }),
+                );
+                const reopeningId = workspace.id;
+                const latest = get().workspaces.find((current) => current.id === reopeningId);
+                if (!latest) throw new Error('Project was deleted while opening');
+                // Preserve edits during IPC; queued persistence must see the reopened state.
+                workspace = { ...latest, isOpen: true };
+                updateWorkspaceState(workspace);
+                persistWorkspaceDebounced(workspace.id);
+              }
+              return workspace;
+            })();
+            openingProjects.set(key, opening);
+            void opening
+              .finally(() => openingProjects.delete(key))
+              .catch((_error: unknown) => {
+                // Each caller handles failure; cleanup must not create an unhandled rejection.
+              });
+          }
+          const workspace = await opening;
+          // Cancellation cannot undo a durable create/reopen, but it must not move focus later.
+          if (signal?.aborted) return workspace;
+          await getWorkspaceApi().setActiveWorkspaceId(workspace.id);
+          if (signal?.aborted) {
+            await getWorkspaceApi().setActiveWorkspaceId(get().activeWorkspaceId);
+            return workspace;
+          }
+          if (!get().workspaces.some((current) => current.id === workspace.id)) {
+            throw new Error('Project was deleted while opening');
+          }
+          set({ activeWorkspaceId: workspace.id, error: null });
+          return workspace;
         } catch (error: unknown) {
           set({ error: getErrorMessage(error) });
+          throw error;
         }
       },
       deleteWorkspace: async (id: string): Promise<void> => {
@@ -455,15 +496,12 @@ export function createWorkspaceStore(
       },
       addWorkspaceTab: (workspaceId: string): void => {
         const shouldSwitchWorkspace = get().activeWorkspaceId !== workspaceId;
-        const workspace = get().workspaces.find(
-          (currentWorkspace) => currentWorkspace.id === workspaceId,
-        );
+        const workspace = findOpenWorkspace(get().workspaces, workspaceId);
         if (!workspace || workspace.tabs.length >= MAX_WORKSPACE_TABS) {
           return;
         }
 
-        const activePane = findWorkspaceActivePane(workspace);
-        const cwd = activePane?.cwd ?? workspace.rootPath;
+        const cwd = workspace.rootPath;
         const tabName = getAutomaticTabName(cwd);
         const { pane, tab } = createTabWithPane(createStoreId, { cwd, tabName });
         const updatedWorkspace: Workspace = {
@@ -540,9 +578,7 @@ export function createWorkspaceStore(
         });
       },
       selectWorkspaceTab: (workspaceId: string, tabId: string): void => {
-        const workspace = get().workspaces.find(
-          (currentWorkspace) => currentWorkspace.id === workspaceId,
-        );
+        const workspace = findOpenWorkspace(get().workspaces, workspaceId);
         if (!workspace) {
           return;
         }
@@ -578,9 +614,7 @@ export function createWorkspaceStore(
         persistWorkspaceDebounced(updatedWorkspace.id);
       },
       selectWorkspacePane: (workspaceId: string, tabId: string, paneId: string): void => {
-        const workspace = get().workspaces.find(
-          (currentWorkspace) => currentWorkspace.id === workspaceId,
-        );
+        const workspace = findOpenWorkspace(get().workspaces, workspaceId);
         if (!workspace) {
           return;
         }
@@ -670,12 +704,10 @@ export function createWorkspaceStore(
         }
 
         const state = get();
-        const sourceWorkspace = state.workspaces.find(
-          (currentWorkspace) => currentWorkspace.id === sourceWorkspaceId,
-        );
-        const targetWorkspace = state.workspaces.find(
-          (currentWorkspace) => currentWorkspace.id === targetWorkspaceId,
-        );
+        // Both ends must be open: panes moved into a closed workspace would unmount and lose their
+        // live PTYs without the tab-close confirmation.
+        const sourceWorkspace = findOpenWorkspace(state.workspaces, sourceWorkspaceId);
+        const targetWorkspace = findOpenWorkspace(state.workspaces, targetWorkspaceId);
         if (!sourceWorkspace || !targetWorkspace) {
           return;
         }
@@ -728,9 +760,7 @@ export function createWorkspaceStore(
       },
       createTabFromPane: (workspaceId: string, sourceTabId: string, paneId: string): void => {
         const shouldSwitchWorkspace = get().activeWorkspaceId !== workspaceId;
-        const workspace = get().workspaces.find(
-          (currentWorkspace) => currentWorkspace.id === workspaceId,
-        );
+        const workspace = findOpenWorkspace(get().workspaces, workspaceId);
         // Check before allocating: rejected actions must not consume ids or schedule persistence.
         if (!workspace || !preparePaneExtraction(workspace, sourceTabId, paneId)) {
           return;
@@ -814,11 +844,11 @@ export function createWorkspaceStore(
       },
       selectAdjacentTabGlobal: (direction: TabSelectionDirection): void => {
         const state = get();
-        // Flatten every workspace's tabs into a single ordered list so workspace boundaries do not
-        // interrupt next/previous navigation. Workspaces with zero tabs are skipped here so the
-        // modulo arithmetic below never lands on an empty workspace.
+        // Only open workspaces can be selected; including closed tabs would stall navigation at
+        // the first rejected destination. Flatten open tabs so workspace boundaries do not interrupt
+        // next/previous navigation, skipping workspaces with zero tabs.
         const entries: { workspaceId: string; tabId: string }[] = [];
-        for (const workspace of state.workspaces) {
+        for (const workspace of getOpenWorkspaces(state.workspaces)) {
           for (const tab of workspace.tabs) {
             entries.push({ workspaceId: workspace.id, tabId: tab.id });
           }
@@ -1006,8 +1036,9 @@ export function createWorkspaceStore(
         applyCwdUpdate(workspace, paneId, cwd);
       },
       updatePaneCwdByPtyId: (ptyId: string, cwd: string): void => {
-        // All workspaces stay mounted (see `MainTerminalArea`), so a PTY id is unique across the
-        // whole renderer process. Stop at the first match to avoid scanning further workspaces.
+        // All open workspaces stay mounted (see `MainTerminalArea`) and closed ones hold no PTY ids,
+        // so a PTY id is unique across the whole renderer process. Stop at the first match to avoid
+        // scanning further workspaces.
         for (const workspace of get().workspaces) {
           const pane = workspace.panes.find((currentPane) => currentPane.ptyId === ptyId);
           if (!pane) {

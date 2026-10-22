@@ -1,9 +1,10 @@
-import { render, waitFor } from '@testing-library/react';
+import { act, render, waitFor } from '@testing-library/react';
 import type { Mock } from 'vite-plus/test';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
 import type { PtyCreateRequest } from '../../../../shared/api-types';
 import { DEFAULT_APP_SETTINGS } from '../../../../shared/settings-defaults';
 import type { AppSettings } from '../../../../shared/types';
+import { useUiStore } from '../../stores/uiStore';
 import { useSettingsStore } from '../../stores/settingsStore';
 import { terminalHostRegistry } from '../../terminal-host/terminalHostRegistry';
 import { useTerminal, type PtyIdChangeReason } from './useTerminal';
@@ -147,6 +148,8 @@ function TestTerminal({
   return <div ref={containerRef} />;
 }
 
+const initialUi = useUiStore.getState();
+
 describe('useTerminal', () => {
   let ptyApi: PtyApiMock;
   let dataCleanup: Mock<() => void>;
@@ -242,6 +245,7 @@ describe('useTerminal', () => {
   });
 
   afterEach(() => {
+    useUiStore.setState(initialUi, true);
     Reflect.deleteProperty(window, 'api');
     Reflect.deleteProperty(navigator, 'clipboard');
     Reflect.deleteProperty(globalThis, 'ResizeObserver');
@@ -521,6 +525,24 @@ describe('useTerminal', () => {
     rerender(<TestTerminal isActive />);
 
     // Then: the existing xterm instance receives focus without recreating the PTY.
+    expect(xtermMock.terminalInstances[0]?.focus).toHaveBeenCalledOnce();
+    expect(ptyApi.create).toHaveBeenCalledOnce();
+  });
+
+  it('does not steal picker focus when a delayed PTY starts, then handles an explicit focus request', async () => {
+    // Given: an active pane creates its PTY while a picker is open.
+    useUiStore.getState().openProjectPalette();
+    render(<TestTerminal isActive />);
+    await waitFor(() => expect(ptyApi.resize).toHaveBeenCalled());
+    expect(xtermMock.terminalInstances[0]?.focus).not.toHaveBeenCalled();
+
+    // When: selection completes without changing the active pane.
+    act(() => {
+      useUiStore.getState().closeProjectPalette();
+      useUiStore.getState().focusWorkspace();
+    });
+
+    // Then: the existing terminal is explicitly focused without restarting its PTY.
     expect(xtermMock.terminalInstances[0]?.focus).toHaveBeenCalledOnce();
     expect(ptyApi.create).toHaveBeenCalledOnce();
   });
