@@ -1,5 +1,6 @@
 import {
   useEffect,
+  useMemo,
   useRef,
   useState,
   type DragEvent,
@@ -11,13 +12,16 @@ import { useTabDragStore } from '../../stores/tabDragStore';
 import { selectActiveWorkspace, useWorkspaceStore } from '../../stores/workspaceStore';
 import { requestTabClose } from '../../tab-close/tabClose';
 import { getOpenWorkspaces } from '../../workspace/open-workspaces';
+import { formatWorkspaceLabels } from '../../workspace/workspace-labels';
 import { ContextMenu } from '../common/ContextMenu';
 import { hasActionableItem, type ContextMenuItem } from '../common/contextMenuItems';
 import { resolveDropEdge, toReorderIndex, TAB_DND_MIME, type DropEdge } from '../common/tabDnd';
 
+/** Renders active workspace tabs and cross-workspace move actions. */
 export function TabBar(): React.JSX.Element {
   const activeWorkspace = useWorkspaceStore(selectActiveWorkspace);
   const workspaces = useWorkspaceStore((state) => state.workspaces);
+  const workspaceLabels = useMemo(() => formatWorkspaceLabels(workspaces), [workspaces]);
   const addTab = useWorkspaceStore((state) => state.addTab);
   const renameTab = useWorkspaceStore((state) => state.renameTab);
   const selectTab = useWorkspaceStore((state) => state.selectTab);
@@ -83,7 +87,7 @@ export function TabBar(): React.JSX.Element {
         items.push({
           type: 'action',
           id: `move-to-${workspace.id}`,
-          label: workspace.name,
+          label: workspaceLabels.get(workspace.id) ?? workspace.name,
           onSelect: () => {
             moveTabToWorkspace(activeWorkspace.id, tabId, workspace.id);
           },

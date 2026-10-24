@@ -50,6 +50,25 @@ function createRuntimeInfo(ptyId: string, foregroundCommand: string): PaneRuntim
 }
 
 describe('TabSearchPalette search helpers', () => {
+  it('disambiguates workspace labels before filtering by tab name', () => {
+    // Given: two same-named workspaces whose tabs match different queries.
+    const entries = [
+      {
+        ...createWorkspace('a', 'api', [{ id: 'ta', name: 'Server' }], 'ta'),
+        rootPath: '/foo/api',
+      },
+      {
+        ...createWorkspace('b', 'api', [{ id: 'tb', name: 'Client' }], 'tb'),
+        rootPath: '/bar/api',
+      },
+    ];
+    // When: tab entries are created and narrowed to a single result.
+    const matches = filterTabSearchEntries(createTabSearchEntries(entries, 'a'), 'Server');
+    // Then: the result retains the same label as the other navigation surfaces.
+    expect(matches).toHaveLength(1);
+    expect(matches[0].workspaceName).toBe('api — foo');
+  });
+
   it('excludes closed workspace tabs until the project is reopened', () => {
     // Given: an open workspace and a closed project with a saved tab.
     const open = createWorkspace('open', 'Open', [{ id: 'open-tab', name: 'Shell' }], 'open-tab');

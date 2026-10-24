@@ -53,6 +53,36 @@ function workspace(overrides: Partial<Workspace> & Pick<Workspace, 'id' | 'name'
 }
 
 describe('collectAgentSessions', () => {
+  it('disambiguates against open workspaces without agent sessions', () => {
+    // Given: only one of two same-named workspaces has an agent.
+    const entries = [
+      workspace({
+        id: 'a',
+        name: 'api',
+        rootPath: '/foo/api',
+        tabs: [
+          {
+            id: 't',
+            name: 'shell',
+            isCustomName: false,
+            layout: { type: 'leaf', paneId: 'p' },
+            activePaneId: 'p',
+          },
+        ],
+        panes: [{ id: 'p', cwd: '/foo/api', ptyId: 'pty' }],
+      }),
+      workspace({ id: 'b', name: 'api', rootPath: '/bar/api' }),
+    ];
+    // When: sessions are collected before and after the empty peer closes.
+    const before = collectAgentSessions(entries, { pty: agentInfo('pty') });
+    const after = collectAgentSessions([entries[0], { ...entries[1], isOpen: false }], {
+      pty: agentInfo('pty'),
+    });
+    // Then: the labels use all open workspaces rather than only visible cards.
+    expect(before.map((session) => session.workspaceName)).toEqual(['api — foo']);
+    expect(after.map((session) => session.workspaceName)).toEqual(['api']);
+  });
+
   it('collects only panes that have an agent, with their workspace and tab labels', () => {
     // Given: one workspace whose tab holds an agent pane and a plain shell pane.
     const workspaces = [

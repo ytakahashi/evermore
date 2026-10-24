@@ -21,6 +21,7 @@ import { useWorkspaceStore } from '../../stores/workspaceStore';
 import { requestTabClose } from '../../tab-close/tabClose';
 import { requestWorkspaceClose } from '../../workspace-close/workspaceClose';
 import { getSidebarWorkspaces } from '../../workspace/open-workspaces';
+import { formatWorkspaceLabels } from '../../workspace/workspace-labels';
 import { ContextMenu } from '../common/ContextMenu';
 import { hasActionableItem, type ContextMenuItem } from '../common/contextMenuItems';
 import { getPaneRunningIndicator } from '../common/pane-running-indicator';
@@ -195,6 +196,7 @@ function PaneSummary({
 /** Renders open workspace navigation and explicit close/delete actions. */
 export function WorkspacesView(): React.JSX.Element {
   const workspaces = useWorkspaceStore((state) => state.workspaces);
+  const workspaceLabels = useMemo(() => formatWorkspaceLabels(workspaces), [workspaces]);
   // Closed projects must be reopened through Open Project before navigation or tab moves.
   const openWorkspaces = useMemo(() => getSidebarWorkspaces(workspaces), [workspaces]);
   const paneInfosByPtyId = usePaneInfoStore((state) => state.infosByPtyId);
@@ -381,7 +383,8 @@ export function WorkspacesView(): React.JSX.Element {
 
   const handleDeleteWorkspace = (workspace: Workspace): void => {
     if (!canDeleteWorkspace(workspace)) return;
-    if (!window.confirm(`Delete workspace "${workspace.name}"? This cannot be undone.`)) return;
+    const label = workspaceLabels.get(workspace.id) ?? workspace.name;
+    if (!window.confirm(`Delete workspace "${label}"? This cannot be undone.`)) return;
     // Collapsed-state cleanup happens via the `workspaces`-sync effect above; no manual prune here.
     void deleteWorkspace(workspace.id);
   };
@@ -454,7 +457,7 @@ export function WorkspacesView(): React.JSX.Element {
         items.push({
           type: 'action',
           id: `move-to-${target.id}`,
-          label: target.name,
+          label: workspaceLabels.get(target.id) ?? target.name,
           onSelect: () => {
             moveTabToWorkspace(workspaceId, tabId, target.id);
           },
@@ -869,6 +872,7 @@ export function WorkspacesView(): React.JSX.Element {
       </div>
       <div className="space-y-0.5">
         {openWorkspaces.map((workspace) => {
+          const workspaceLabel = workspaceLabels.get(workspace.id) ?? workspace.name;
           const isActive = workspace.id === activeWorkspaceId;
           const isEditing = workspace.id === editingWorkspaceId;
           const isExpanded = !collapsedWorkspaceIds.has(workspace.id);
@@ -919,7 +923,7 @@ export function WorkspacesView(): React.JSX.Element {
                   <>
                     <button
                       aria-expanded={isExpanded}
-                      aria-label={`${isExpanded ? 'Collapse' : 'Expand'} ${workspace.name}`}
+                      aria-label={`${isExpanded ? 'Collapse' : 'Expand'} ${workspaceLabel}`}
                       className="flex size-5 shrink-0 items-center justify-center rounded text-subtle hover:bg-raised hover:text-foreground"
                       type="button"
                       onClick={() => {
@@ -946,12 +950,14 @@ export function WorkspacesView(): React.JSX.Element {
                       }}
                     >
                       <Folder size={14} className={isActive ? 'text-brand' : 'text-subtle'} />
-                      <span className="truncate">{workspace.name}</span>
+                      <span className="truncate" title={workspaceLabel}>
+                        {workspaceLabel}
+                      </span>
                     </button>
                   </>
                 )}
                 <button
-                  aria-label={`New tab in ${workspace.name}`}
+                  aria-label={`New tab in ${workspaceLabel}`}
                   className="invisible flex size-5 shrink-0 items-center justify-center rounded text-subtle hover:bg-raised hover:text-foreground disabled:cursor-default disabled:opacity-40 group-hover:visible"
                   disabled={isEditing}
                   title="New tab"
@@ -963,12 +969,12 @@ export function WorkspacesView(): React.JSX.Element {
                   <Plus size={12} />
                 </button>
                 <button
-                  aria-label={`Close ${workspace.name}`}
+                  aria-label={`Close ${workspaceLabel}`}
                   className="invisible flex size-5 shrink-0 items-center justify-center rounded text-subtle hover:bg-raised hover:text-danger disabled:cursor-default disabled:opacity-40 group-hover:visible"
                   disabled={!canCloseWorkspace(workspace) || isEditing}
                   title={
                     canCloseWorkspace(workspace)
-                      ? `Close ${workspace.name}`
+                      ? `Close ${workspaceLabel}`
                       : 'The home workspace cannot be closed'
                   }
                   type="button"
