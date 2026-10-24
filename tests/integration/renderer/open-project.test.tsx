@@ -7,22 +7,32 @@ import { DEFAULT_APP_SETTINGS } from '../../../src/shared/settings-defaults';
 import { OpenProjectPalette } from '../../../src/renderer/src/components/projects/OpenProjectPalette';
 import { TabSearchPalette } from '../../../src/renderer/src/components/main-area/TabSearchPalette';
 import { MainTerminalArea } from '../../../src/renderer/src/components/main-area/MainTerminalArea';
+import { WorkspacesView } from '../../../src/renderer/src/components/sidebar/WorkspacesView';
 import { SettingsView } from '../../../src/renderer/src/components/settings/SettingsView';
 import { useWorkspaceStore } from '../../../src/renderer/src/stores/workspaceStore';
 import { useSettingsStore } from '../../../src/renderer/src/stores/settingsStore';
 import { useUiStore } from '../../../src/renderer/src/stores/uiStore';
 
-const terminal = vi.hoisted(() => ({ mount: vi.fn(), unmount: vi.fn() }));
+const terminal = vi.hoisted(() => ({ mount: vi.fn(), unmount: vi.fn(), command: vi.fn() }));
 
 // Fake the native terminal boundary; retain real pane rendering and store/UI transitions.
 vi.mock('../../../src/renderer/src/components/terminal/TerminalView', () => ({
-  TerminalView: function FakeTerminal({ paneId, cwd }: { paneId: string; cwd: string }) {
+  TerminalView: function FakeTerminal({
+    paneId,
+    cwd,
+    initialCommand,
+  }: {
+    paneId: string;
+    cwd: string;
+    initialCommand?: string;
+  }) {
     useEffect(() => {
       terminal.mount(paneId, cwd);
+      if (initialCommand) terminal.command(initialCommand);
       return () => {
         terminal.unmount(paneId);
       };
-    }, [paneId, cwd]);
+    }, [paneId, cwd, initialCommand]);
     return <div data-testid={`terminal-${paneId}`} />;
   },
 }));
@@ -84,11 +94,16 @@ beforeEach(async () => {
       saved = [...saved, created];
       return created;
     }),
-    update: vi.fn(async () => {}),
+    update: vi.fn(async (updated) => {
+      saved = saved.map((entry) => (entry.id === updated.id ? updated : entry));
+    }),
     delete: vi.fn(async () => {}),
     setActiveWorkspaceId: vi.fn(async () => {}),
   };
-  Object.defineProperty(window, 'api', { configurable: true, value: { workspace: api } });
+  Object.defineProperty(window, 'api', {
+    configurable: true,
+    value: { workspace: api, window: { confirmCloseWorkspace: vi.fn(async () => true) } },
+  });
   useSettingsStore.setState({
     settings: { ...DEFAULT_APP_SETTINGS, projects: { directories: ['/projects/evermore'] } },
     isLoading: false,
@@ -98,6 +113,7 @@ beforeEach(async () => {
   await useWorkspaceStore.getState().loadWorkspaces();
   terminal.mount.mockClear();
   terminal.unmount.mockClear();
+  terminal.command.mockClear();
 });
 
 afterEach(async () => {
@@ -371,5 +387,128 @@ describe('opening projects', () => {
     expect(screen.getAllByRole('option')).toHaveLength(20);
     expect(screen.getAllByRole('option')[19]).toHaveAttribute('aria-selected', 'true');
     expect(input).toHaveFocus();
+  });
+});
+
+describe('closing and reopening projects', () => {
+  it('closes every project terminal, retains other owners, and restores layout/cwd without startup commands', async () => {
+    // Given: two tabs and a split in a live project, alongside a home terminal.
+    const project = workspace('project', '/projects/evermore');
+    project.tabs[0]!.layout = {
+      type: 'split',
+      direction: 'horizontal',
+      ratio: 0.4,
+      children: [
+        { type: 'leaf', paneId: 'project-pane' },
+        { type: 'leaf', paneId: 'split-pane' },
+      ],
+    };
+    project.tabs.push({
+      id: 'second-tab',
+      name: 'Second',
+      isCustomName: true,
+      layout: { type: 'leaf', paneId: 'second-pane' },
+      activePaneId: 'second-pane',
+    });
+    project.panes[0]!.initialCommand = 'ssh example';
+    project.panes.push(
+      { id: 'split-pane', cwd: '/projects/evermore/src' },
+      { id: 'second-pane', cwd: '/elsewhere' },
+    );
+    saved.push(project);
+    useWorkspaceStore.setState({ workspaces: saved, activeWorkspaceId: project.id });
+    useUiStore.setState({ projectPaletteOpen: false, activeView: 'workspace' });
+    render(
+      <>
+        <WorkspacesView />
+        <MainTerminalArea />
+        <OpenProjectPalette />
+      </>,
+    );
+    await waitFor(() => expect(useWorkspaceStore.getState().isLoading).toBe(false));
+    act(() => useWorkspaceStore.getState().setActiveWorkspace(project.id));
+    const homeOwner = screen.getByTestId('terminal-home-pane');
+    expect(terminal.command).toHaveBeenCalledExactlyOnceWith('ssh example');
+    terminal.mount.mockClear();
+    terminal.unmount.mockClear();
+    terminal.command.mockClear();
+
+    // When: the sidebar closes the project, state saves, and the application reloads its workspaces.
+    fireEvent.click(screen.getByRole('button', { name: 'Close project' }));
+    await waitFor(() =>
+      expect(api.update).toHaveBeenCalledWith(
+        expect.objectContaining({ id: project.id, isOpen: false }),
+      ),
+    );
+    await act(async () => useWorkspaceStore.getState().loadWorkspaces());
+
+    // Then: all three project terminals unmount, home stays alive, and closed state survives reload.
+    expect(
+      terminal.unmount.mock.calls
+        .map(([id]) => id)
+        .sort((left: string, right: string) => left.localeCompare(right)),
+    ).toEqual(['project-pane', 'second-pane', 'split-pane']);
+    expect(screen.getByTestId('terminal-home-pane')).toBe(homeOwner);
+    expect(terminal.mount).not.toHaveBeenCalled();
+    expect(screen.queryByRole('button', { name: 'Close project' })).not.toBeInTheDocument();
+    expect(useWorkspaceStore.getState().activeWorkspaceId).toBe('home');
+
+    // When: Open Project reopens the retained project.
+    act(() => useUiStore.getState().openProjectPalette());
+    fireEvent.keyDown(screen.getByRole('combobox'), { key: 'Enter' });
+    await waitFor(() => expect(useUiStore.getState().projectPaletteOpen).toBe(false));
+
+    // Then: original IDs, split ratio, selection and cwd return as fresh shells.
+    const reopened = useWorkspaceStore
+      .getState()
+      .workspaces.find((entry) => entry.id === project.id)!;
+    expect(reopened.tabs).toEqual(project.tabs);
+    expect(reopened.activeTabId).toBe(project.activeTabId);
+    expect(terminal.mount.mock.calls).toEqual([
+      ['project-pane', '/projects/evermore/subdir'],
+      ['split-pane', '/projects/evermore/src'],
+      ['second-pane', '/elsewhere'],
+    ]);
+    expect(terminal.command).not.toHaveBeenCalled();
+    expect(api.create).not.toHaveBeenCalled();
+    expect(api.delete).not.toHaveBeenCalled();
+    expect(screen.getByTestId('terminal-home-pane')).toBe(homeOwner);
+  });
+
+  it('keeps every terminal alive when workspace close is cancelled', async () => {
+    // Given: always-confirm policy and a native sheet that cancels.
+    const project = workspace('project', '/projects/evermore');
+    saved.push(project);
+    useWorkspaceStore.setState({ workspaces: saved, activeWorkspaceId: project.id });
+    useUiStore.setState({ projectPaletteOpen: false, activeView: 'workspace' });
+    useSettingsStore.setState({
+      settings: {
+        ...DEFAULT_APP_SETTINGS,
+        app: { ...DEFAULT_APP_SETTINGS.app, tabCloseConfirm: 'always' },
+      },
+    });
+    vi.mocked(window.api.window.confirmCloseWorkspace).mockResolvedValue(false);
+    render(
+      <>
+        <WorkspacesView />
+        <MainTerminalArea />
+      </>,
+    );
+    await waitFor(() => expect(useWorkspaceStore.getState().isLoading).toBe(false));
+    act(() => useWorkspaceStore.getState().setActiveWorkspace(project.id));
+    const owner = screen.getByTestId('terminal-project-pane');
+    // When: close is requested and cancelled.
+    fireEvent.click(screen.getByRole('button', { name: 'Close project' }));
+    await act(async () => {
+      await Promise.resolve();
+    });
+    // Then: state and terminal ownership remain intact.
+    expect(window.api.window.confirmCloseWorkspace).toHaveBeenCalledWith({
+      runningProcesses: false,
+    });
+    expect(screen.getByTestId('terminal-project-pane')).toBe(owner);
+    expect(terminal.unmount).not.toHaveBeenCalled();
+    expect(useWorkspaceStore.getState().activeWorkspaceId).toBe(project.id);
+    expect(api.update).not.toHaveBeenCalled();
   });
 });

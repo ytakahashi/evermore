@@ -76,6 +76,8 @@ export interface Api {
   };
   window: {
     isFullScreen: () => Promise<boolean>;
+    /** Shows the main-owned workspace-close sheet for all terminal sessions in a project. */
+    confirmCloseWorkspace: (payload: { runningProcesses: boolean }) => Promise<boolean>;
     /** Shows the native tab-close sheet and resolves to whether the user confirmed the close. */
     confirmCloseTab: (payload: { runningProcesses: boolean }) => Promise<boolean>;
     /**

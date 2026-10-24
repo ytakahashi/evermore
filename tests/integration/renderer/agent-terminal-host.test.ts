@@ -1,4 +1,4 @@
-import { createElement, StrictMode } from 'react';
+import { createElement, StrictMode, useEffect } from 'react';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
 import type { PaneRuntimeInfo, Workspace } from '../../../src/shared/types';
@@ -121,6 +121,62 @@ describe('Agents view terminal borrowing', () => {
     useUiStore.setState({ activeView: 'workspace' });
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
+  });
+
+  it('releases a preview when its workspace closes and keeps other sessions usable', () => {
+    // Given: a previewable terminal owner and an agent in another workspace.
+    const other: Workspace = {
+      ...workspace,
+      id: 'other',
+      activeTabId: 'other-tab',
+      tabs: [
+        {
+          ...workspace.tabs[0]!,
+          id: 'other-tab',
+          activePaneId: 'p3',
+          layout: { type: 'leaf', paneId: 'p3' },
+        },
+      ],
+      panes: [{ id: 'p3', cwd: '/other', ptyId: 'pty-3' }],
+    };
+    useWorkspaceStore.setState({ workspaces: [workspace, other], activeWorkspaceId: other.id });
+    usePaneInfoStore.getState().setInfo(info('pty-3', 'codex'));
+    const remaining = register('p3');
+    let retiredRoot!: HTMLElement;
+    function Owner(): null {
+      useEffect(() => {
+        const home = document.createElement('div');
+        const element = document.createElement('div');
+        retiredRoot = element;
+        home.appendChild(element);
+        document.body.appendChild(home);
+        const unregister = terminalHostRegistry.register('p1', { home, element, fit: vi.fn() });
+        return () => {
+          unregister();
+          element.remove();
+          home.remove();
+        };
+      }, []);
+      return null;
+    }
+    function OpenOwner(): ReturnType<typeof createElement> | null {
+      const isOpen = useWorkspaceStore(
+        (state) => state.workspaces.find((w) => w.id === workspace.id)?.isOpen,
+      );
+      return isOpen ? createElement(Owner) : null;
+    }
+    render(createElement('div', null, createElement(OpenOwner), createElement(AgentsView)));
+    fireEvent.click(row('Claude'));
+    expect(retiredRoot.closest('[aria-label="Selected agent terminal"]')).not.toBeNull();
+    // When: the project closes while its terminal is borrowed.
+    act(() => useWorkspaceStore.getState().closeWorkspace(workspace.id));
+    // Then: its owner and preview disappear, and the remaining agent can borrow its terminal.
+    expect(retiredRoot.isConnected).toBe(false);
+    expect(screen.queryByRole('button', { name: /Claude/ })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Selected agent terminal')).not.toBeInTheDocument();
+    fireEvent.click(row('Codex'));
+    expect(remaining.element.closest('[aria-label="Selected agent terminal"]')).not.toBeNull();
+    expect(useUiStore.getState().activeView).toBe('agents');
   });
 
   it('moves focus by keyboard without borrowing and returns a previewed terminal before a pane jump', () => {

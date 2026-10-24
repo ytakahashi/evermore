@@ -44,6 +44,7 @@ export function collectAgentSessions(
   const sessions: AgentSession[] = [];
 
   for (const workspace of workspaces) {
+    if (!workspace.isOpen) continue;
     const panesById = new Map(workspace.panes.map((pane) => [pane.id, pane]));
 
     for (const tab of workspace.tabs) {

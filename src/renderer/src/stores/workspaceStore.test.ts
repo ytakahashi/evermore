@@ -63,6 +63,129 @@ describe('workspaceStore', () => {
     vi.useRealTimers();
   });
 
+  describe('closing workspaces', () => {
+    it.each([true, false])(
+      'retains durable state and clears runtime state (active=%s)',
+      async (active) => {
+        // Given: a project with a pending cwd save and one-shot command.
+        vi.useFakeTimers();
+        const project = createWorkspace('workspace-2', '/project');
+        project.panes[0] = {
+          ...project.panes[0]!,
+          ptyId: 'pty-project',
+          initialCommand: 'ssh example',
+        };
+        const store = createWorkspaceStore({ workspaceApi, now: () => 42 });
+        store.setState({
+          workspaces: [project, workspace],
+          activeWorkspaceId: active ? project.id : workspace.id,
+        });
+        store.getState().updatePaneCwdByPtyId('pty-project', '/project/sub');
+        const before = store.getState().workspaces.find((w) => w.id === project.id)!;
+        // When: close happens before cwd persistence.
+        store.getState().closeWorkspace(project.id);
+        const closed = store.getState().workspaces.find((w) => w.id === project.id)!;
+        await vi.advanceTimersByTimeAsync(300);
+        // Then: layout/selection survive, runtime fields disappear, and only the latest closed snapshot saves.
+        expect(closed).toEqual({
+          ...before,
+          isOpen: false,
+          updatedAt: 42,
+          panes: [{ id: project.panes[0]!.id, cwd: '/project/sub' }],
+        });
+        expect(store.getState().activeWorkspaceId).toBe(workspace.id);
+        expect(workspaceApi.update).toHaveBeenCalledExactlyOnceWith(closed);
+        expect(workspaceApi.setActiveWorkspaceId).toHaveBeenCalledTimes(active ? 1 : 0);
+        expect(workspaceApi.delete).not.toHaveBeenCalled();
+      },
+    );
+
+    it('refuses home, closed, and missing targets', async () => {
+      // Given: home and an already closed project.
+      vi.useFakeTimers();
+      const store = createWorkspaceStore({ workspaceApi });
+      const closed = { ...createWorkspace('workspace-2', '/project'), isOpen: false };
+      const entries = [workspace, closed];
+      store.setState({ workspaces: entries, activeWorkspaceId: workspace.id });
+      // When: each unavailable target is closed.
+      for (const id of [workspace.id, closed.id, 'missing']) store.getState().closeWorkspace(id);
+      await vi.advanceTimersByTimeAsync(1000);
+      // Then: the operation is inert, including persistence.
+      expect(store.getState().workspaces).toBe(entries);
+      expect(workspaceApi.update).not.toHaveBeenCalled();
+    });
+
+    it('keeps a closed workspace closed if persistence fails', async () => {
+      // Given: both layout and active-ID writes fail.
+      vi.useFakeTimers();
+      workspaceApi.update = vi.fn().mockRejectedValue(new Error('disk unavailable'));
+      workspaceApi.setActiveWorkspaceId = vi
+        .fn()
+        .mockRejectedValue(new Error('active unavailable'));
+      const project = createWorkspace('workspace-2', '/project');
+      const store = createWorkspaceStore({ workspaceApi });
+      store.setState({ workspaces: [workspace, project], activeWorkspaceId: project.id });
+      // When: close stops the runtime sessions and writes fail.
+      store.getState().closeWorkspace(project.id);
+      await vi.advanceTimersByTimeAsync(300);
+      // Then: the error is recorded without restarting terminal sessions.
+      expect(store.getState().error).toBe('disk unavailable');
+      expect(store.getState().workspaces.find((w) => w.id === project.id)?.isOpen).toBe(false);
+      expect(store.getState().activeWorkspaceId).toBe(workspace.id);
+    });
+
+    it('ignores late PTY exits for a closed split workspace', () => {
+      // Given: a closed workspace still retains a split layout.
+      const project = createWorkspace('workspace-2', '/project');
+      project.tabs[0]!.layout = {
+        type: 'split',
+        direction: 'horizontal',
+        ratio: 0.5,
+        children: [
+          { type: 'leaf', paneId: project.panes[0]!.id },
+          { type: 'leaf', paneId: 'second' },
+        ],
+      };
+      project.panes.push({ id: 'second', cwd: '/project/sub' });
+      project.isOpen = false;
+      const store = createWorkspaceStore({ workspaceApi });
+      store.setState({ workspaces: [workspace, project], activeWorkspaceId: workspace.id });
+      // When: a retired process reports its exit.
+      store.getState().closePaneOnExit('second');
+      // Then: the saved split survives for reopening.
+      expect(store.getState().workspaces[1]).toBe(project);
+    });
+
+    it('does not activate a workspace closed while Open Project persists its active ID', async () => {
+      // Given: an open project whose activation IPC is pending.
+      vi.useFakeTimers();
+      const project = createWorkspace('workspace-2', '/project');
+      let finish!: () => void;
+      workspaceApi.setActiveWorkspaceId = vi
+        .fn()
+        .mockImplementationOnce(
+          () =>
+            new Promise<void>((resolve) => {
+              finish = resolve;
+            }),
+        )
+        .mockResolvedValue(undefined);
+      const store = createWorkspaceStore({ workspaceApi });
+      store.setState({ workspaces: [workspace, project], activeWorkspaceId: workspace.id });
+      const opening = store.getState().openProject('/project');
+      await Promise.resolve();
+      // When: close wins before activation completes.
+      store.getState().closeWorkspace(project.id);
+      finish();
+      await expect(opening).rejects.toThrow('Project was closed or deleted while opening');
+      await vi.advanceTimersByTimeAsync(300);
+      // Then: renderer and main keep the fallback active without reopening the project.
+      expect(store.getState().activeWorkspaceId).toBe(workspace.id);
+      expect(workspaceApi.setActiveWorkspaceId).toHaveBeenLastCalledWith(workspace.id);
+      expect(store.getState().workspaces[1]?.isOpen).toBe(false);
+    });
+  });
+
   it('loads workspaces and selects the active workspace, tab, and pane', async () => {
     // Given: the preload workspace API returns persisted workspaces.
     const useStore = createWorkspaceStore({ workspaceApi });

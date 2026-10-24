@@ -13,13 +13,14 @@ import { getPaneDisplayLabel } from '../../../../shared/pane-label';
 import { getTruncatedPathLabel } from '../../../../shared/path-label';
 import type { Pane, PaneRuntimeInfo, Workspace } from '../../../../shared/types';
 import { MAX_WORKSPACE_TABS } from '../../../../shared/workspace-constants';
-import { canDeleteWorkspace } from '../../../../shared/workspace-kind';
+import { canCloseWorkspace, canDeleteWorkspace } from '../../../../shared/workspace-kind';
 import { usePaneInfoStore } from '../../stores/paneInfoStore';
 import { useTabDragStore, type TabDragDescriptor } from '../../stores/tabDragStore';
 import { useUiStore } from '../../stores/uiStore';
 import { useWorkspaceStore } from '../../stores/workspaceStore';
 import { requestTabClose } from '../../tab-close/tabClose';
-import { getOpenWorkspaces } from '../../workspace/open-workspaces';
+import { requestWorkspaceClose } from '../../workspace-close/workspaceClose';
+import { getSidebarWorkspaces } from '../../workspace/open-workspaces';
 import { ContextMenu } from '../common/ContextMenu';
 import { hasActionableItem, type ContextMenuItem } from '../common/contextMenuItems';
 import { getPaneRunningIndicator } from '../common/pane-running-indicator';
@@ -191,10 +192,11 @@ function PaneSummary({
   );
 }
 
+/** Renders open workspace navigation and explicit close/delete actions. */
 export function WorkspacesView(): React.JSX.Element {
   const workspaces = useWorkspaceStore((state) => state.workspaces);
   // Closed projects must be reopened through Open Project before navigation or tab moves.
-  const openWorkspaces = useMemo(() => getOpenWorkspaces(workspaces), [workspaces]);
+  const openWorkspaces = useMemo(() => getSidebarWorkspaces(workspaces), [workspaces]);
   const paneInfosByPtyId = usePaneInfoStore((state) => state.infosByPtyId);
   const activeWorkspaceId = useWorkspaceStore((state) => state.activeWorkspaceId);
   const addWorkspaceTab = useWorkspaceStore((state) => state.addWorkspaceTab);
@@ -211,6 +213,12 @@ export function WorkspacesView(): React.JSX.Element {
   const beginTabDrag = useTabDragStore((state) => state.begin);
   const endTabDrag = useTabDragStore((state) => state.end);
   const showWorkspaceView = useUiStore((state) => state.showWorkspaceView);
+
+  const [workspaceMenu, setWorkspaceMenu] = useState<{
+    workspaceId: string;
+    x: number;
+    y: number;
+  } | null>(null);
 
   // Holds the right-clicked tab (with its owning workspace) and the click point; null while closed.
   const [tabMenu, setTabMenu] = useState<{
@@ -259,13 +267,13 @@ export function WorkspacesView(): React.JSX.Element {
   // Keep tree disclosure state local to the sidebar so it never becomes persisted workspace data.
   const [collapsedWorkspaceIds, setCollapsedWorkspaceIds] = useState<Set<string>>(() => new Set());
 
-  // Drop disclosure entries for workspaces that no longer exist so stale ids cannot leak across
+  // Drop disclosure entries for workspaces that are no longer open so stale ids cannot leak across
   // sessions or accidentally collapse a future workspace that happens to reuse the same id.
   // Adjusting state during render (rather than in an effect) is recommended for syncing derived
   // state with props/external state — see https://react.dev/learn/you-might-not-need-an-effect
   // — and avoids an extra render after every workspace list change.
   if (collapsedWorkspaceIds.size > 0) {
-    const validIds = new Set(workspaces.map((workspace) => workspace.id));
+    const validIds = new Set(openWorkspaces.map((workspace) => workspace.id));
     let hasStaleId = false;
     for (const id of collapsedWorkspaceIds) {
       if (!validIds.has(id)) {
@@ -277,6 +285,21 @@ export function WorkspacesView(): React.JSX.Element {
       setCollapsedWorkspaceIds((current) => new Set([...current].filter((id) => validIds.has(id))));
     }
   }
+
+  // A closed row retains its durable record, but must release transient sidebar interactions.
+  const isOpenWorkspaceId = (id: string): boolean =>
+    openWorkspaces.some((workspace) => workspace.id === id);
+  if (workspaceMenu && !isOpenWorkspaceId(workspaceMenu.workspaceId)) setWorkspaceMenu(null);
+  if (tabMenu && !isOpenWorkspaceId(tabMenu.workspaceId)) setTabMenu(null);
+  if (paneMenu && !isOpenWorkspaceId(paneMenu.workspaceId)) setPaneMenu(null);
+  if (dropTarget && !isOpenWorkspaceId(dropTarget.workspaceId)) setDropTarget(null);
+  if (editingWorkspaceId && !isOpenWorkspaceId(editingWorkspaceId)) setEditingWorkspaceId(null);
+  if (editingTab && !isOpenWorkspaceId(editingTab.workspaceId)) setEditingTab(null);
+  const canDeleteMenuWorkspace =
+    workspaceMenu !== null &&
+    workspaces.some(
+      (workspace) => workspace.id === workspaceMenu.workspaceId && canDeleteWorkspace(workspace),
+    );
 
   useEffect(() => {
     if (!editingWorkspaceId) return;
@@ -449,6 +472,7 @@ export function WorkspacesView(): React.JSX.Element {
     if (!hasActionableItem(buildTabMenuItems(workspaceId, tabId))) {
       return;
     }
+    setWorkspaceMenu(null);
     setPaneMenu(null);
     setTabMenu({ workspaceId, tabId, x: event.clientX, y: event.clientY });
   };
@@ -498,6 +522,7 @@ export function WorkspacesView(): React.JSX.Element {
     event.preventDefault();
     // Unlike `openTabMenu`, this intentionally skips `hasActionableItem`: a lone-pane tab's only
     // action is disabled, but the menu still opens to surface *why* via the item's `title`.
+    setWorkspaceMenu(null);
     setTabMenu(null);
     setPaneMenu({ workspaceId, sourceTabId, paneId, x: event.clientX, y: event.clientY });
   };
@@ -856,6 +881,20 @@ export function WorkspacesView(): React.JSX.Element {
                     ? 'ring-1 ring-brand'
                     : ''
                 }`}
+                onContextMenu={(event) => {
+                  event.preventDefault();
+                  // Inline rename intentionally offers neither workspace actions nor an edit menu.
+                  if (isEditing) {
+                    return;
+                  }
+                  setTabMenu(null);
+                  setPaneMenu(null);
+                  setWorkspaceMenu({
+                    workspaceId: workspace.id,
+                    x: event.clientX,
+                    y: event.clientY,
+                  });
+                }}
                 onDragOver={(event) => {
                   handleWorkspaceDragOver(event, workspace.id);
                 }}
@@ -924,17 +963,17 @@ export function WorkspacesView(): React.JSX.Element {
                   <Plus size={12} />
                 </button>
                 <button
-                  aria-label={`Delete ${workspace.name}`}
+                  aria-label={`Close ${workspace.name}`}
                   className="invisible flex size-5 shrink-0 items-center justify-center rounded text-subtle hover:bg-raised hover:text-danger disabled:cursor-default disabled:opacity-40 group-hover:visible"
-                  disabled={!canDeleteWorkspace(workspace) || isEditing}
+                  disabled={!canCloseWorkspace(workspace) || isEditing}
                   title={
-                    canDeleteWorkspace(workspace)
-                      ? `Delete ${workspace.name}`
-                      : 'The home workspace cannot be deleted'
+                    canCloseWorkspace(workspace)
+                      ? `Close ${workspace.name}`
+                      : 'The home workspace cannot be closed'
                   }
                   type="button"
                   onClick={() => {
-                    handleDeleteWorkspace(workspace);
+                    void requestWorkspaceClose(workspace.id);
                   }}
                 >
                   <X size={12} />
@@ -1104,6 +1143,31 @@ export function WorkspacesView(): React.JSX.Element {
           );
         })}
       </div>
+      {workspaceMenu && (
+        // Like the pane menu, this opens even when its only action is disabled so the item's
+        // `title` can explain why home cannot be deleted.
+        <ContextMenu
+          position={{ x: workspaceMenu.x, y: workspaceMenu.y }}
+          items={[
+            {
+              type: 'action',
+              id: 'delete-workspace',
+              label: 'Delete Workspace…',
+              disabled: !canDeleteMenuWorkspace,
+              title: canDeleteMenuWorkspace ? undefined : 'The home workspace cannot be deleted',
+              onSelect: () => {
+                const target = useWorkspaceStore
+                  .getState()
+                  .workspaces.find((workspace) => workspace.id === workspaceMenu.workspaceId);
+                if (target) handleDeleteWorkspace(target);
+              },
+            },
+          ]}
+          onClose={() => {
+            setWorkspaceMenu(null);
+          }}
+        />
+      )}
       {tabMenu && (
         <ContextMenu
           position={{ x: tabMenu.x, y: tabMenu.y }}

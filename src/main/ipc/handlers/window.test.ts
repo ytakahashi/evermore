@@ -168,6 +168,144 @@ describe('registerWindowHandlers', () => {
     expect(showMessageBox).toHaveBeenCalledTimes(2);
   });
 
+  describe('workspace close', () => {
+    it.each([
+      ['running-process copy', true, 'Terminal processes are still running in this workspace.'],
+      ['generic copy', false, 'Close this workspace?'],
+    ])('returns the selected action with %s', async (_label, runningProcesses, message) => {
+      // Given: an available window and a dialog that selects Close Tab.
+      const window = createWindow();
+      const showMessageBox = vi.fn(() => Promise.resolve({ response: 0 }));
+      registerWindowHandlers({
+        getWindow: () => window as never,
+        showMessageBox,
+        showOpenDialog: vi.fn(),
+      });
+
+      // When: the renderer requests tab-close confirmation.
+      const confirmed = await requireHandler(IPC.WINDOW_CONFIRM_CLOSE_WORKSPACE)(
+        {},
+        { runningProcesses },
+      );
+
+      // Then: the native copy reflects the request and the Close Tab response is accepted.
+      expect(confirmed).toBe(true);
+      expect(showMessageBox).toHaveBeenCalledWith(
+        window,
+        expect.objectContaining({
+          buttons: ['Close Workspace', 'Cancel'],
+          cancelId: 1,
+          defaultId: 1,
+          message,
+        }),
+      );
+    });
+
+    it('returns false when the user cancels', async () => {
+      // Given: a dialog that selects Cancel.
+      const window = createWindow();
+      const showMessageBox = vi.fn(() => Promise.resolve({ response: 1 }));
+      registerWindowHandlers({
+        getWindow: () => window as never,
+        showMessageBox,
+        showOpenDialog: vi.fn(),
+      });
+
+      // When: confirmation is requested.
+      const confirmed = await requireHandler(IPC.WINDOW_CONFIRM_CLOSE_WORKSPACE)(
+        {},
+        { runningProcesses: true },
+      );
+
+      // Then: the close is rejected.
+      expect(confirmed).toBe(false);
+    });
+
+    it('allows the close without showing a dialog when the window is unavailable', async () => {
+      // Given: there is no live window that can own a native sheet.
+      const showMessageBox = vi.fn();
+      registerWindowHandlers({ getWindow: () => null, showMessageBox, showOpenDialog: vi.fn() });
+
+      // When: confirmation is requested with a valid payload.
+      const confirmed = await requireHandler(IPC.WINDOW_CONFIRM_CLOSE_WORKSPACE)(
+        {},
+        { runningProcesses: true },
+      );
+
+      // Then: the operation is not blocked on an impossible dialog.
+      expect(confirmed).toBe(true);
+      expect(showMessageBox).not.toHaveBeenCalled();
+    });
+
+    it('allows the close without showing a dialog when the window is destroyed', async () => {
+      // Given: the renderer request races with destruction of its native window.
+      const window = createWindow(true);
+      const showMessageBox = vi.fn();
+      registerWindowHandlers({
+        getWindow: () => window as never,
+        showMessageBox,
+        showOpenDialog: vi.fn(),
+      });
+
+      // When: confirmation is requested with a valid payload.
+      const confirmed = await requireHandler(IPC.WINDOW_CONFIRM_CLOSE_WORKSPACE)(
+        {},
+        { runningProcesses: true },
+      );
+
+      // Then: an impossible sheet does not block the close or call Electron's dialog API.
+      expect(confirmed).toBe(true);
+      expect(showMessageBox).not.toHaveBeenCalled();
+    });
+
+    it.each([null, {}, { runningProcesses: 'yes' }, []])(
+      'rejects malformed confirmation payloads before resolving the window',
+      async (payload) => {
+        // Given: a window resolver whose use is observable.
+        const getWindow = vi.fn(() => null);
+        registerWindowHandlers({ getWindow, showMessageBox: vi.fn(), showOpenDialog: vi.fn() });
+
+        // When / Then: invalid renderer input is rejected without consulting native state.
+        await expect(
+          requireHandler(IPC.WINDOW_CONFIRM_CLOSE_WORKSPACE)({}, payload),
+        ).rejects.toThrow(`Invalid IPC payload for ${IPC.WINDOW_CONFIRM_CLOSE_WORKSPACE}`);
+        expect(getWindow).not.toHaveBeenCalled();
+      },
+    );
+
+    it('suppresses a second prompt while the first is open and recovers after rejection', async () => {
+      // Given: a first dialog request that remains pending.
+      const window = createWindow();
+      let rejectFirst: ((reason: Error) => void) | undefined;
+      const showMessageBox = vi
+        .fn<() => Promise<{ response: number }>>()
+        .mockImplementationOnce(
+          () =>
+            new Promise((_resolve, reject) => {
+              rejectFirst = reject;
+            }),
+        )
+        .mockResolvedValue({ response: 0 });
+      registerWindowHandlers({
+        getWindow: () => window as never,
+        showMessageBox,
+        showOpenDialog: vi.fn(),
+      });
+      const handler = requireHandler(IPC.WINDOW_CONFIRM_CLOSE_WORKSPACE);
+
+      // When: another request arrives before the first sheet settles.
+      const first = handler({}, { runningProcesses: true }) as Promise<boolean>;
+      const overlapping = await handler({}, { runningProcesses: true });
+
+      // Then: the overlapping request is cancelled, and a failed first prompt releases the guard.
+      expect(overlapping).toBe(false);
+      rejectFirst?.(new Error('dialog unavailable'));
+      await expect(first).rejects.toThrow('dialog unavailable');
+      await expect(handler({}, { runningProcesses: false })).resolves.toBe(true);
+      expect(showMessageBox).toHaveBeenCalledTimes(2);
+    });
+  });
+
   it('returns the directory selected in the native picker', async () => {
     // Given: an available window and a picker that selects one directory.
     const window = createWindow();
@@ -276,6 +414,35 @@ describe('registerWindowHandlers', () => {
     // Then: no stale invoke handler remains.
     expect(ipcMainMock.removeHandler).toHaveBeenCalledWith(IPC.WINDOW_IS_FULLSCREEN);
     expect(ipcMainMock.removeHandler).toHaveBeenCalledWith(IPC.WINDOW_CONFIRM_CLOSE_TAB);
+    expect(ipcMainMock.removeHandler).toHaveBeenCalledWith(IPC.WINDOW_CONFIRM_CLOSE_WORKSPACE);
     expect(ipcMainMock.removeHandler).toHaveBeenCalledWith(IPC.WINDOW_PICK_DIRECTORY);
   });
+});
+
+it('shares the native sheet guard between tab and workspace closes', async () => {
+  // Given: a tab-close sheet is pending.
+  resetIpcMainMock();
+  let finish!: (value: { response: number }) => void;
+  const showMessageBox = vi.fn(
+    () =>
+      new Promise<{ response: number }>((resolve) => {
+        finish = resolve;
+      }),
+  );
+  registerWindowHandlers({
+    getWindow: () => createWindow() as never,
+    showMessageBox,
+    showOpenDialog: vi.fn(),
+  });
+  const first = requireHandler(IPC.WINDOW_CONFIRM_CLOSE_TAB)({}, { runningProcesses: true });
+  // When: a workspace close arrives at the same window.
+  const second = await requireHandler(IPC.WINDOW_CONFIRM_CLOSE_WORKSPACE)(
+    {},
+    { runningProcesses: true, title: 'untrusted' },
+  );
+  finish({ response: 0 });
+  await first;
+  // Then: no overlapping sheet or renderer-provided copy is shown.
+  expect(second).toBe(false);
+  expect(showMessageBox).toHaveBeenCalledOnce();
 });
