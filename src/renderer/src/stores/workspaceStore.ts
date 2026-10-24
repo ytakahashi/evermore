@@ -11,7 +11,11 @@ import { findAdjacentPaneId, type PaneFocusDirection } from '../../../shared/pan
 import { getPathBasename } from '../../../shared/path-label';
 import type { Pane, PaneLayout, Tab, Workspace } from '../../../shared/types';
 import { MAX_WORKSPACE_TABS } from '../../../shared/workspace-constants';
-import { canDeleteWorkspace, findFallbackWorkspace } from '../../../shared/workspace-kind';
+import {
+  canCloseWorkspace,
+  canDeleteWorkspace,
+  findFallbackWorkspace,
+} from '../../../shared/workspace-kind';
 import {
   getAutomaticTabName,
   syncTabNameWithPane,
@@ -52,6 +56,8 @@ export interface WorkspaceStoreState {
   setActiveWorkspace: (id: string) => void;
   /** Opens or creates a project, retaining successful durable writes if active-ID persistence fails. */
   openProject: (rootPath: string, signal?: AbortSignal) => Promise<Workspace>;
+  /** Ends all terminal sessions while retaining the project layout for reopening. */
+  closeWorkspace: (id: string) => void;
   deleteWorkspace: (id: string) => Promise<void>;
   renameWorkspace: (id: string, name: string) => void;
   addTab: () => void;
@@ -446,14 +452,43 @@ export function createWorkspaceStore(
             await getWorkspaceApi().setActiveWorkspaceId(get().activeWorkspaceId);
             return workspace;
           }
-          if (!get().workspaces.some((current) => current.id === workspace.id)) {
-            throw new Error('Project was deleted while opening');
+          if (!findOpenWorkspace(get().workspaces, workspace.id)) {
+            // A close during active-ID persistence wins over this older open request.
+            await getWorkspaceApi().setActiveWorkspaceId(get().activeWorkspaceId);
+            throw new Error('Project was closed or deleted while opening');
           }
           set({ activeWorkspaceId: workspace.id, error: null });
           return workspace;
         } catch (error: unknown) {
           set({ error: getErrorMessage(error) });
           throw error;
+        }
+      },
+      closeWorkspace: (id: string): void => {
+        const state = get();
+        const target = state.workspaces.find((workspace) => workspace.id === id);
+        if (!target || !canCloseWorkspace(target)) return;
+
+        // Reopening restores layout/cwd, never a retired PTY or one-shot startup command.
+        const closed = {
+          ...target,
+          isOpen: false,
+          panes: target.panes.map(stripRuntimePaneFieldsForWorkspaceUpdate),
+          updatedAt: now(),
+        };
+        const workspaces = replaceWorkspace(state.workspaces, closed);
+        const activeWorkspaceId =
+          state.activeWorkspaceId === id
+            ? (findFallbackWorkspace(getOpenWorkspaces(workspaces))?.id ?? null)
+            : state.activeWorkspaceId;
+        set({ workspaces, activeWorkspaceId });
+        persistWorkspaceDebounced(id);
+        if (activeWorkspaceId !== state.activeWorkspaceId) {
+          void getWorkspaceApi()
+            .setActiveWorkspaceId(activeWorkspaceId)
+            .catch((error: unknown) => {
+              set({ error: getErrorMessage(error) });
+            });
         }
       },
       deleteWorkspace: async (id: string): Promise<void> => {
@@ -994,7 +1029,7 @@ export function createWorkspaceStore(
           }
         }
 
-        if (!targetWorkspace || !targetTab) {
+        if (!targetWorkspace?.isOpen || !targetTab) {
           return;
         }
 

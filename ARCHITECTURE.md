@@ -269,6 +269,19 @@ The renderer is a single React 19 app rendered into `#root` by `main.tsx` with `
   move destinations) list open workspaces only, and `workspaceStore` refuses to activate, select
   into, or move tabs into a closed one. Activating it would show an empty terminal area, and moving
   a tab into it would unmount the tab's terminals and dispose their live PTYs.
+- **Workspace close preserves durable structure and retires runtime state.** User requests go
+  through `workspace-close/workspaceClose.ts`, which shares `terminal-close/closePolicy.ts` and the
+  existing `app.tabCloseConfirm` setting with tab close. A workspace gets one native confirmation
+  for all of its panes. The store atomically marks it closed, strips `ptyId` and `initialCommand`,
+  and selects home if needed. Terminal unmount cleanup owns PTY disposal; persistence never disposes
+  PTYs. Reopening restores layout/cwd as fresh shells without replaying one-shot commands. Late PTY
+  exits must not alter closed layouts, and pending Open Project activation must not reactivate a
+  closed one.
+- **Home is pinned first only in the sidebar.** `getSidebarWorkspaces()` preserves relative project
+  order without mutating persisted order. Other navigation and terminal mounting retain storage
+  order through `getOpenWorkspaces()`. Closed workspaces are also excluded from agent sessions
+  before runtime cleanup finishes. The sidebar close button retains records; explicit deletion is a
+  separate context-menu action and remains unavailable for home.
 - **The renderer must not block on IPC errors.** Connection / tunnel stores preserve the last
   successful snapshot on failure so the sidebar keeps showing usable controls.
 - **Workspace persistence is debounced** in the renderer (`workspaceStore`) and flushed via

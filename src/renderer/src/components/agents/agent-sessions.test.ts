@@ -250,3 +250,30 @@ describe('collectAgentSessions', () => {
     expect(collectAgentSessions(withoutPty, {}, { retainPaneId: 'p1' })).toEqual([]);
   });
 });
+
+it('excludes closed workspaces even when stale PTY information or selection remains', () => {
+  // Given: a closed workspace whose runtime cleanup has not reached the mirror yet.
+  const closed = workspace({
+    id: 'closed',
+    name: 'Closed',
+    isOpen: false,
+    tabs: [
+      {
+        id: 'tab',
+        name: 'Agent',
+        isCustomName: false,
+        layout: { type: 'leaf', paneId: 'pane' },
+        activePaneId: 'pane',
+      },
+    ],
+    panes: [{ id: 'pane', cwd: '/tmp', ptyId: 'pty' }],
+  });
+  // When: cards are collected while a preview still references the retired pane.
+  const sessions = collectAgentSessions(
+    [closed],
+    { pty: agentInfo('pty') },
+    { retainPaneId: 'pane' },
+  );
+  // Then: no card or retained selection resurrects the closed session.
+  expect(sessions).toEqual([]);
+});

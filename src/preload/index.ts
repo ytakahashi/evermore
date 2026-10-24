@@ -171,6 +171,8 @@ const api = {
   },
   window: {
     isFullScreen: (): Promise<boolean> => ipcRenderer.invoke(IPC.WINDOW_IS_FULLSCREEN),
+    confirmCloseWorkspace: (payload: { runningProcesses: boolean }): Promise<boolean> =>
+      ipcRenderer.invoke(IPC.WINDOW_CONFIRM_CLOSE_WORKSPACE, payload),
     confirmCloseTab: (payload: { runningProcesses: boolean }): Promise<boolean> =>
       ipcRenderer.invoke(IPC.WINDOW_CONFIRM_CLOSE_TAB, payload),
     pickDirectory: (): Promise<string | null> => ipcRenderer.invoke(IPC.WINDOW_PICK_DIRECTORY),

@@ -41,7 +41,9 @@ describe('ApplicationSection', () => {
   it('updates tab-close confirmation behavior independently', async () => {
     // Given: the Application section exposes a separate tab-close policy group.
     render(<ApplicationSection />);
-    const tabCloseGroup = screen.getByRole('group', { name: 'Tab close confirmation' });
+    const tabCloseGroup = screen.getByRole('group', {
+      name: 'Tab and workspace close confirmation',
+    });
 
     // When: the user selects Always for tab closes.
     fireEvent.click(within(tabCloseGroup).getByRole('radio', { name: /always/i }));

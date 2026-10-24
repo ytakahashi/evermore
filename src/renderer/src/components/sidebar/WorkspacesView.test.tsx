@@ -824,7 +824,8 @@ describe('WorkspacesView', () => {
     );
 
     // When: that workspace is deleted from the sidebar.
-    fireEvent.click(screen.getByRole('button', { name: 'Delete Project' }));
+    fireEvent.contextMenu(screen.getByRole('button', { name: 'Project' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Delete Workspace…' }));
     await vi.advanceTimersByTimeAsync(0);
     expect(screen.queryByRole('button', { name: 'Project' })).not.toBeInTheDocument();
 
@@ -1074,15 +1075,63 @@ describe('WorkspacesView', () => {
     expect(screen.getByRole('button', { name: 'Close server' })).toBeDisabled();
   });
 
+  it('pins home first even when project storage order precedes it', () => {
+    // Given: the home record is stored after a project.
+    useWorkspaceStore.setState({ workspaces: [workspace2, workspace1] });
+    // When: the sidebar renders the workspace headings.
+    render(<WorkspacesView />);
+    const headings = screen
+      .getAllByRole('button')
+      .filter((button) => ['Default', 'Project'].includes(button.textContent ?? ''));
+    // Then: home is displayed first without mutating the store array.
+    expect(headings.map((button) => button.textContent)).toEqual(['Default', 'Project']);
+    expect(useWorkspaceStore.getState().workspaces.map((w) => w.id)).toEqual([
+      workspace2.id,
+      workspace1.id,
+    ]);
+  });
+
+  it('protects home from explicit deletion in the workspace menu', () => {
+    // Given: the home heading is present.
+    render(<WorkspacesView />);
+    // When: the user opens its context menu.
+    fireEvent.contextMenu(screen.getByRole('button', { name: 'Default' }));
+    // Then: deletion remains unavailable and the menu explains why.
+    const deleteItem = screen.getByRole('menuitem', { name: 'Delete Workspace…' });
+    expect(deleteItem).toBeDisabled();
+    expect(deleteItem).toHaveAttribute('title', 'The home workspace cannot be deleted');
+  });
+
+  it('suppresses context menus during workspace rename', () => {
+    // Given: the project name is being edited inline.
+    render(<WorkspacesView />);
+    fireEvent.doubleClick(screen.getByRole('button', { name: 'Project' }));
+    // When: the user right-clicks the rename input.
+    const notPrevented = fireEvent.contextMenu(screen.getByLabelText('Rename Project'));
+    // Then: the default menu is suppressed and no workspace menu opens.
+    expect(notPrevented).toBe(false);
+    expect(screen.queryByRole('menuitem', { name: 'Delete Workspace…' })).not.toBeInTheDocument();
+  });
+
+  it('disables workspace close during inline rename', () => {
+    // Given: project close is initially available.
+    render(<WorkspacesView />);
+    expect(screen.getByRole('button', { name: 'Close Project' })).toBeEnabled();
+    // When: the project name is edited.
+    fireEvent.doubleClick(screen.getByRole('button', { name: 'Project' }));
+    // Then: the close action cannot interrupt rename.
+    expect(screen.getByRole('button', { name: 'Close Project' })).toBeDisabled();
+  });
+
   it('deletes a project workspace when confirmed and switches active to home', async () => {
     // Given: the project workspace is active and the confirmation dialog accepts automatically.
     useWorkspaceStore.setState({ activeWorkspaceId: workspace2.id });
     vi.spyOn(window, 'confirm').mockReturnValue(true);
     render(<WorkspacesView />);
 
-    // When: the delete button for the active project is clicked.
-    const deleteButton = screen.getByRole('button', { name: 'Delete Project' });
-    fireEvent.click(deleteButton);
+    // When: explicit deletion is selected from the workspace context menu.
+    fireEvent.contextMenu(screen.getByRole('button', { name: 'Project' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Delete Workspace…' }));
 
     // workspaceDelete is invoked synchronously inside the async deleteWorkspace action.
     expect(workspaceDelete).toHaveBeenCalledWith('workspace-2');
@@ -1100,26 +1149,27 @@ describe('WorkspacesView', () => {
     vi.spyOn(window, 'confirm').mockReturnValue(false);
     render(<WorkspacesView />);
 
-    // When: the delete button is clicked but the user cancels.
-    fireEvent.click(screen.getByRole('button', { name: 'Delete Project' }));
+    // When: explicit deletion is selected but the user cancels.
+    fireEvent.contextMenu(screen.getByRole('button', { name: 'Project' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Delete Workspace…' }));
 
     // Then: nothing is deleted.
     expect(workspaceDelete).not.toHaveBeenCalled();
     expect(useWorkspaceStore.getState().workspaces).toHaveLength(2);
   });
 
-  it('disables the delete button only for the home workspace', () => {
+  it('disables the close button only for the home workspace', () => {
     // Given: home and a project workspace are loaded.
     render(<WorkspacesView />);
 
     // When: the sidebar renders.
-    const homeDeleteButton = screen.getByRole('button', { name: 'Delete Default' });
-    const projectDeleteButton = screen.getByRole('button', { name: 'Delete Project' });
+    const homeCloseButton = screen.getByRole('button', { name: 'Close Default' });
+    const projectCloseButton = screen.getByRole('button', { name: 'Close Project' });
 
-    // Then: home cannot be deleted while the project can.
-    expect(homeDeleteButton).toBeDisabled();
-    expect(homeDeleteButton).toHaveAttribute('title', 'The home workspace cannot be deleted');
-    expect(projectDeleteButton).toBeEnabled();
+    // Then: home cannot be closed while the project can.
+    expect(homeCloseButton).toBeDisabled();
+    expect(homeCloseButton).toHaveAttribute('title', 'The home workspace cannot be closed');
+    expect(projectCloseButton).toBeEnabled();
   });
 
   it('does not open the right-click menu for a lone tab with no actionable command', () => {

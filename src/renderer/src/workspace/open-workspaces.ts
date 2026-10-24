@@ -22,3 +22,12 @@ export function findOpenWorkspace(
 ): Workspace | undefined {
   return workspaces.find((workspace) => workspace.id === id && workspace.isOpen);
 }
+
+/** Returns open sidebar entries with home pinned first, without changing stored project order. */
+export function getSidebarWorkspaces(workspaces: readonly Workspace[]): Workspace[] {
+  const open = getOpenWorkspaces(workspaces);
+  return [
+    ...open.filter((workspace) => workspace.kind === 'home'),
+    ...open.filter((workspace) => workspace.kind !== 'home'),
+  ];
+}

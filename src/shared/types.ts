@@ -246,7 +246,7 @@ export interface AppSettings {
   };
   app: {
     quitConfirm: ConfirmMode;
-    /** Confirmation policy for user-initiated tab closes. */
+    /** Confirmation policy for user-initiated tab and workspace closes. */
     tabCloseConfirm: ConfirmMode;
   };
   shellIntegration: {

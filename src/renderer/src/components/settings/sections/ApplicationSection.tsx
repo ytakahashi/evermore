@@ -28,17 +28,17 @@ const QUIT_CONFIRM_OPTIONS: readonly ConfirmModeOption[] = [
 
 const TAB_CLOSE_CONFIRM_OPTIONS: readonly ConfirmModeOption[] = [
   {
-    description: 'Close tabs immediately without a confirmation dialog.',
+    description: 'Close tabs and workspaces immediately without a confirmation dialog.',
     label: 'Never',
     value: 'never',
   },
   {
-    description: 'Always ask before closing a tab.',
+    description: 'Always ask before closing a tab or workspace.',
     label: 'Always',
     value: 'always',
   },
   {
-    description: 'Ask when a terminal process is running in the tab.',
+    description: 'Ask when a terminal process is running in the tab or workspace.',
     label: 'When processes are running',
     value: 'running-only',
   },
@@ -115,7 +115,7 @@ export function ApplicationSection(): React.JSX.Element {
         value={quitConfirm}
       />
       <ConfirmModeFieldset
-        legend="Tab close confirmation"
+        legend="Tab and workspace close confirmation"
         name="tab-close-confirm"
         onChange={(value) => {
           void updateSettings({ app: { tabCloseConfirm: value } });

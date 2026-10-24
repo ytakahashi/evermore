@@ -18,3 +18,8 @@ export function canDeleteWorkspace(workspace: Workspace): boolean {
 export function findFallbackWorkspace(workspaces: Workspace[]): Workspace | null {
   return workspaces.find((workspace) => workspace.kind === 'home') ?? workspaces[0] ?? null;
 }
+
+/** Returns whether an open project may end its terminal sessions while retaining its layout. */
+export function canCloseWorkspace(workspace: Workspace): boolean {
+  return workspace.kind === 'project' && workspace.isOpen;
+}

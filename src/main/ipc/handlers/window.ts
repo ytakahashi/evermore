@@ -18,14 +18,17 @@ interface RegisterWindowHandlersOptions {
   ) => Promise<{ canceled: boolean; filePaths: string[] }>;
 }
 
-function parseConfirmCloseTabPayload(payload: unknown): { runningProcesses: boolean } {
+function parseConfirmClosePayload(
+  payload: unknown,
+  channel: string,
+): { runningProcesses: boolean } {
   if (
     typeof payload !== 'object' ||
     payload === null ||
     Array.isArray(payload) ||
     typeof (payload as Record<string, unknown>)['runningProcesses'] !== 'boolean'
   ) {
-    throw new Error(`Invalid IPC payload for ${IPC.WINDOW_CONFIRM_CLOSE_TAB}`);
+    throw new Error(`Invalid IPC payload for ${channel}`);
   }
 
   return {
@@ -53,11 +56,27 @@ function createCloseTabDialogOptions(runningProcesses: boolean): MessageBoxOptio
   };
 }
 
+function createCloseWorkspaceDialogOptions(runningProcesses: boolean): MessageBoxOptions {
+  return {
+    type: 'warning',
+    buttons: ['Close Workspace', 'Cancel'],
+    defaultId: 1,
+    cancelId: 1,
+    title: 'Close Workspace?',
+    message: runningProcesses
+      ? 'Terminal processes are still running in this workspace.'
+      : 'Close this workspace?',
+    detail:
+      'Closing this workspace will stop all of its terminal sessions. Its layout and working directories will be kept for reopening.',
+    noLink: true,
+  };
+}
+
 /**
  * Registers IPC handlers for window-level state and actions.
  */
 export function registerWindowHandlers(options: RegisterWindowHandlersOptions): () => void {
-  let closeTabPromptOpen = false;
+  let closePromptOpen = false;
   let directoryPickerOpen = false;
 
   ipcMain.handle(IPC.WINDOW_IS_FULLSCREEN, () => {
@@ -65,27 +84,31 @@ export function registerWindowHandlers(options: RegisterWindowHandlersOptions): 
     return window ? window.isFullScreen() : false;
   });
 
-  ipcMain.handle(IPC.WINDOW_CONFIRM_CLOSE_TAB, async (_event, payload: unknown) => {
-    const { runningProcesses } = parseConfirmCloseTabPayload(payload);
-    const window = options.getWindow();
-    if (!window || window.isDestroyed()) {
-      return true;
-    }
-    if (closeTabPromptOpen) {
-      return false;
-    }
+  // Both terminal-close operations share one sheet guard for this window.
+  const closeConfirmations = [
+    [IPC.WINDOW_CONFIRM_CLOSE_TAB, createCloseTabDialogOptions],
+    [IPC.WINDOW_CONFIRM_CLOSE_WORKSPACE, createCloseWorkspaceDialogOptions],
+  ] as const;
+  for (const [channel, createDialogOptions] of closeConfirmations) {
+    ipcMain.handle(channel, async (_event, payload: unknown) => {
+      const { runningProcesses } = parseConfirmClosePayload(payload, channel);
+      const window = options.getWindow();
+      if (!window || window.isDestroyed()) {
+        return true;
+      }
+      if (closePromptOpen) {
+        return false;
+      }
 
-    closeTabPromptOpen = true;
-    try {
-      const result = await options.showMessageBox(
-        window,
-        createCloseTabDialogOptions(runningProcesses),
-      );
-      return result.response === 0;
-    } finally {
-      closeTabPromptOpen = false;
-    }
-  });
+      closePromptOpen = true;
+      try {
+        const result = await options.showMessageBox(window, createDialogOptions(runningProcesses));
+        return result.response === 0;
+      } finally {
+        closePromptOpen = false;
+      }
+    });
+  }
 
   ipcMain.handle(IPC.WINDOW_PICK_DIRECTORY, async () => {
     const window = options.getWindow();
@@ -107,6 +130,7 @@ export function registerWindowHandlers(options: RegisterWindowHandlersOptions): 
   return () => {
     ipcMain.removeHandler(IPC.WINDOW_IS_FULLSCREEN);
     ipcMain.removeHandler(IPC.WINDOW_CONFIRM_CLOSE_TAB);
+    ipcMain.removeHandler(IPC.WINDOW_CONFIRM_CLOSE_WORKSPACE);
     ipcMain.removeHandler(IPC.WINDOW_PICK_DIRECTORY);
   };
 }
