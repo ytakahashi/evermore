@@ -33,11 +33,13 @@ Zsh shell integration gives the workspace UI shell-level accuracy and responsive
 
 ### AI Agent Hook Integration
 
-The **Agents** view shows prompts and activity across workspaces. Select a session to operate its
-existing terminal alongside the list without switching workspaces. Click the selected row again or
-close the panel to return to the full-width list. **Open in workspace** navigates to the original
-pane. Esc reaches the agent while the terminal has focus; outside the terminal, it returns to the
-workspace. Selection resets when you leave the Agents view.
+The **Agents** view shows prompts and activity across workspaces, grouped under a heading per
+workspace with projects first and the home workspace last. Each card shows its tab and its cwd
+relative to the project root. Select a session to operate its existing terminal alongside the list
+without switching workspaces. Click the selected row again or close the panel to return to the
+full-width list. **Open in workspace** navigates to the original pane. Esc reaches the agent while
+the terminal has focus; outside the terminal, it returns to the workspace. Selection resets when you
+leave the Agents view.
 
 With AI agent hooks configured, the sidebar reflects per-pane agent status in real time:
 

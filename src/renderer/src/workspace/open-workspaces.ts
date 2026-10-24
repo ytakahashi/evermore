@@ -31,3 +31,19 @@ export function getSidebarWorkspaces(workspaces: readonly Workspace[]): Workspac
     ...open.filter((workspace) => workspace.kind !== 'home'),
   ];
 }
+
+/**
+ * Returns open Agents view entries with home last, sharing the sidebar's project order.
+ *
+ * Home is the place for work that belongs to no project, while agents mostly run in projects, so
+ * the Agents view leads with projects. Both surfaces derive project order from storage order here;
+ * only home's position differs. Home is never user-reorderable, so a future workspace reordering
+ * feature only needs to change project order for both surfaces to follow.
+ */
+export function getAgentsViewWorkspaces(workspaces: readonly Workspace[]): Workspace[] {
+  const open = getOpenWorkspaces(workspaces);
+  return [
+    ...open.filter((workspace) => workspace.kind !== 'home'),
+    ...open.filter((workspace) => workspace.kind === 'home'),
+  ];
+}

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vite-plus/test';
 import type { PaneLayout, PaneRuntimeInfo, Workspace } from '../../../../shared/types';
-import { collectAgentSessions } from './agent-sessions';
+import { collectAgentSessions, formatAgentCwdLabel, groupAgentSessions } from './agent-sessions';
 
 function runtimeInfo(ptyId: string, overrides: Partial<PaneRuntimeInfo> = {}): PaneRuntimeInfo {
   return {
@@ -119,6 +119,8 @@ describe('collectAgentSessions', () => {
         ptyId: 'pty-1',
         workspaceId: 'ws-1',
         workspaceName: 'Project',
+        workspaceKind: 'project',
+        workspaceRootPath: '/tmp',
         tabId: 'tab-1',
         tabName: 'server',
         info: infos['pty-1'],
@@ -306,4 +308,126 @@ it('excludes closed workspaces even when stale PTY information or selection rema
   );
   // Then: no card or retained selection resurrects the closed session.
   expect(sessions).toEqual([]);
+});
+
+function agentWorkspace(
+  id: string,
+  paneIds: readonly string[],
+  overrides: Partial<Workspace> = {},
+): Workspace {
+  return workspace({
+    id,
+    name: id,
+    tabs: [
+      {
+        id: `${id}-tab`,
+        name: 'shell',
+        isCustomName: false,
+        layout:
+          paneIds.length === 2
+            ? splitLayout(paneIds[0], paneIds[1])
+            : { type: 'leaf', paneId: paneIds[0] },
+        activePaneId: paneIds[0],
+      },
+    ],
+    panes: paneIds.map((paneId) => ({ id: paneId, cwd: '/tmp', ptyId: `pty-${paneId}` })),
+    ...overrides,
+  });
+}
+
+it('places home sessions after every project session', () => {
+  // Given: home stored first, followed by two projects with agents.
+  const workspaces = [
+    agentWorkspace('home', ['h1'], { kind: 'home', rootPath: '/Users/tester' }),
+    agentWorkspace('a', ['a1', 'a2'], { rootPath: '/work/a' }),
+    agentWorkspace('b', ['b1']),
+  ];
+  const infos = Object.fromEntries(
+    ['h1', 'a1', 'a2', 'b1'].map((paneId) => [`pty-${paneId}`, agentInfo(`pty-${paneId}`)]),
+  );
+
+  // When: the sessions are collected.
+  const sessions = collectAgentSessions(workspaces, infos);
+
+  // Then: projects keep storage order and carry their workspace context, with home last.
+  expect(sessions.map((session) => session.paneId)).toEqual(['a1', 'a2', 'b1', 'h1']);
+  expect(sessions[0]).toMatchObject({ workspaceKind: 'project', workspaceRootPath: '/work/a' });
+  expect(sessions[3]).toMatchObject({ workspaceKind: 'home', workspaceRootPath: '/Users/tester' });
+});
+
+describe('groupAgentSessions', () => {
+  it('groups consecutive sessions by workspace in flat order', () => {
+    // Given: sessions from two projects and home, with an agentless project in between.
+    const workspaces = [
+      agentWorkspace('home', ['h1'], { kind: 'home', name: 'Default' }),
+      agentWorkspace('a', ['a1', 'a2']),
+      agentWorkspace('idle', ['i1']),
+      agentWorkspace('b', ['b1']),
+    ];
+    const infos = Object.fromEntries(
+      ['h1', 'a1', 'a2', 'b1'].map((paneId) => [`pty-${paneId}`, agentInfo(`pty-${paneId}`)]),
+    );
+    const sessions = collectAgentSessions(workspaces, infos);
+
+    // When: the sessions are grouped.
+    const groups = groupAgentSessions(sessions);
+
+    // Then: each group keeps its sessions in order, and the agentless workspace has no group.
+    expect(
+      groups.map((group) => [group.workspaceId, group.sessions.map(({ paneId }) => paneId)]),
+    ).toEqual([
+      ['a', ['a1', 'a2']],
+      ['b', ['b1']],
+      ['home', ['h1']],
+    ]);
+    expect(groups.flatMap((group) => group.sessions)).toEqual(sessions);
+    expect(groups[2]).toMatchObject({ workspaceName: 'Default', workspaceRootPath: '/tmp' });
+  });
+
+  it('returns no groups without sessions', () => {
+    // Given / When / Then: an empty list yields no headings.
+    expect(groupAgentSessions([])).toEqual([]);
+  });
+});
+
+describe('formatAgentCwdLabel', () => {
+  const home = '/Users/tester';
+  const root = '/Users/tester/ghq/evermore';
+
+  it('omits the project root and shows paths inside it relative to the root', () => {
+    // Given: panes at and below a project root, including a trailing slash on either side.
+
+    // When / Then: the root itself is omitted and descendants are relative.
+    expect(formatAgentCwdLabel(root, 'project', root, home)).toBeNull();
+    expect(formatAgentCwdLabel(`${root}/`, 'project', root, home)).toBeNull();
+    expect(formatAgentCwdLabel(`${root}/src/main`, 'project', `${root}/`, home)).toBe('src/main');
+  });
+
+  it('shows paths outside the project as home-shortened absolute paths', () => {
+    // Given: a pane that left the project, including a sibling sharing the root as a text prefix.
+
+    // When / Then: segment boundaries decide containment.
+    expect(formatAgentCwdLabel('/Users/tester/ghq', 'project', root, home)).toBe('~/ghq');
+    expect(formatAgentCwdLabel(`${root}-v2/src`, 'project', root, home)).toBe(
+      '~/ghq/evermore-v2/src',
+    );
+    expect(formatAgentCwdLabel('/opt/tools', 'project', root, home)).toBe('/opt/tools');
+  });
+
+  it('shows home paths as home-shortened absolute paths, including the root', () => {
+    // Given: panes in the home workspace.
+
+    // When / Then: the home root is shown rather than omitted.
+    expect(formatAgentCwdLabel(home, 'home', home, home)).toBe('~');
+    expect(formatAgentCwdLabel(`${home}/Downloads`, 'home', home, home)).toBe('~/Downloads');
+  });
+
+  it('keeps absolute paths when the home directory is unknown', () => {
+    // Given: no home workspace has been loaded.
+
+    // When / Then: paths are shown without shortening.
+    expect(formatAgentCwdLabel('/Users/tester/ghq', 'project', root, undefined)).toBe(
+      '/Users/tester/ghq',
+    );
+  });
 });

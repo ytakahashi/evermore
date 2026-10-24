@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vite-plus/test';
 import type { Workspace } from '../../../shared/types';
-import { findOpenWorkspace, getOpenWorkspaces, getSidebarWorkspaces } from './open-workspaces';
+import {
+  findOpenWorkspace,
+  getAgentsViewWorkspaces,
+  getOpenWorkspaces,
+  getSidebarWorkspaces,
+} from './open-workspaces';
 
 function workspace(id: string, isOpen: boolean): Workspace {
   return {
@@ -50,4 +55,20 @@ it('pins home only in sidebar order without mutating storage order', () => {
   expect(sidebar.map((entry) => entry.id)).toEqual(['home', 'a', 'b']);
   expect(getOpenWorkspaces(entries).map((entry) => entry.id)).toEqual(['a', 'home', 'b']);
   expect(entries.map((entry) => entry.id)).toEqual(['a', 'closed', 'home', 'b']);
+});
+
+it('places home last in Agents view order while keeping project order', () => {
+  // Given: home stored first, between projects, and a closed entry.
+  const home = { ...workspace('home', true), kind: 'home' as const };
+  const entries = [home, workspace('a', true), workspace('closed', false), workspace('b', true)];
+  // When: the Agents view collects its entries.
+  const agentsView = getAgentsViewWorkspaces(entries);
+  // Then: projects keep storage order, home follows them, and closed entries are omitted.
+  expect(agentsView.map((entry) => entry.id)).toEqual(['a', 'b', 'home']);
+  expect(
+    getAgentsViewWorkspaces([workspace('a', true), home, workspace('b', true)]).map(
+      (entry) => entry.id,
+    ),
+  ).toEqual(['a', 'b', 'home']);
+  expect(entries.map((entry) => entry.id)).toEqual(['home', 'a', 'closed', 'b']);
 });

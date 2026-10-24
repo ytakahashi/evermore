@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vite-plus/test';
-import { getPathBasename, getTruncatedPathLabel } from './path-label';
+import { getPathBasename, getTruncatedPathLabel, shortenHomePath } from './path-label';
 
 describe('getPathBasename', () => {
   it('returns the final path segment for POSIX-style paths', () => {
@@ -74,5 +74,34 @@ describe('getTruncatedPathLabel', () => {
     expect(getTruncatedPathLabel('/Users/tester/project/src', { ellipsis: '..' })).toBe(
       '../project/src',
     );
+  });
+});
+
+describe('shortenHomePath', () => {
+  it('abbreviates the home directory and paths beneath it', () => {
+    // Given: paths at and below the home directory.
+
+    // When / Then: the home prefix becomes the tilde shorthand.
+    expect(shortenHomePath('/Users/tester', '/Users/tester')).toBe('~');
+    expect(shortenHomePath('/Users/tester/', '/Users/tester')).toBe('~');
+    expect(shortenHomePath('/Users/tester/project/src', '/Users/tester/')).toBe('~/project/src');
+  });
+
+  it('leaves paths outside the home directory unchanged', () => {
+    // Given: a sibling sharing the home prefix as text, and an unrelated path.
+
+    // When / Then: only whole-segment matches are abbreviated.
+    expect(shortenHomePath('/Users/tester2/project', '/Users/tester')).toBe(
+      '/Users/tester2/project',
+    );
+    expect(shortenHomePath('/opt/tools', '/Users/tester')).toBe('/opt/tools');
+  });
+
+  it('does not abbreviate without a usable home directory', () => {
+    // Given: the home directory is unknown or is the filesystem root.
+
+    // When / Then: the path is returned as is rather than collapsing into the shorthand.
+    expect(shortenHomePath('/Users/tester', undefined)).toBe('/Users/tester');
+    expect(shortenHomePath('/Users/tester', '/')).toBe('/Users/tester');
   });
 });
