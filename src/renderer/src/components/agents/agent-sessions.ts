@@ -1,6 +1,7 @@
 import { formatAgentDisplayName } from '../../../../shared/ai-integration/agent-display-name';
 import { flattenLayout } from '../../../../shared/pane-layout';
 import type { PaneRuntimeInfo, Workspace } from '../../../../shared/types';
+import { formatWorkspaceLabels } from '../../workspace/workspace-labels';
 
 /**
  * One agent pane, or a selected live pane retained while agent information is unavailable,
@@ -42,6 +43,7 @@ export function collectAgentSessions(
   options: { retainPaneId?: string } = {},
 ): AgentSession[] {
   const sessions: AgentSession[] = [];
+  const workspaceLabels = formatWorkspaceLabels(workspaces);
 
   for (const workspace of workspaces) {
     if (!workspace.isOpen) continue;
@@ -67,7 +69,7 @@ export function collectAgentSessions(
           paneId: pane.id,
           ptyId: pane.ptyId,
           workspaceId: workspace.id,
-          workspaceName: workspace.name,
+          workspaceName: workspaceLabels.get(workspace.id) ?? workspace.name,
           tabId: tab.id,
           tabName: tab.name,
           info,

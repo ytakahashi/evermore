@@ -357,6 +357,34 @@ describe('TabBar', () => {
     expect(screen.queryByRole('menu')).not.toBeInTheDocument();
   });
 
+  it('disambiguates move destinations against the excluded source workspace', () => {
+    // Given: a two-tab source and a destination share a saved name.
+    const source = {
+      ...workspace,
+      name: 'api',
+      rootPath: '/foo/api',
+      tabs: [...workspace.tabs, { ...workspace.tabs[0], id: 'extra-tab', name: 'build' }],
+    };
+    const destination = {
+      ...workspace,
+      id: 'destination',
+      kind: 'project' as const,
+      name: 'api',
+      rootPath: '/bar/api',
+      tabs: [],
+      panes: [],
+    };
+    useWorkspaceStore.setState({ workspaces: [source, destination] });
+    render(<TabBar />);
+
+    // When: the source tab's menu excludes its own workspace from move targets.
+    fireEvent.contextMenu(screen.getByRole('button', { name: 'zsh' }));
+
+    // Then: the sole destination still carries its qualifier.
+    expect(screen.getByRole('menuitem', { name: 'api — bar' })).toBeInTheDocument();
+    expect(screen.queryByRole('menuitem', { name: 'api — foo' })).not.toBeInTheDocument();
+  });
+
   it('moves a tab to another workspace from its right-click menu', () => {
     // Given: a two-tab workspace plus a second workspace to receive the tab.
     useWorkspaceStore.setState({

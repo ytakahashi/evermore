@@ -969,6 +969,41 @@ describe('WorkspacesView', () => {
     useUiStore.setState({ projectPaletteOpen: false });
   });
 
+  it('uses disambiguated labels for navigation and moves while editing the saved name', async () => {
+    // Given: home and project share a name but have different parent directories.
+    useWorkspaceStore.setState({
+      workspaces: [
+        { ...workspace1, name: 'api', rootPath: '/foo/api' },
+        { ...workspace2, name: 'api', rootPath: '/bar/api' },
+      ],
+    });
+    render(<WorkspacesView />);
+    expect(screen.getByRole('button', { name: 'api — foo' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Close api — bar' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'New tab in api — bar' })).toBeInTheDocument();
+    fireEvent.contextMenu(screen.getByRole('button', { name: 'logs (1 pane)' }));
+    expect(screen.getByRole('menuitem', { name: 'api — foo' })).toBeInTheDocument();
+    fireEvent.keyDown(window, { key: 'Escape' });
+
+    // When: the project is renamed using its unqualified saved name.
+    fireEvent.doubleClick(screen.getByRole('button', { name: 'api — bar' }));
+    const input = screen.getByRole('textbox', { name: 'Rename api' });
+    expect(input).toHaveValue('api');
+    fireEvent.change(input, { target: { value: 'Backend' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+    await vi.advanceTimersByTimeAsync(300);
+
+    // Then: both labels update and persistence receives only the explicitly entered name.
+    expect(screen.getByRole('button', { name: 'api' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Backend' })).toBeInTheDocument();
+    expect(workspaceUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: workspace2.id,
+        name: 'Backend',
+      }),
+    );
+  });
+
   it('renames a workspace with Enter and persists the new name', async () => {
     // Given: the sidebar shows two workspaces.
     render(<WorkspacesView />);
@@ -1142,6 +1177,46 @@ describe('WorkspacesView', () => {
     // Then: the project is removed and home becomes active.
     expect(useWorkspaceStore.getState().workspaces).toHaveLength(1);
     expect(useWorkspaceStore.getState().activeWorkspaceId).toBe('workspace-1');
+  });
+
+  it.each([
+    { id: 'foo', label: 'api — foo' },
+    { id: 'bar', label: 'api — bar' },
+  ])('identifies $label in the irreversible deletion confirmation', async ({ id, label }) => {
+    // Given: two deletable projects share their saved name.
+    useWorkspaceStore.setState({
+      workspaces: [
+        workspace1,
+        { ...workspace2, id: 'foo', name: 'api', rootPath: '/foo/api' },
+        {
+          ...workspace2,
+          id: 'bar',
+          name: 'api',
+          rootPath: '/bar/api',
+          tabs: [],
+          panes: [],
+          activeTabId: null,
+        },
+      ],
+    });
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    render(<WorkspacesView />);
+
+    // When: explicit deletion is requested for one of the projects.
+    fireEvent.contextMenu(screen.getByRole('button', { name: label }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Delete Workspace…' }));
+    await vi.advanceTimersByTimeAsync(0);
+
+    // Then: confirmation uses the same distinguishing label as navigation and deletes that ID.
+    expect(confirm).toHaveBeenCalledWith(`Delete workspace "${label}"? This cannot be undone.`);
+    expect(workspaceDelete).toHaveBeenCalledWith(id);
+    expect(useWorkspaceStore.getState().workspaces.some((workspace) => workspace.id === id)).toBe(
+      false,
+    );
+    expect(
+      useWorkspaceStore.getState().workspaces.find((workspace) => workspace.kind === 'project')
+        ?.name,
+    ).toBe('api');
   });
 
   it('does not delete when the confirmation dialog is dismissed', async () => {
