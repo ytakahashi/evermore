@@ -28,7 +28,7 @@ export type SettingsSectionId =
   | 'advancedFeatures'
   | 'about';
 
-interface UiStoreState {
+export interface UiStoreState {
   windowFullScreen: boolean;
   fullscreenPaneId: string | null;
   sidebarView: SidebarView;

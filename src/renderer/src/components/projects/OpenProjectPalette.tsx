@@ -1,5 +1,6 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Search } from 'lucide-react';
+import { usePickerSession } from '../common/usePickerSession';
 import { createProjectCandidates, filterProjectCandidates } from '../../projects/projectCandidates';
 import { useSettingsStore } from '../../stores/settingsStore';
 import { useUiStore } from '../../stores/uiStore';
@@ -22,25 +23,12 @@ function ProjectPicker(): React.JSX.Element {
   const workspaceError = useWorkspaceStore((state) => state.error);
   const [query, setQuery] = useState('');
   const [selectedIndex, setSelectedIndex] = useState(0);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const dialogRef = useRef<HTMLDivElement>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
-  // True while this picker is mounted. `openProject` can resolve after unmount, and its
-  // continuation must not set state or move focus for a session the user already left.
-  const sessionRef = useRef(false);
-  // Aborted on every exit path (Escape, backdrop, navigation, unmount). Aborting cannot undo a
-  // create/reopen that main already persisted; it only stops the store from activating the result.
-  const controllerRef = useRef<AbortController | null>(null);
-  // Synchronous double-submit guard. `busy` state lags a render behind, so a repeated Enter in the
-  // same tick would otherwise start a second request.
-  const submittingRef = useRef(false);
-  // Cleared by exits that choose their own focus destination (a completed selection focuses the
-  // terminal, the empty-state link opens Settings) so unmount does not pull focus back.
-  const restoreFocusRef = useRef(true);
-  // The element focused before this picker opened, recorded once per session. StrictMode replays
-  // the mount effect after the input already has focus, so a per-run capture would record the input.
-  const previousFocusRef = useRef<Element | null>(null);
+  const closePicker = useUiStore((state) => state.closeProjectPalette);
+  const { dialogRef, inputRef, busy, error, close, submit, onKeyDown } = usePickerSession({
+    focusRequest,
+    selectIsOpen: (state) => state.projectPaletteOpen,
+    closePicker,
+  });
   const entries = useMemo(
     () =>
       createProjectCandidates(settings?.projects.directories ?? [], workspaces, activeWorkspaceId),
@@ -56,101 +44,21 @@ function ProjectPicker(): React.JSX.Element {
   const loadError = !settings ? settingsError : workspaces.length === 0 ? workspaceError : null;
   const ready = !loading && !loadError;
 
-  // A layout effect so the input is focused and the previous focus is captured before paint, and
-  // so cleanup runs before passive effects of the next view (such as terminal focus) on close.
-  useLayoutEffect(() => {
-    sessionRef.current = true;
-    controllerRef.current = new AbortController();
-    const unsubscribe = useUiStore.subscribe((current, previous) => {
-      // Navigation behind the modal invalidates the session, including any pending selection.
-      if (current.activeView !== previous.activeView && current.projectPaletteOpen) {
-        controllerRef.current?.abort();
-        current.closeProjectPalette();
-      }
-    });
-    const previousFocus = (previousFocusRef.current ??= document.activeElement);
-    const previousView = useUiStore.getState().activeView;
-    inputRef.current?.focus();
-    return () => {
-      sessionRef.current = false;
-      unsubscribe();
-      controllerRef.current?.abort();
-      const ui = useUiStore.getState();
-      // Switching palettes or completing a selection owns its next focus destination.
-      if (
-        restoreFocusRef.current &&
-        !ui.tabSearchOpen &&
-        !ui.projectPaletteOpen &&
-        ui.activeView === previousView &&
-        previousFocus instanceof HTMLElement &&
-        previousFocus.isConnected
-      ) {
-        previousFocus.focus();
-      }
-    };
-  }, []);
-
-  // Invoking Open Project while already open refocuses the input without resetting the query.
-  useEffect(() => {
-    inputRef.current?.focus();
-  }, [focusRequest]);
-
   useEffect(() => {
     dialogRef.current
       ?.querySelector(`[id="project-option-${index}"]`)
       ?.scrollIntoView?.({ block: 'nearest' });
-  }, [index, filtered]);
+  }, [dialogRef, index, filtered]);
 
-  const close = (): void => {
-    controllerRef.current?.abort();
-    useUiStore.getState().closeProjectPalette();
-  };
   const select = async (rootPath: string): Promise<void> => {
-    if (submittingRef.current || !ready) return;
-    submittingRef.current = true;
-    setBusy(true);
-    setError(null);
-    const previousView = useUiStore.getState().activeView;
-    try {
-      await useWorkspaceStore.getState().openProject(rootPath, controllerRef.current?.signal);
-      const ui = useUiStore.getState();
-      // The user may have dismissed or navigated away during IPC; the project stays persisted but
-      // the picker must not override the view they moved to.
-      if (!sessionRef.current || !ui.projectPaletteOpen || ui.activeView !== previousView) return;
-      restoreFocusRef.current = false;
-      close();
-      useUiStore.getState().focusWorkspace();
-    } catch (caught: unknown) {
-      if (sessionRef.current) setError(caught instanceof Error ? caught.message : 'Unknown error');
-    } finally {
-      submittingRef.current = false;
-      if (sessionRef.current) setBusy(false);
-    }
-  };
-
-  const onKeyDown = (event: KeyboardEvent<HTMLDivElement>): void => {
-    // Escape during IME composition cancels the composition only. It still must not bubble to
-    // view-level handlers such as Agents view's Escape-to-return.
-    if (event.nativeEvent.isComposing) {
-      if (event.key === 'Escape') event.stopPropagation();
-      return;
-    }
-    if (event.key === 'Escape') {
-      event.preventDefault();
-      event.stopPropagation();
-      close();
-    } else if (event.key === 'Tab') {
-      // Trap Tab inside the modal. Options are excluded because they are reached with arrows via
-      // `aria-activedescendant`, not as separate tab stops.
-      const controls = [
-        ...(dialogRef.current?.querySelectorAll<HTMLElement>(
-          'input:not(:disabled), button:not(:disabled):not([role="option"])',
-        ) ?? []),
-      ];
-      const current = controls.indexOf(document.activeElement as HTMLElement);
-      event.preventDefault();
-      controls[(current + (event.shiftKey ? -1 : 1) + controls.length) % controls.length]?.focus();
-    }
+    if (!ready) return;
+    await submit(
+      (signal) => useWorkspaceStore.getState().openProject(rootPath, signal),
+      () => {
+        close(false);
+        useUiStore.getState().focusWorkspace();
+      },
+    );
   };
 
   return (
@@ -267,8 +175,7 @@ function ProjectPicker(): React.JSX.Element {
                 type="button"
                 className="mt-2 underline"
                 onClick={() => {
-                  restoreFocusRef.current = false;
-                  close();
+                  close(false);
                   useUiStore.getState().openSettings('projects');
                 }}
               >
