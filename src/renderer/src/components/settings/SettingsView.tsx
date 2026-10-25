@@ -1,5 +1,6 @@
 import { X } from 'lucide-react';
 import { useUiStore, type SettingsSectionId } from '../../stores/uiStore';
+import { AgentPresetsSection } from './sections/AgentPresetsSection';
 import { AboutSection } from './sections/AboutSection';
 import { AdvancedFeaturesSection } from './sections/AdvancedFeaturesSection';
 import { AIIntegrationSection } from './sections/AIIntegrationSection';
@@ -23,6 +24,7 @@ const SECTIONS: readonly SectionDefinition[] = [
   { id: 'shortcuts', label: 'Shortcuts', Component: ShortcutsSection },
   { id: 'application', label: 'Application', Component: ApplicationSection },
   { id: 'projects', label: 'Projects', Component: ProjectsSection },
+  { id: 'agentPresets', label: 'Agent presets', Component: AgentPresetsSection },
   { id: 'recommendedSetup', label: 'Recommended setup', Component: RecommendedSetupSection },
   { id: 'aiIntegration', label: 'AI Integration', Component: AIIntegrationSection },
   { id: 'notifications', label: 'Notifications', Component: NotificationsSection },

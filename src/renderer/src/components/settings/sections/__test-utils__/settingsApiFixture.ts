@@ -52,6 +52,7 @@ function defaultMerge(current: AppSettings, patch: SettingsUpdate): AppSettings 
     notifications: patch.notifications
       ? { ...current.notifications, ...patch.notifications }
       : current.notifications,
+    agents: patch.agents ? { ...current.agents, ...patch.agents } : current.agents,
     projects: patch.projects ? { ...current.projects, ...patch.projects } : current.projects,
   };
 }

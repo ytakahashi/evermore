@@ -30,9 +30,15 @@ export function AppShell(): React.JSX.Element {
       // In the workspace view Esc must reach the terminal (vim, less, etc.), which is exactly what
       // this condition excludes.
       if (event.key === 'Escape') {
+        // Esc during IME composition cancels the composition, so leave it to the focused input
+        // and keep its draft. WebKit can report `isComposing: false` for the key that ends
+        // composition, hence the 229 keyCode check (same as the terminal command blocks).
+        if (event.isComposing || event.keyCode === 229) {
+          return;
+        }
         const currentActiveView = useUiStore.getState().activeView;
-        // xterm stops propagation for handled keys, but IME composition and screen reader mode
-        // can let Esc bubble here. Do not dismiss the view for those terminal-originated events.
+        // xterm stops propagation for handled keys, but screen reader mode can still let Esc
+        // bubble here. Do not dismiss the view for those terminal-originated events.
         const isTerminalTarget = event.target instanceof Element && event.target.closest('.xterm');
         if (currentActiveView !== 'workspace' && !isTerminalTarget) {
           event.preventDefault();

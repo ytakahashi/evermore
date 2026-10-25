@@ -115,6 +115,28 @@ describe('AppShell', () => {
     expect(useUiStore.getState().activeView).toBe('workspace');
   });
 
+  it.each([
+    ['isComposing', { isComposing: true }],
+    ['keyCode 229', { keyCode: 229 }],
+  ])('keeps the settings view open for Esc during IME composition (%s)', (_name, init) => {
+    // Given: the user is composing text in a settings input.
+    useUiStore.setState({ activeView: 'settings' });
+    render(<AppShell />);
+    const event = new KeyboardEvent('keydown', {
+      key: 'Escape',
+      bubbles: true,
+      cancelable: true,
+      ...init,
+    });
+
+    // When: Esc is pressed to cancel the composition.
+    window.dispatchEvent(event);
+
+    // Then: the shell leaves the key to the IME and does not dismiss the view.
+    expect(useUiStore.getState().activeView).toBe('settings');
+    expect(event.defaultPrevented).toBe(false);
+  });
+
   it('does not interfere with Esc when the workspace view is active', () => {
     // Given: a separate Esc listener installed by another component (representing
     // MainTerminalArea fullscreen handling) that should still observe the event.

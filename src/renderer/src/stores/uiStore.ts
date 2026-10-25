@@ -22,6 +22,7 @@ export type SettingsSectionId =
   | 'shortcuts'
   | 'application'
   | 'projects'
+  | 'agentPresets'
   | 'recommendedSetup'
   | 'aiIntegration'
   | 'notifications'

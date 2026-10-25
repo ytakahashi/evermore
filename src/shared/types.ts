@@ -194,6 +194,15 @@ export type FontWeight = '100' | '200' | '300' | '400' | '500' | '600' | '700' |
 
 export type ConfirmMode = 'always' | 'never' | 'running-only';
 
+/** A reusable user-authored shell command, optionally scoped to one project. */
+export interface AgentPreset {
+  id: string;
+  label: string;
+  command: string;
+  /** An absolute project root; omitted for presets shared by all projects. */
+  rootPath?: string;
+}
+
 /**
  * Application-wide user preferences persisted by the main process.
  *
@@ -268,6 +277,10 @@ export interface AppSettings {
      * notifications.
      */
     aiAgentAwaitingInputEnabled: boolean;
+  };
+  agents: {
+    /** User order is preserved across shared and project-scoped presets. */
+    presets: AgentPreset[];
   };
   projects: {
     /**

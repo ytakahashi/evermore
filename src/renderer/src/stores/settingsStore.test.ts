@@ -31,6 +31,7 @@ function makeSettingsApi(initial: AppSettings = structuredClone(DEFAULT_APP_SETT
         notifications: patch.notifications
           ? { ...state.current.notifications, ...patch.notifications }
           : state.current.notifications,
+        agents: patch.agents ? { ...state.current.agents, ...patch.agents } : state.current.agents,
         projects: patch.projects
           ? { ...state.current.projects, ...patch.projects }
           : state.current.projects,
@@ -147,6 +148,32 @@ describe('createSettingsStore', () => {
     expect(api.update).toHaveBeenCalledWith(
       expect.objectContaining({ projects: { directories: ['/work/b'] } }),
     );
+  });
+
+  it('coalesces preset arrays while preserving sibling settings', async () => {
+    // Given: a loaded isolated store with a short debounce.
+    const { api } = makeSettingsApi();
+    const store = createSettingsStore({ settingsApi: api, debounceMs: 20 });
+    await store.getState().loadSettings();
+    const presets = [{ id: 'custom', label: '', command: 'agent --flag' }];
+
+    // When: presets are replaced twice alongside another settings section.
+    void store.getState().updateSettings({ agents: { presets } });
+    expect(store.getState().settings?.agents.presets).toEqual(presets);
+    void store.getState().updateSettings({ projects: { directories: ['/work'] } });
+    const flushed = store.getState().updateSettings({ agents: { presets: [] } });
+    await vi.advanceTimersByTimeAsync(30);
+    await flushed;
+
+    // Then: the final array replaces the earlier one and the sibling update survives.
+    expect(api.update).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({
+        agents: { presets: [] },
+        projects: { directories: ['/work'] },
+      }),
+    );
+    expect(store.getState().settings?.agents.presets).toEqual([]);
+    expect(store.getState().settings?.projects.directories).toEqual(['/work']);
   });
 
   it('reconciles local state with the post-write settings returned by main', async () => {

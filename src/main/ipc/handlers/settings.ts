@@ -44,6 +44,7 @@ function readSettingsUpdate(payload: unknown): SettingsUpdate {
     app: readSectionUpdate<AppSettings['app']>(settings.app),
     shellIntegration: readSectionUpdate<AppSettings['shellIntegration']>(settings.shellIntegration),
     notifications: readSectionUpdate<AppSettings['notifications']>(settings.notifications),
+    agents: readSectionUpdate<AppSettings['agents']>(settings.agents),
     projects: readSectionUpdate<AppSettings['projects']>(settings.projects),
   };
 }
