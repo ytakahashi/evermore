@@ -81,3 +81,23 @@ export function getTruncatedPathLabel(
 
   return `${ellipsis}/${segments.slice(-maxSegments).join('/')}`;
 }
+
+/**
+ * Abbreviates the home directory prefix of an absolute POSIX path to `~`.
+ *
+ * The prefix must match whole segments so `/Users/foo2` is not shortened for `/Users/foo`. Paths
+ * are returned unchanged when the home directory is unknown or is `/`, where every path would
+ * otherwise collapse into `~`.
+ */
+export function shortenHomePath(path: string, homeDirectory: string | undefined): string {
+  const home = homeDirectory?.replace(/\/+$/, '');
+  if (!home) {
+    return path;
+  }
+
+  if (path === home || path === `${home}/`) {
+    return '~';
+  }
+
+  return path.startsWith(`${home}/`) ? `~${path.slice(home.length)}` : path;
+}

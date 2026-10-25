@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
 import type { PaneRuntimeInfo, Workspace } from '../../../../shared/types';
 import { usePaneInfoStore } from '../../stores/paneInfoStore';
@@ -83,7 +83,7 @@ const workspace2: Workspace = {
       activePaneId: 'workspace-2-pane-1',
     },
   ],
-  panes: [{ id: 'workspace-2-pane-1', cwd: '/Users/tester/project/server', ptyId: 'pty-2' }],
+  panes: [{ id: 'workspace-2-pane-1', cwd: '/Users/tester/project/src', ptyId: 'pty-2' }],
   activeTabId: 'workspace-2-tab-1',
   createdAt: 1,
   updatedAt: 1,
@@ -140,8 +140,8 @@ describe('AgentsView', () => {
   });
 
   it.each([
-    { key: 'ArrowDown', endpoint: /Default \/ zsh/, overshoot: 'ArrowUp' },
-    { key: 'ArrowUp', endpoint: /Project \/ server/, overshoot: 'ArrowDown' },
+    { key: 'ArrowDown', endpoint: /server/, overshoot: 'ArrowUp' },
+    { key: 'ArrowUp', endpoint: /zsh/, overshoot: 'ArrowDown' },
   ])(
     'focuses an endpoint from the list with $key and clamps there',
     ({ key, endpoint, overshoot }) => {
@@ -177,12 +177,13 @@ describe('AgentsView', () => {
 
     // When: ArrowDown is pressed twice.
     fireEvent.keyDown(list, { key: 'ArrowDown' });
-    fireEvent.keyDown(screen.getByRole('button', { name: /Default \/ zsh/ }), {
+    fireEvent.keyDown(screen.getByRole('button', { name: /server/ }), {
       key: 'ArrowDown',
     });
 
-    // Then: the last card has focus, and no session is selected or previewed.
-    expect(screen.getByRole('button', { name: /Project \/ server/ })).toHaveFocus();
+    // Then: the last card, in the home group after the project group, has focus, and no session
+    // is selected or previewed.
+    expect(screen.getByRole('button', { name: /zsh/ })).toHaveFocus();
     expect(screen.queryByRole('button', { pressed: true })).not.toBeInTheDocument();
     expect(
       screen.queryByRole('region', { name: 'Selected agent terminal' }),
@@ -195,7 +196,7 @@ describe('AgentsView', () => {
       infosByPtyId: { 'pty-1': agentInfo('pty-1'), 'pty-2': agentInfo('pty-2') },
     });
     render(<AgentsView />);
-    const last = screen.getByRole('button', { name: /Project \/ server/ });
+    const last = screen.getByRole('button', { name: /zsh/ });
     fireEvent.click(last);
     const list = screen.getByLabelText('Agent sessions');
     list.focus();
@@ -205,7 +206,7 @@ describe('AgentsView', () => {
 
     // Then: focus moves up from the selected card instead of jumping to the last endpoint, and the
     // selection is left unchanged.
-    expect(screen.getByRole('button', { name: /Default \/ zsh/ })).toHaveFocus();
+    expect(screen.getByRole('button', { name: /server/ })).toHaveFocus();
     expect(last).toHaveAttribute('aria-pressed', 'true');
   });
 
@@ -213,7 +214,7 @@ describe('AgentsView', () => {
     // Given: a focused, unselected session in another workspace.
     usePaneInfoStore.setState({ infosByPtyId: { 'pty-2': agentInfo('pty-2') } });
     render(<AgentsView />);
-    const card = screen.getByRole('button', { name: /Project \/ server/ });
+    const card = screen.getByRole('button', { name: /server/ });
     card.focus();
 
     // When: Enter is pressed on the card.
@@ -233,7 +234,7 @@ describe('AgentsView', () => {
     // Given: a selected session in another workspace, with focus on the list container.
     usePaneInfoStore.setState({ infosByPtyId: { 'pty-2': agentInfo('pty-2') } });
     render(<AgentsView />);
-    fireEvent.click(screen.getByRole('button', { name: /Project \/ server/ }));
+    fireEvent.click(screen.getByRole('button', { name: /server/ }));
     const list = screen.getByLabelText('Agent sessions');
     list.focus();
 
@@ -300,7 +301,7 @@ describe('AgentsView', () => {
     const list = screen.getByLabelText('Agent sessions');
 
     // When: ArrowDown arrives from an excluded source.
-    dispatch(screen.getByRole('button', { name: /Default \/ zsh/ }));
+    dispatch(screen.getByRole('button', { name: /zsh/ }));
 
     // Then: focus does not move to a card.
     expect(list).toHaveFocus();
@@ -311,7 +312,7 @@ describe('AgentsView', () => {
     // Given: a focused card.
     usePaneInfoStore.setState({ infosByPtyId: { 'pty-1': agentInfo('pty-1') } });
     render(<AgentsView />);
-    const card = screen.getByRole('button', { name: /Default \/ zsh/ });
+    const card = screen.getByRole('button', { name: /zsh/ });
     card.focus();
 
     // When: Space is pressed on the card.
@@ -326,7 +327,7 @@ describe('AgentsView', () => {
     // Given: a selected session whose panel close button has focus.
     usePaneInfoStore.setState({ infosByPtyId: { 'pty-1': agentInfo('pty-1') } });
     render(<AgentsView />);
-    const card = screen.getByRole('button', { name: /Default \/ zsh/ });
+    const card = screen.getByRole('button', { name: /zsh/ });
     fireEvent.click(card);
     const close = screen.getByRole('button', { name: 'Close agent terminal' });
     close.focus();
@@ -362,7 +363,7 @@ describe('AgentsView', () => {
     // Given: a Tab-focused card without a terminal selection.
     usePaneInfoStore.setState({ infosByPtyId: { 'pty-1': agentInfo('pty-1') } });
     render(<AgentsView />);
-    screen.getByRole('button', { name: /Default \/ zsh/ }).focus();
+    screen.getByRole('button', { name: /zsh/ }).focus();
 
     // When: agent detection removes that unselected row.
     act(() => usePaneInfoStore.setState({ infosByPtyId: {} }));
@@ -383,7 +384,7 @@ describe('AgentsView', () => {
         <AgentsView />
       </>,
     );
-    const card = screen.getByRole('button', { name: /Default \/ zsh/ });
+    const card = screen.getByRole('button', { name: /zsh/ });
     fireEvent.click(card);
     card.focus();
     const external = getByLabelText('Sidebar control');
@@ -431,7 +432,7 @@ describe('AgentsView', () => {
     expect(screen.getByText('Claude Code')).toBeInTheDocument();
     expect(screen.getByText('Bash: pnpm test')).toBeInTheDocument();
     expect(screen.getByTitle(prompt)).toHaveTextContent(prompt);
-    expect(screen.getByText('Default / zsh')).toBeInTheDocument();
+    expect(screen.getByText('zsh')).toBeInTheDocument();
   });
 
   it('renders a multi-line prompt with its line breaks intact', () => {
@@ -510,7 +511,7 @@ describe('AgentsView', () => {
     render(<AgentsView />);
 
     // When: the card is clicked.
-    fireEvent.click(screen.getByText('Project / server'));
+    fireEvent.click(screen.getByRole('button', { name: /server/ }));
 
     // Then: selection keeps the Agents view and active workspace unchanged.
     expect(useUiStore.getState().activeView).toBe('agents');
@@ -547,7 +548,7 @@ describe('AgentsView', () => {
     // Given: an agent row in the full-width list.
     usePaneInfoStore.setState({ infosByPtyId: { 'pty-1': agentInfo('pty-1') } });
     render(<AgentsView />);
-    const row = screen.getByRole('button', { name: /Default \/ zsh/ });
+    const row = screen.getByRole('button', { name: /zsh/ });
 
     // When: the row is selected.
     fireEvent.click(row);
@@ -577,17 +578,14 @@ describe('AgentsView', () => {
     expect(
       screen.queryByRole('region', { name: 'Selected agent terminal' }),
     ).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Default \/ zsh/ })).toHaveAttribute(
-      'aria-pressed',
-      'false',
-    );
+    expect(screen.getByRole('button', { name: /zsh/ })).toHaveAttribute('aria-pressed', 'false');
   });
 
   it('keeps an ended agent selected until explicitly closed', () => {
     // Given: a selected agent.
     usePaneInfoStore.setState({ infosByPtyId: { 'pty-1': agentInfo('pty-1') } });
     render(<AgentsView />);
-    fireEvent.click(screen.getByRole('button', { name: /Default \/ zsh/ }));
+    fireEvent.click(screen.getByRole('button', { name: /zsh/ }));
 
     // When: its agent status disappears.
     act(() => {
@@ -622,7 +620,7 @@ describe('AgentsView', () => {
       // Given: a selected agent pane.
       usePaneInfoStore.setState({ infosByPtyId: { 'pty-1': agentInfo('pty-1') } });
       render(<AgentsView />);
-      fireEvent.click(screen.getByRole('button', { name: /Default \/ zsh/ }));
+      fireEvent.click(screen.getByRole('button', { name: /zsh/ }));
 
       // When: the structural model loses the pane or its PTY.
       act(() => {
@@ -646,4 +644,78 @@ describe('AgentsView', () => {
       expect(screen.getByText('No agents detected')).toBeInTheDocument();
     },
   );
+
+  it('groups cards under workspace headings with projects first and home last', () => {
+    // Given: agents in home and a project, plus an open project without agents.
+    const idle: Workspace = { ...workspace2, id: 'idle', name: 'Idle', tabs: [], panes: [] };
+    useWorkspaceStore.setState({ workspaces: [workspace1, workspace2, idle] });
+    usePaneInfoStore.setState({
+      infosByPtyId: { 'pty-1': agentInfo('pty-1'), 'pty-2': agentInfo('pty-2') },
+    });
+
+    // When: the agents view renders.
+    render(<AgentsView />);
+
+    // Then: each workspace with agents has a heading naming it and its home-shortened root, in
+    // the same order arrow keys follow, and the agentless workspace has no section.
+    const headings = screen.getAllByRole('heading', { level: 2 });
+    expect(headings.map((heading) => heading.textContent)).toEqual([
+      'Project ~/project',
+      'Default ~',
+    ]);
+    expect(screen.queryByRole('region', { name: /Idle/ })).not.toBeInTheDocument();
+    const project = screen.getByRole('region', { name: 'Project ~/project' });
+    expect(within(project).getByRole('button', { name: /server/ })).toBeInTheDocument();
+    const home = screen.getByRole('region', { name: 'Default ~' });
+    expect(within(home).getByRole('button', { name: /zsh/ })).toBeInTheDocument();
+  });
+
+  it('locates each card by tab and workspace-relative cwd without repeating the workspace', () => {
+    // Given: a project agent in a subdirectory, a project agent at the root, and a home agent.
+    const atRoot: Workspace = {
+      ...workspace2,
+      id: 'workspace-3',
+      name: 'Other',
+      rootPath: '/Users/tester/other',
+      tabs: [
+        {
+          id: 'workspace-3-tab-1',
+          name: 'root-tab',
+          isCustomName: false,
+          layout: { type: 'leaf', paneId: 'workspace-3-pane-1' },
+          activePaneId: 'workspace-3-pane-1',
+        },
+      ],
+      panes: [{ id: 'workspace-3-pane-1', cwd: '/Users/tester/other', ptyId: 'pty-3' }],
+      activeTabId: 'workspace-3-tab-1',
+    };
+    useWorkspaceStore.setState({ workspaces: [workspace1, workspace2, atRoot] });
+    usePaneInfoStore.setState({
+      infosByPtyId: {
+        'pty-1': agentInfo('pty-1'),
+        'pty-2': agentInfo('pty-2'),
+        'pty-3': agentInfo('pty-3'),
+      },
+    });
+
+    // When: the agents view renders.
+    render(<AgentsView />);
+
+    // Then: cards show the tab and cwd relative to the heading, the project root is omitted, and
+    // home keeps its root as `~`.
+    const subdirectory = screen.getByRole('button', { name: /server/ });
+    expect(within(subdirectory).getByTitle('/Users/tester/project/src')).toHaveTextContent('src');
+    expect(subdirectory).not.toHaveTextContent('Project');
+    const root = screen.getByRole('button', { name: /root-tab/ });
+    expect(within(root).queryByTitle('/Users/tester/other')).not.toBeInTheDocument();
+    const homeCard = screen.getByRole('button', { name: /zsh/ });
+    expect(within(homeCard).getByTitle('/Users/tester')).toHaveTextContent('~');
+
+    // When: a terminal panel opens and the list becomes compact.
+    fireEvent.click(subdirectory);
+
+    // Then: compact cards keep the tab but drop the cwd line.
+    expect(within(subdirectory).getByText('server')).toBeInTheDocument();
+    expect(within(subdirectory).queryByTitle('/Users/tester/project/src')).not.toBeInTheDocument();
+  });
 });

@@ -1,18 +1,26 @@
 import { useLayoutEffect, useRef, useState } from 'react';
 import { formatAgentActivityDetail } from '../../../../shared/agent-label';
-import { getTruncatedPathLabel } from '../../../../shared/path-label';
+import { shortenHomePath } from '../../../../shared/path-label';
 import { usePaneInfoStore } from '../../stores/paneInfoStore';
 import { useUiStore } from '../../stores/uiStore';
 import { useWorkspaceStore } from '../../stores/workspaceStore';
 import { getPaneRunningIndicator } from '../common/pane-running-indicator';
 import { SparklesIcon } from '../common/SparklesIcon';
 import { AgentTerminalPanel } from './AgentTerminalPanel';
-import { collectAgentSessions, getAgentSessionName, type AgentSession } from './agent-sessions';
+import {
+  collectAgentSessions,
+  formatAgentCwdLabel,
+  getAgentSessionName,
+  groupAgentSessions,
+  type AgentSession,
+} from './agent-sessions';
 
 interface AgentCardProps {
   session: AgentSession;
   /** Index into the rendered list; only used to keep SVG gradient ids unique. */
   cardIndex: number;
+  /** Location within the workspace; `null` when the pane sits at the project root. */
+  cwdLabel: string | null;
   onSelect: () => void;
   compact: boolean;
   selected: boolean;
@@ -21,6 +29,7 @@ interface AgentCardProps {
 function AgentCard({
   session,
   cardIndex,
+  cwdLabel,
   onSelect,
   compact,
   selected,
@@ -58,10 +67,13 @@ function AgentCard({
           </span>
         )}
         <div className="mt-0.5 flex min-w-0 flex-col gap-0.5 text-xs text-muted">
-          <span className="truncate">{`${session.workspaceName} / ${session.tabName}`}</span>
-          {!compact && (
+          {/* The workspace is named by the section heading, so the card only locates the pane
+              within it. The cwd is cut at the end by CSS rather than by segments: an ellipsis
+              prefix would hide whether the label is relative or starts with `/` or `~`. */}
+          <span className="truncate">{session.tabName}</span>
+          {!compact && cwdLabel !== null && (
             <span className="truncate font-mono text-[11px]" title={session.cwd}>
-              {getTruncatedPathLabel(session.cwd)}
+              {cwdLabel}
             </span>
           )}
         </div>
@@ -145,6 +157,12 @@ function AgentSessionsView(): React.JSX.Element {
     retainPaneId: selectedPaneId ?? undefined,
   });
   const selectedSession = sessions.find((session) => session.paneId === selectedPaneId);
+  const groups = groupAgentSessions(sessions);
+  // Cards are indexed by flat order so SVG gradient ids stay unique across groups.
+  const cardIndexByPaneId = new Map(sessions.map((session, index) => [session.paneId, index]));
+  // Relies on the main-process store syncing home's rootPath to the current home directory on
+  // every load, which avoids exposing the home directory through preload.
+  const homeDirectory = workspaces.find((workspace) => workspace.kind === 'home')?.rootPath;
 
   // Reset against the structural model, not polling: ended agents remain usable shells.
   if (selectedPaneId && !selectedSession) setSelectedPaneId(null);
@@ -262,20 +280,51 @@ function AgentSessionsView(): React.JSX.Element {
           {sessions.length === 0 ? (
             <EmptyState />
           ) : (
-            <div className="flex flex-col gap-2">
-              {sessions.map((session, cardIndex) => (
-                <AgentCard
-                  key={session.paneId}
-                  cardIndex={cardIndex}
-                  session={session}
-                  compact={!!selectedSession}
-                  selected={session.paneId === selectedPaneId}
-                  onSelect={() => {
-                    if (session.paneId === selectedPaneId) closeSelection();
-                    else setSelectedPaneId(session.paneId);
-                  }}
-                />
-              ))}
+            <div className="flex flex-col gap-4">
+              {groups.map((group) => {
+                const headingId = `agents-group-${group.workspaceId}`;
+                return (
+                  <section
+                    key={group.workspaceId}
+                    aria-labelledby={headingId}
+                    className="flex flex-col gap-2"
+                  >
+                    <h2 id={headingId} className="flex min-w-0 items-baseline gap-2 px-1 text-xs">
+                      {/* The name only shrinks once the path has fully collapsed. */}
+                      <span className="max-w-full shrink-0 truncate font-semibold text-foreground">
+                        {group.workspaceName}
+                      </span>
+                      {/* Flex layout drops this space visually, but it keeps the heading's
+                          accessible name from fusing the name and path into one word. */}{' '}
+                      <span
+                        className="min-w-0 truncate font-mono text-[11px] text-subtle"
+                        title={group.workspaceRootPath}
+                      >
+                        {shortenHomePath(group.workspaceRootPath, homeDirectory)}
+                      </span>
+                    </h2>
+                    {group.sessions.map((session) => (
+                      <AgentCard
+                        key={session.paneId}
+                        cardIndex={cardIndexByPaneId.get(session.paneId) ?? 0}
+                        cwdLabel={formatAgentCwdLabel(
+                          session.cwd,
+                          session.workspaceKind,
+                          session.workspaceRootPath,
+                          homeDirectory,
+                        )}
+                        session={session}
+                        compact={!!selectedSession}
+                        selected={session.paneId === selectedPaneId}
+                        onSelect={() => {
+                          if (session.paneId === selectedPaneId) closeSelection();
+                          else setSelectedPaneId(session.paneId);
+                        }}
+                      />
+                    ))}
+                  </section>
+                );
+              })}
             </div>
           )}
         </div>
