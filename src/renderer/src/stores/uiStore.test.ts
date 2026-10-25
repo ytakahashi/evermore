@@ -17,10 +17,51 @@ describe('useUiStore', () => {
       activeView: 'workspace',
       tabSearchOpen: false,
       projectPaletteOpen: false,
+      launchPaletteOpen: false,
+      launchPaletteFocusRequest: 0,
+      pendingAgentSelectionPaneId: null,
+      lastAgentPresetId: null,
       projectPaletteFocusRequest: 0,
       settingsSection: 'terminal',
       terminalFocusRequest: 0,
     });
+  });
+
+  it('keeps launch and existing palettes mutually exclusive', () => {
+    // Given: the project picker is open.
+    useUiStore.getState().openProjectPalette();
+    // When: launch is opened and requested again.
+    useUiStore.getState().openLaunchPalette();
+    const request = useUiStore.getState().launchPaletteFocusRequest;
+    useUiStore.getState().openLaunchPalette();
+    // Then: repeated invocation refocuses it, and other palettes replace it.
+    expect(useUiStore.getState()).toMatchObject({
+      launchPaletteOpen: true,
+      projectPaletteOpen: false,
+      tabSearchOpen: false,
+      launchPaletteFocusRequest: request + 1,
+    });
+    expect(selectIsWorkspaceInteractive(useUiStore.getState())).toBe(false);
+    useUiStore.getState().openTabSearch();
+    expect(useUiStore.getState().launchPaletteOpen).toBe(false);
+    useUiStore.getState().openLaunchPalette();
+    useUiStore.getState().openProjectPalette();
+    expect(useUiStore.getState().launchPaletteOpen).toBe(false);
+  });
+
+  it('keeps only the newest pending selection and clears it on departure', () => {
+    // Given: Agents receives two successful launch requests.
+    useUiStore.getState().openAgents();
+    useUiStore.getState().requestAgentSelection('old');
+    useUiStore.getState().requestAgentSelection('new');
+    // When: an old continuation tries to consume the request.
+    useUiStore.getState().consumeAgentSelection('old');
+    // Then: the newer request survives, until the view is left.
+    expect(useUiStore.getState().pendingAgentSelectionPaneId).toBe('new');
+    useUiStore.getState().openSettings();
+    expect(useUiStore.getState().pendingAgentSelectionPaneId).toBeNull();
+    useUiStore.getState().requestAgentSelection('late');
+    expect(useUiStore.getState().pendingAgentSelectionPaneId).toBeNull();
   });
 
   it('defaults to the workspaces sidebar view and open sidebar with default width', () => {
@@ -290,6 +331,7 @@ describe('useUiStore', () => {
     const closed = {
       activeView: 'workspace',
       projectPaletteOpen: false,
+      launchPaletteOpen: false,
       tabSearchOpen: false,
     } as const;
 

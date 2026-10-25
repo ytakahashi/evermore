@@ -87,10 +87,10 @@ function nameScore(name: string, query: string): number | null {
  * `/Users/<name>/ghq/github.com`, so a subsequence match would accept nearly every candidate for
  * short queries.
  */
-export function filterProjectCandidates(
-  entries: ProjectCandidate[],
+export function filterProjectCandidates<T extends ProjectCandidate>(
+  entries: T[],
   query: string,
-): ProjectCandidate[] {
+): T[] {
   const normalized = query.trim().toLocaleLowerCase();
   if (!normalized) return entries;
   return entries

@@ -1,7 +1,7 @@
 export const MAX_ID_LENGTH = 256;
 export const MAX_ALIAS_LENGTH = 512;
 export const MAX_PATH_LENGTH = 4_096;
-export const MAX_NAME_LENGTH = 256;
+export { MAX_WORKSPACE_NAME_LENGTH as MAX_NAME_LENGTH } from '../../shared/workspace-constants';
 export const MAX_COMMAND_LENGTH = 16_384;
 export const MAX_PTY_WRITE_LENGTH = 1_048_576;
 export const MAX_PTY_DIMENSION = 10_000;

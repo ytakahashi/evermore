@@ -135,7 +135,7 @@ export function usePickerSession({
 
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>): void => {
     // IME Escape cancels composition without reaching view-level Escape handlers.
-    if (event.nativeEvent.isComposing) {
+    if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) {
       if (event.key === 'Escape') event.stopPropagation();
       return;
     }

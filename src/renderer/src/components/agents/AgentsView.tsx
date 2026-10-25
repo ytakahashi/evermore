@@ -1,4 +1,5 @@
 import { useLayoutEffect, useRef, useState } from 'react';
+import { Plus } from 'lucide-react';
 import { formatAgentActivityDetail } from '../../../../shared/agent-label';
 import { shortenHomePath } from '../../../../shared/path-label';
 import { usePaneInfoStore } from '../../stores/paneInfoStore';
@@ -149,13 +150,15 @@ function AgentSessionsView(): React.JSX.Element {
   const infosByPtyId = usePaneInfoStore((state) => state.infosByPtyId);
   const selectWorkspacePane = useWorkspaceStore((state) => state.selectWorkspacePane);
   const showWorkspaceView = useUiStore((state) => state.showWorkspaceView);
+  const pendingPaneId = useUiStore((state) => state.pendingAgentSelectionPaneId);
   const [selectedPaneId, setSelectedPaneId] = useState<string | null>(null);
   const listRef = useRef<HTMLDivElement | null>(null);
   const viewRef = useRef<HTMLElement | null>(null);
   const focusedElementRef = useRef<HTMLElement | null>(null);
   const sessions = collectAgentSessions(workspaces, infosByPtyId, {
-    retainPaneId: selectedPaneId ?? undefined,
+    retainPaneIds: [selectedPaneId, pendingPaneId].filter((id): id is string => id !== null),
   });
+  const pendingSession = sessions.find((session) => session.paneId === pendingPaneId);
   const selectedSession = sessions.find((session) => session.paneId === selectedPaneId);
   const groups = groupAgentSessions(sessions);
   // Cards are indexed by flat order so SVG gradient ids stay unique across groups.
@@ -165,11 +168,22 @@ function AgentSessionsView(): React.JSX.Element {
   const homeDirectory = workspaces.find((workspace) => workspace.kind === 'home')?.rootPath;
 
   // Reset against the structural model, not polling: ended agents remain usable shells.
-  if (selectedPaneId && !selectedSession) setSelectedPaneId(null);
+  // Adopt a ready launch request before paint, then consume the external handoff after commit.
+  if (pendingSession && pendingSession.paneId !== selectedPaneId)
+    setSelectedPaneId(pendingSession.paneId);
+  else if (selectedPaneId && !selectedSession) setSelectedPaneId(null);
 
   useLayoutEffect(() => {
     listRef.current?.focus();
   }, []);
+
+  useLayoutEffect(() => {
+    if (!pendingPaneId) return;
+    const exists = workspaces.some(
+      (workspace) => workspace.isOpen && workspace.panes.some((pane) => pane.id === pendingPaneId),
+    );
+    if (pendingSession || !exists) useUiStore.getState().consumeAgentSelection(pendingPaneId);
+  }, [pendingPaneId, pendingSession, workspaces]);
 
   const focusCard = (paneId: string): void => {
     const card = Array.from(
@@ -200,6 +214,7 @@ function AgentSessionsView(): React.JSX.Element {
     if (
       event.defaultPrevented ||
       event.nativeEvent.isComposing ||
+      event.nativeEvent.keyCode === 229 ||
       event.metaKey ||
       event.ctrlKey ||
       event.altKey ||
@@ -219,7 +234,10 @@ function AgentSessionsView(): React.JSX.Element {
     if (!card && event.target !== event.currentTarget) return;
     const paneId = card?.dataset.agentPaneId ?? selectedPaneId;
 
-    if (event.key === 'Enter') {
+    if (event.key.toLowerCase() === 'n') {
+      event.preventDefault();
+      useUiStore.getState().openLaunchPalette();
+    } else if (event.key === 'Enter') {
       const session = sessions.find((candidate) => candidate.paneId === paneId);
       if (!session) return;
       // Enter normally clicks the button, which would also toggle selection after navigation.
@@ -263,10 +281,20 @@ function AgentSessionsView(): React.JSX.Element {
       className="flex h-full min-h-0 w-full flex-col bg-background text-foreground"
     >
       <header className="flex flex-wrap items-center justify-between gap-2 border-b border-border px-4 py-2">
-        <h1 className="text-sm font-semibold">Agents</h1>
+        <div className="flex items-center gap-2">
+          <h1 className="text-sm font-semibold">Agents</h1>
+          <button
+            type="button"
+            aria-label="Launch agent"
+            className="rounded p-1 text-muted hover:bg-raised hover:text-foreground"
+            onClick={() => useUiStore.getState().openLaunchPalette()}
+          >
+            <Plus size={16} />
+          </button>
+        </div>
         <p className="text-xs text-muted">
           In the list: <kbd>Esc</kbd> Back · <kbd>↑↓</kbd> Move · <kbd>Space</kbd> Preview ·{' '}
-          <kbd>Enter</kbd> Open in workspace
+          <kbd>Enter</kbd> Open in workspace · <kbd>N</kbd> New
         </p>
       </header>
       <div className="flex min-h-0 min-w-0 flex-1">

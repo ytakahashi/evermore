@@ -40,6 +40,18 @@ export interface UiStoreState {
   tabSearchOpen: boolean;
   projectPaletteOpen: boolean;
   projectPaletteFocusRequest: number;
+  launchPaletteOpen: boolean;
+  launchPaletteFocusRequest: number;
+  lastAgentPresetId: string | null;
+  pendingAgentSelectionPaneId: string | null;
+  openLaunchPalette: () => void;
+  closeLaunchPalette: () => void;
+  /** Records a successful launch for the next preset selection. */
+  rememberAgentPreset: (id: string) => void;
+  /** Requests selection once the launched pane has a PTY. */
+  requestAgentSelection: (paneId: string) => void;
+  /** Consumes only the matching request so a newer launch cannot be cleared by stale work. */
+  consumeAgentSelection: (paneId: string) => void;
   settingsSection: SettingsSectionId;
   terminalFocusRequest: number;
   openProjectPalette: () => void;
@@ -76,14 +88,17 @@ export interface UiStoreState {
  * workspace commands and delayed terminal focus stay suspended behind it.
  */
 export function selectIsPaletteOpen(
-  state: Pick<UiStoreState, 'projectPaletteOpen' | 'tabSearchOpen'>,
+  state: Pick<UiStoreState, 'projectPaletteOpen' | 'tabSearchOpen' | 'launchPaletteOpen'>,
 ): boolean {
-  return state.projectPaletteOpen || state.tabSearchOpen;
+  return state.projectPaletteOpen || state.tabSearchOpen || state.launchPaletteOpen;
 }
 
 /** Returns whether the workspace is visible and not covered by a modal picker. */
 export function selectIsWorkspaceInteractive(
-  state: Pick<UiStoreState, 'activeView' | 'projectPaletteOpen' | 'tabSearchOpen'>,
+  state: Pick<
+    UiStoreState,
+    'activeView' | 'projectPaletteOpen' | 'tabSearchOpen' | 'launchPaletteOpen'
+  >,
 ): boolean {
   return state.activeView === 'workspace' && !selectIsPaletteOpen(state);
 }
@@ -99,11 +114,31 @@ export const useUiStore = create<UiStoreState>((set, get) => ({
   tabSearchOpen: false,
   projectPaletteOpen: false,
   projectPaletteFocusRequest: 0,
+  launchPaletteOpen: false,
+  launchPaletteFocusRequest: 0,
+  lastAgentPresetId: null,
+  pendingAgentSelectionPaneId: null,
+  openLaunchPalette: () =>
+    set((state) => ({
+      launchPaletteOpen: true,
+      projectPaletteOpen: false,
+      tabSearchOpen: false,
+      launchPaletteFocusRequest: state.launchPaletteFocusRequest + 1,
+    })),
+  closeLaunchPalette: () => set({ launchPaletteOpen: false }),
+  rememberAgentPreset: (id) => set({ lastAgentPresetId: id }),
+  requestAgentSelection: (paneId) => {
+    if (get().activeView === 'agents') set({ pendingAgentSelectionPaneId: paneId });
+  },
+  consumeAgentSelection: (paneId) => {
+    if (get().pendingAgentSelectionPaneId === paneId) set({ pendingAgentSelectionPaneId: null });
+  },
   settingsSection: 'terminal',
   terminalFocusRequest: 0,
   openProjectPalette: () =>
     set((state) => ({
       projectPaletteOpen: true,
+      launchPaletteOpen: false,
       tabSearchOpen: false,
       projectPaletteFocusRequest: state.projectPaletteFocusRequest + 1,
     })),
@@ -111,6 +146,7 @@ export const useUiStore = create<UiStoreState>((set, get) => ({
   focusWorkspace: () =>
     set((state) => ({
       activeView: 'workspace',
+      pendingAgentSelectionPaneId: null,
       terminalFocusRequest: state.terminalFocusRequest + 1,
     })),
   setSettingsSection: (settingsSection) => set({ settingsSection }),
@@ -129,6 +165,7 @@ export const useUiStore = create<UiStoreState>((set, get) => ({
     // shortcuts.
     set((state) => ({
       sidebarView: view,
+      pendingAgentSelectionPaneId: null,
       activeView: state.activeView === 'workspace' ? state.activeView : 'workspace',
     }));
   },
@@ -149,7 +186,7 @@ export const useUiStore = create<UiStoreState>((set, get) => ({
     });
   },
   setActiveView: (view) => {
-    set({ activeView: view });
+    set({ activeView: view, ...(view === 'agents' ? {} : { pendingAgentSelectionPaneId: null }) });
   },
   setTabBarOpen: (open) => {
     set({ tabBarOpen: open });
@@ -158,7 +195,7 @@ export const useUiStore = create<UiStoreState>((set, get) => ({
     set((state) => ({ tabBarOpen: !state.tabBarOpen }));
   },
   openTabSearch: () => {
-    set({ tabSearchOpen: true, projectPaletteOpen: false });
+    set({ tabSearchOpen: true, projectPaletteOpen: false, launchPaletteOpen: false });
   },
   closeTabSearch: () => {
     set({ tabSearchOpen: false });
@@ -167,7 +204,11 @@ export const useUiStore = create<UiStoreState>((set, get) => ({
     set({ windowFullScreen: isFullScreen });
   },
   openSettings: (section) => {
-    set({ activeView: 'settings', settingsSection: section ?? get().settingsSection });
+    set({
+      activeView: 'settings',
+      pendingAgentSelectionPaneId: null,
+      settingsSection: section ?? get().settingsSection,
+    });
   },
   openAgents: () => {
     if (get().activeView !== 'agents') {
@@ -176,7 +217,7 @@ export const useUiStore = create<UiStoreState>((set, get) => ({
   },
   showWorkspaceView: () => {
     if (get().activeView !== 'workspace') {
-      set({ activeView: 'workspace' });
+      set({ activeView: 'workspace', pendingAgentSelectionPaneId: null });
     }
   },
 }));

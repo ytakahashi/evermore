@@ -123,7 +123,13 @@ describe('AgentsView', () => {
       error: null,
     });
     usePaneInfoStore.setState({ infosByPtyId: {}, isLoading: false, error: null });
-    useUiStore.setState({ activeView: 'agents' });
+    useUiStore.setState({
+      activeView: 'agents',
+      launchPaletteOpen: false,
+      projectPaletteOpen: false,
+      tabSearchOpen: false,
+      pendingAgentSelectionPaneId: null,
+    });
   });
 
   afterEach(() => {
@@ -136,7 +142,73 @@ describe('AgentsView', () => {
       error: null,
     });
     usePaneInfoStore.setState({ infosByPtyId: {}, isLoading: false, error: null });
-    useUiStore.setState({ activeView: 'workspace' });
+    useUiStore.setState({
+      activeView: 'workspace',
+      launchPaletteOpen: false,
+      pendingAgentSelectionPaneId: null,
+    });
+  });
+
+  it('opens launch from the header and an unmodified N on the list', () => {
+    // Given: an empty, focused agents list.
+    render(<AgentsView />);
+    // When: the header button is clicked.
+    fireEvent.click(screen.getByRole('button', { name: 'Launch agent' }));
+    // Then: launch opens; after dismissal, N offers the same action.
+    expect(useUiStore.getState().launchPaletteOpen).toBe(true);
+    act(() => useUiStore.getState().closeLaunchPalette());
+    fireEvent.keyDown(screen.getByLabelText('Agent sessions'), { key: 'n', isComposing: true });
+    expect(useUiStore.getState().launchPaletteOpen).toBe(false);
+    fireEvent.keyDown(screen.getByLabelText('Agent sessions'), { key: 'n', ctrlKey: true });
+    expect(useUiStore.getState().launchPaletteOpen).toBe(false);
+    fireEvent.keyDown(screen.getByLabelText('Agent sessions'), { key: 'n' });
+    expect(useUiStore.getState().launchPaletteOpen).toBe(true);
+  });
+
+  it('waits for a PTY while retaining the current ended-agent selection', () => {
+    // Given: a selected agent whose runtime information then disappears.
+    usePaneInfoStore.setState({ infosByPtyId: { 'pty-1': agentInfo('pty-1') } });
+    render(<AgentsView />);
+    fireEvent.click(screen.getByRole('button', { pressed: false, name: /zsh/ }));
+    const paneId = workspace2.panes[0].id;
+    // When: a new pane is requested before its PTY exists.
+    act(() => {
+      usePaneInfoStore.setState({ infosByPtyId: {} });
+      useWorkspaceStore.setState({
+        workspaces: [
+          workspace1,
+          { ...workspace2, panes: [{ ...workspace2.panes[0], ptyId: undefined }] },
+        ],
+      });
+      useUiStore.getState().requestAgentSelection(paneId);
+    });
+    // Then: the previous selected shell remains visible until the new PTY is ready.
+    expect(screen.getByRole('button', { pressed: true, name: /zsh/ })).toBeInTheDocument();
+    expect(useUiStore.getState().pendingAgentSelectionPaneId).toBe(paneId);
+    // When: PTY creation completes without an agent hook snapshot yet.
+    act(() => useWorkspaceStore.setState({ workspaces: [workspace1, workspace2] }));
+    // Then: the requested card is selected and the handoff is consumed.
+    expect(screen.getByRole('button', { pressed: true, name: /server/ })).toBeInTheDocument();
+    expect(useUiStore.getState().pendingAgentSelectionPaneId).toBeNull();
+  });
+
+  it('discards pending selection when its workspace closes before PTY creation', () => {
+    // Given: a pending request for a pane without a PTY.
+    useWorkspaceStore.setState({
+      workspaces: [
+        workspace1,
+        { ...workspace2, panes: [{ ...workspace2.panes[0], ptyId: undefined }] },
+      ],
+    });
+    useUiStore.getState().requestAgentSelection(workspace2.panes[0].id);
+    render(<AgentsView />);
+    // When: the workspace is closed.
+    act(() => useWorkspaceStore.getState().closeWorkspace(workspace2.id));
+    // Then: no pending request can select the later stale PTY.
+    expect(useUiStore.getState().pendingAgentSelectionPaneId).toBeNull();
+    expect(
+      screen.queryByRole('region', { name: 'Selected agent terminal' }),
+    ).not.toBeInTheDocument();
   });
 
   it.each([
@@ -571,7 +643,13 @@ describe('AgentsView', () => {
       useUiStore.setState({ activeView: 'settings' });
     });
     act(() => {
-      useUiStore.setState({ activeView: 'agents' });
+      useUiStore.setState({
+        activeView: 'agents',
+        launchPaletteOpen: false,
+        projectPaletteOpen: false,
+        tabSearchOpen: false,
+        pendingAgentSelectionPaneId: null,
+      });
     });
 
     // Then: the later visit does not restore selection.

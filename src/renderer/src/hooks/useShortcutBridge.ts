@@ -106,6 +106,9 @@ function handleShortcut(actionId: KeyboardShortcutActionId): void {
       uiState.setFullscreenPaneId(activePane.id);
       return;
     }
+    case 'ui.launchAgent':
+      uiState.openLaunchPalette();
+      return;
     case 'ui.openProject':
       uiState.openProjectPalette();
       return;

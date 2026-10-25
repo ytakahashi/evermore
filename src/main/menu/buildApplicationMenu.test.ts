@@ -105,6 +105,21 @@ describe('buildApplicationMenu', () => {
     );
   });
 
+  it('dispatches Launch Agent with the configured accelerator', () => {
+    // Given: a user-defined Launch Agent shortcut.
+    const { dispatchers, calls } = createDispatchers();
+    const options = defaultOptions({
+      dispatchers,
+      keybindings: { ...DEFAULT_KEYBINDINGS, 'ui.launchAgent': 'Command+Shift+L' },
+    });
+    // When: the menu item is invoked.
+    const item = findItemByLabel(buildApplicationMenu(options), 'Launch Agent…');
+    clickMenuItem(item);
+    // Then: menu dispatch and customization share the same action definition.
+    expect(item?.accelerator).toBe('Command+Shift+L');
+    expect(calls).toEqual(['ui.launchAgent']);
+  });
+
   it('drops the accelerator for explicit unbinds while keeping the click handler', () => {
     // Given: the user explicitly unbinds an action.
     const { dispatchers, calls } = createDispatchers();
