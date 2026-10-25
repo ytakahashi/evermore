@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vite-plus/test';
-import { DEFAULT_APP_SETTINGS } from '../../shared/settings-defaults';
+import { MAX_AGENT_PRESETS, MAX_AGENT_PRESET_STRING_LENGTH } from '../../shared/agent-presets';
+import { cloneDefaultSettings, DEFAULT_APP_SETTINGS } from '../../shared/settings-defaults';
 import type { AppSettings } from '../../shared/types';
 import { createLogger, type LogRecord, type LogTransport } from '../logging/logger';
 import {
@@ -771,5 +772,124 @@ describe('SettingsStore', () => {
       expect(DEFAULT_APP_SETTINGS.projects.directories).toEqual([]);
       expect(store.reset().projects.directories).toEqual([]);
     });
+  });
+});
+
+describe('agent preset persistence', () => {
+  it('omits equal defaults but persists edited arrays and their order', () => {
+    // Given: a fresh store and independently cloned defaults.
+    const storage = new MemorySettingsStorageAdapter();
+    const store = new SettingsStore({ storage });
+    const presets = cloneDefaultSettings().agents.presets;
+
+    // When: defaults are saved unchanged, then reordered and edited.
+    store.update({ agents: { presets } });
+    expect(storage.payload).toEqual({});
+    presets.reverse();
+    store.update({ agents: { presets } });
+    expect(storage.payload).toEqual({ agents: { presets } });
+    presets[0].command = 'codex --flag';
+    store.update({ agents: { presets } });
+
+    // Then: the entire ordered array round-trips, including edits.
+    expect(storage.payload).toEqual({ agents: { presets } });
+    expect(store.reload().agents.presets).toEqual(presets);
+  });
+
+  it('keeps explicit deletion empty across reload and restores defaults only on reset', () => {
+    // Given: the built-in presets.
+    const storage = new MemorySettingsStorageAdapter();
+    const store = new SettingsStore({ storage });
+
+    // When: all presets are removed and the file is reloaded.
+    store.update({ agents: { presets: [] } });
+    const reloaded = store.reload();
+
+    // Then: deletion persists; an explicit reset restores independent defaults.
+    expect(storage.payload).toEqual({ agents: { presets: [] } });
+    expect(reloaded.agents.presets).toEqual([]);
+    const reset = store.reset();
+    reset.agents.presets[0].command = 'changed';
+    expect(DEFAULT_APP_SETTINGS.agents.presets[0].command).toBe('claude');
+    expect(store.reset().agents.presets).toEqual(DEFAULT_APP_SETTINGS.agents.presets);
+    expect(cloneDefaultSettings().agents.presets[0].command).toBe('claude');
+    expect(storage.payload).toEqual({});
+  });
+
+  it.each([undefined, null, {}, 'invalid'])(
+    'falls back to defaults for a non-array: %s',
+    (presets) => {
+      // Given: a hand-edited file with an invalid list container.
+      const storage = new MemorySettingsStorageAdapter({ agents: { presets } });
+
+      // When: settings are read.
+      const store = new SettingsStore({ storage });
+
+      // Then: defaults resolve and the sparse file contains no preset override.
+      expect(store.get().agents).toEqual(DEFAULT_APP_SETTINGS.agents);
+      expect(storage.payload).toEqual({});
+    },
+  );
+
+  it('drops invalid entries individually and normalizes scopes without touching shell syntax', () => {
+    // Given: mixed valid and invalid entries, including a first invalid duplicate.
+    const storage = new MemorySettingsStorageAdapter({
+      agents: {
+        presets: [
+          null,
+          { id: '   ', command: 'codex' },
+          { command: 'codex' },
+          { id: 'valid', command: '   ' },
+          {
+            id: 'valid',
+            command: '  codex "$HOME"  ',
+            rootPath: '~/missing/../project/',
+            extra: 1,
+          },
+          { id: 'valid', command: 'duplicate' },
+          { id: 'relative', command: 'codex', rootPath: './project' },
+          { id: 'bad-scope', command: 'codex', rootPath: null },
+          { id: 'bad-label', command: 'codex', label: 1 },
+          { id: 'x'.repeat(MAX_AGENT_PRESET_STRING_LENGTH + 1), command: 'codex' },
+          {
+            id: 'long-label',
+            command: 'codex',
+            label: 'x'.repeat(MAX_AGENT_PRESET_STRING_LENGTH + 1),
+          },
+          { id: 'long', command: 'x'.repeat(MAX_AGENT_PRESET_STRING_LENGTH + 1) },
+          { id: 'home', label: '', command: 'claude', rootPath: '~' },
+          { id: 'shared', command: 'codex' },
+        ],
+      },
+    });
+
+    // When: main resolves settings using its injected home directory.
+    const store = new SettingsStore({ storage, getHomeDirectory: () => '/home/user' });
+
+    // Then: valid rows retain order and missing directories; unknown keys are stripped.
+    expect(store.get().agents.presets).toEqual([
+      { id: 'valid', label: '', command: '  codex "$HOME"  ', rootPath: '/home/user/project' },
+      { id: 'home', label: '', command: 'claude', rootPath: '/home/user' },
+      { id: 'shared', label: '', command: 'codex' },
+    ]);
+  });
+
+  it('bounds the number of valid rows', () => {
+    // Given: more valid rows than the supported limit.
+    const storage = new MemorySettingsStorageAdapter({
+      agents: {
+        presets: Array.from({ length: MAX_AGENT_PRESETS + 1 }, (_, index) => ({
+          id: String(index),
+          command: 'codex',
+        })),
+      },
+    });
+
+    // When: the file is normalized.
+    const store = new SettingsStore({ storage });
+
+    // Then: only the first supported rows survive.
+    expect(store.get().agents.presets).toHaveLength(MAX_AGENT_PRESETS);
+    expect(store.get().agents.presets.at(-1)?.id).toBe(String(MAX_AGENT_PRESETS - 1));
   });
 });

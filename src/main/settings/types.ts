@@ -28,7 +28,7 @@ export interface SettingsStorageAdapter {
 
 export interface SettingsStoreOptions {
   storage?: SettingsStorageAdapter;
-  /** Resolves `~` in registered project directories. Defaults to `os.homedir`. */
+  /** Resolves `~` in project directories and agent preset scopes. Defaults to `os.homedir`. */
   getHomeDirectory?: () => string;
   /**
    * Logger used for internal diagnostics such as failures in subscriber callbacks. Optional so

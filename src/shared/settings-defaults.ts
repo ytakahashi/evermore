@@ -48,6 +48,12 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   notifications: {
     aiAgentAwaitingInputEnabled: false,
   },
+  agents: {
+    presets: [
+      { id: 'claude-code', label: 'Claude Code', command: 'claude' },
+      { id: 'codex', label: 'Codex CLI', command: 'codex' },
+    ],
+  },
   projects: {
     directories: [],
   },
@@ -68,6 +74,7 @@ export function cloneDefaultSettings(): AppSettings {
     app: { ...DEFAULT_APP_SETTINGS.app },
     shellIntegration: { ...DEFAULT_APP_SETTINGS.shellIntegration },
     notifications: { ...DEFAULT_APP_SETTINGS.notifications },
+    agents: { presets: DEFAULT_APP_SETTINGS.agents.presets.map((preset) => ({ ...preset })) },
     projects: { directories: [...DEFAULT_APP_SETTINGS.projects.directories] },
   };
 }

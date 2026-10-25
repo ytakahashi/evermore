@@ -1,11 +1,16 @@
 import { homedir } from 'node:os';
 import path from 'node:path';
 import Store from 'electron-store';
+import {
+  MAX_AGENT_PRESETS,
+  MAX_AGENT_PRESET_STRING_LENGTH,
+  getAgentPresetFieldsError,
+} from '../../shared/agent-presets';
 import { normalizeAbsolutePath } from '../../shared/absolute-path';
 import type { SettingsUpdate } from '../../shared/api-types';
 import { isKeyboardShortcutActionId } from '../../shared/keyboard-shortcuts';
 import { cloneDefaultSettings, DEFAULT_APP_SETTINGS } from '../../shared/settings-defaults';
-import type { AppSettings, ConfirmMode, FontWeight } from '../../shared/types';
+import type { AgentPreset, AppSettings, ConfirmMode, FontWeight } from '../../shared/types';
 import { createSilentLogger, type Logger } from '../logging/logger';
 import type { PersistedSettings, SettingsStorageAdapter, SettingsStoreOptions } from './types';
 
@@ -117,7 +122,7 @@ function pickStringOrNull(
   return fallback;
 }
 
-function normalizeProjectDirectory(value: unknown, homeDirectory: string): string | null {
+function normalizeSettingsDirectory(value: unknown, homeDirectory: string): string | null {
   if (typeof value !== 'string' || value.length === 0) {
     return null;
   }
@@ -160,12 +165,55 @@ function pickProjectDirectories(
     if (result.length >= MAX_PROJECT_DIRECTORIES) {
       break;
     }
-    const directory = normalizeProjectDirectory(entry, homeDirectory);
+    const directory = normalizeSettingsDirectory(entry, homeDirectory);
     if (directory === null || seen.has(directory)) {
       continue;
     }
     seen.add(directory);
     result.push(directory);
+  }
+  return result;
+}
+
+function pickAgentPresets(value: unknown, homeDirectory: string): AgentPreset[] {
+  if (!Array.isArray(value)) {
+    return DEFAULT_APP_SETTINGS.agents.presets.map((preset) => ({ ...preset }));
+  }
+  const result: AgentPreset[] = [];
+  const seen = new Set<string>();
+  for (const entry of value) {
+    if (result.length >= MAX_AGENT_PRESETS) {
+      break;
+    }
+    if (
+      !isPlainObject(entry) ||
+      typeof entry.id !== 'string' ||
+      !entry.id.trim() ||
+      entry.id.length > MAX_AGENT_PRESET_STRING_LENGTH ||
+      seen.has(entry.id) ||
+      typeof entry.command !== 'string'
+    ) {
+      continue;
+    }
+    const label = entry.label === undefined ? '' : entry.label;
+    if (typeof label !== 'string' || getAgentPresetFieldsError(label, entry.command)) {
+      continue;
+    }
+    const rootPath =
+      entry.rootPath === undefined
+        ? undefined
+        : normalizeSettingsDirectory(entry.rootPath, homeDirectory);
+    if (rootPath === null) {
+      continue;
+    }
+    // Reconstruct known fields so hand-edited files and IPC cannot persist extra properties.
+    result.push({
+      id: entry.id,
+      label,
+      command: entry.command,
+      ...(rootPath === undefined ? {} : { rootPath }),
+    });
+    seen.add(entry.id);
   }
   return result;
 }
@@ -239,6 +287,7 @@ function readCurrentSettings(raw: unknown, homeDirectory: string): AppSettings {
   const appRaw = isPlainObject(raw.app) ? raw.app : {};
   const shellIntegrationRaw = isPlainObject(raw.shellIntegration) ? raw.shellIntegration : {};
   const notificationsRaw = isPlainObject(raw.notifications) ? raw.notifications : {};
+  const agentsRaw = isPlainObject(raw.agents) ? raw.agents : {};
   const projectsRaw = isPlainObject(raw.projects) ? raw.projects : {};
 
   const terminal: AppSettings['terminal'] = {
@@ -294,6 +343,7 @@ function readCurrentSettings(raw: unknown, homeDirectory: string): AppSettings {
         defaults.notifications.aiAgentAwaitingInputEnabled,
       ),
     },
+    agents: { presets: pickAgentPresets(agentsRaw.presets, homeDirectory) },
     projects: {
       directories: pickProjectDirectories(
         projectsRaw.directories,
@@ -334,6 +384,24 @@ function diffPrimitives<T extends object>(current: T, defaultValue: T): Partial<
 
 function areStringListsEqual(left: readonly string[], right: readonly string[]): boolean {
   return left.length === right.length && left.every((value, index) => value === right[index]);
+}
+
+function areAgentPresetListsEqual(
+  left: readonly AgentPreset[],
+  right: readonly AgentPreset[],
+): boolean {
+  return (
+    left.length === right.length &&
+    left.every((preset, index) => {
+      const other = right[index];
+      return (
+        preset.id === other.id &&
+        preset.label === other.label &&
+        preset.command === other.command &&
+        preset.rootPath === other.rootPath
+      );
+    })
+  );
 }
 
 /**
@@ -422,6 +490,11 @@ function diffAgainstDefaults(settings: AppSettings): PersistedSettings {
     result.projects = { directories: [...settings.projects.directories] };
   }
 
+  // Persisted whole for the same reason as `projects.directories`; an explicit empty list differs
+  // from the defaults, so deleting every preset does not bring the defaults back.
+  if (!areAgentPresetListsEqual(settings.agents.presets, defaults.agents.presets)) {
+    result.agents = { presets: settings.agents.presets.map((preset) => ({ ...preset })) };
+  }
   return result;
 }
 
@@ -463,6 +536,7 @@ function applySettingsPatch(current: AppSettings, patch: SettingsUpdate): AppSet
           patch.notifications as Record<string, unknown>,
         ) as AppSettings['notifications'])
       : current.notifications,
+    agents: patch.agents ? mergeSection(current.agents, patch.agents) : current.agents,
     projects: patch.projects
       ? (mergeSection(
           current.projects as Record<string, unknown>,

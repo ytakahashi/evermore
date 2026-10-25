@@ -64,6 +64,7 @@ function mergePatchIntoSettings(current: AppSettings, patch: SettingsUpdate): Ap
     notifications: patch.notifications
       ? { ...current.notifications, ...patch.notifications }
       : current.notifications,
+    agents: patch.agents ? { ...current.agents, ...patch.agents } : current.agents,
     projects: patch.projects ? { ...current.projects, ...patch.projects } : current.projects,
   };
 }
@@ -160,6 +161,7 @@ export function createSettingsStore(
           notifications: patch.notifications
             ? { ...pendingPatch.notifications, ...patch.notifications }
             : pendingPatch.notifications,
+          agents: patch.agents ? { ...pendingPatch.agents, ...patch.agents } : pendingPatch.agents,
           projects: patch.projects
             ? { ...pendingPatch.projects, ...patch.projects }
             : pendingPatch.projects,

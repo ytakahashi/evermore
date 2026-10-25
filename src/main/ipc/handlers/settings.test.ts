@@ -126,6 +126,25 @@ describe('registerSettingsHandlers', () => {
     expect(settingsStore.get().projects.directories).toEqual(['/work/project']);
   });
 
+  it('persists agent presets through IPC and strips unknown fields', async () => {
+    // Given: the existing settings handlers.
+    registerSettingsHandlers({ settingsStore });
+
+    // When: a preset update includes unknown row and section properties.
+    const result = (await findHandler(IPC.SETTINGS_UPDATE)?.(
+      {},
+      {
+        settings: {
+          agents: { ignored: true, presets: [{ id: 'custom', command: 'codex', ignored: true }] },
+        },
+      },
+    )) as AppSettings;
+
+    // Then: only the supported preset fields cross into persisted settings.
+    expect(result.agents.presets).toEqual([{ id: 'custom', label: '', command: 'codex' }]);
+    expect(storage.payload).toEqual({ agents: result.agents });
+  });
+
   it('returns runtime-reconciled settings after update', async () => {
     // Given: runtime settings application falls back to a different hotkey value.
     const applyRuntimeSettings = vi.fn((_settings: AppSettings) => {
