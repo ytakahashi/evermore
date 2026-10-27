@@ -4,7 +4,7 @@ import type { Workspace } from '../../../shared/types';
  * Returns the workspaces whose terminals are mounted, preserving storage order.
  *
  * Closed workspaces keep their layout and cwd but have no mounted panes, so every navigation surface
- * (sidebar, tab search, move destinations) lists only these. Reopening goes through Open Project.
+ * (sidebar, tab search, move destinations) lists only these. Reopening goes through Open Project or Launch Agent.
  */
 export function getOpenWorkspaces(workspaces: readonly Workspace[]): Workspace[] {
   return workspaces.filter((workspace) => workspace.isOpen);

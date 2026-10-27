@@ -97,6 +97,7 @@ export function buildApplicationMenu(
     label: 'File',
     submenu: [
       actionItem('ui.openProject', options),
+      actionItem('ui.launchAgent', options),
       actionItem('workspace.newTab', options),
       actionItem('workspace.closeTab', options),
       { type: 'separator' },

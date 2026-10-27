@@ -42,11 +42,28 @@ describe('useShortcutBridge', () => {
       sidebarOpen: true,
       tabSearchOpen: false,
       projectPaletteOpen: false,
+      launchPaletteOpen: false,
     });
   });
 
   afterEach(() => {
     Reflect.deleteProperty(window, 'api');
+  });
+
+  it('opens Launch Agent from Settings and suppresses workspace commands behind it', () => {
+    // Given: Settings and a dispatch bridge.
+    useUiStore.setState({ activeView: 'settings', projectPaletteOpen: true });
+    render(<TestBridge />);
+    // When: the menu invokes Launch Agent.
+    emit('ui.launchAgent');
+    // Then: its modal opens exclusively without changing the entry view.
+    expect(useUiStore.getState()).toMatchObject({
+      activeView: 'settings',
+      launchPaletteOpen: true,
+      projectPaletteOpen: false,
+      tabSearchOpen: false,
+    });
+    useUiStore.getState().closeLaunchPalette();
   });
 
   it('opens the project picker from Settings through the menu action', () => {

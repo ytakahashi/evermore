@@ -41,6 +41,13 @@ full-width list. **Open in workspace** navigates to the original pane. Esc reach
 the terminal has focus; outside the terminal, it returns to the workspace. Selection resets when you
 leave the Agents view.
 
+Use **Launch Agent…** (`Command+Shift+N`), the **+** button in Agents, or **N** while the list has
+focus to choose a project and a command preset. Home is also available as a launch target. Manage
+shared and project-specific commands in **Settings > Agent presets**; project presets appear first
+in the launcher. Launching from Agents keeps the overview open and selects the new session once its
+terminal is ready. Launching from another view opens the new terminal in its workspace. The shortcut
+can be customized in **Settings > Shortcuts**.
+
 With AI agent hooks configured, the sidebar reflects per-pane agent status in real time:
 
 - **Live Activity Status**: Shows when an agent turn is in progress.

@@ -9,8 +9,14 @@ import {
 } from '../../../shared/pane-layout';
 import { findAdjacentPaneId, type PaneFocusDirection } from '../../../shared/pane-navigation';
 import { getPathBasename } from '../../../shared/path-label';
-import type { Pane, PaneLayout, Tab, Workspace } from '../../../shared/types';
-import { MAX_WORKSPACE_TABS } from '../../../shared/workspace-constants';
+import type { AgentPreset, Pane, PaneLayout, Tab, Workspace } from '../../../shared/types';
+import {
+  MAX_WORKSPACE_TABS,
+  MAX_WORKSPACE_PANES,
+  MAX_WORKSPACE_NAME_LENGTH,
+} from '../../../shared/workspace-constants';
+import type { LaunchTarget } from '../agents/launchTarget';
+import { getAgentPresetFieldsError } from '../../../shared/agent-presets';
 import {
   canCloseWorkspace,
   canDeleteWorkspace,
@@ -56,6 +62,16 @@ export interface WorkspaceStoreState {
   setActiveWorkspace: (id: string) => void;
   /** Opens or creates a project, retaining successful durable writes if active-ID persistence fails. */
   openProject: (rootPath: string, signal?: AbortSignal) => Promise<Workspace>;
+  /**
+   * Appends an agent tab without changing the active workspace or any workspace's active tab, so
+   * returning from Agents shows what the user was viewing. Callers that reveal the tab select it.
+   * Cancellation only precedes tab creation.
+   */
+  launchAgent: (
+    target: LaunchTarget,
+    preset: AgentPreset,
+    signal?: AbortSignal,
+  ) => Promise<{ workspaceId: string; tabId: string; paneId: string }>;
   /** Ends all terminal sessions while retaining the project layout for reopening. */
   closeWorkspace: (id: string) => void;
   deleteWorkspace: (id: string) => Promise<void>;
@@ -359,6 +375,46 @@ export function createWorkspaceStore(
       }));
     };
 
+    // Share durable project creation/reopening without sharing callers' activation or cancellation.
+    // Not `async`: callers' continuations must stay on the shared promise's tick, and every failure
+    // must still surface as a rejection rather than a synchronous throw.
+    const ensureProjectWorkspaceOpen = (rootPath: string): Promise<Workspace> => {
+      if (!rootPath.startsWith('/'))
+        return Promise.reject(new Error('Project path must be absolute'));
+      const key = normalizeAbsolutePath(rootPath);
+      let opening = openingProjects.get(key);
+      if (!opening) {
+        opening = (async (): Promise<Workspace> => {
+          const state = get();
+          let workspace = findProjectWorkspace(state.workspaces, key, state.activeWorkspaceId);
+          if (!workspace) {
+            workspace = await getWorkspaceApi().create(getPathBasename(key), key);
+            const created = workspace;
+            set((current) => ({ workspaces: replaceWorkspace(current.workspaces, created) }));
+          } else if (!workspace.isOpen) {
+            await getWorkspaceApi().update(
+              toWorkspaceUpdatePayload({ ...workspace, isOpen: true }),
+            );
+            const reopeningId = workspace.id;
+            const latest = get().workspaces.find((current) => current.id === reopeningId);
+            if (!latest) throw new Error('Project was deleted while opening');
+            // Preserve edits during IPC; queued persistence must see the reopened state.
+            workspace = { ...latest, isOpen: true };
+            updateWorkspacesState([workspace]);
+            persistWorkspaceDebounced(workspace.id);
+          }
+          return workspace;
+        })();
+        openingProjects.set(key, opening);
+        void opening
+          .finally(() => openingProjects.delete(key))
+          .catch((_error: unknown) => {
+            // Each caller handles failure; cleanup must not create an unhandled rejection.
+          });
+      }
+      return opening;
+    };
+
     // Shared cwd-update body for both pane-id and pty-id keyed actions. Keeping the early-return
     // and persistence call in one place is what guarantees that re-emits of the same cwd cannot
     // bump `workspace.updatedAt` regardless of which entry point the caller used.
@@ -405,46 +461,14 @@ export function createWorkspaceStore(
         }
       },
       setActiveWorkspace: (id: string): void => {
-        // Closed workspaces are activated only by `openProject`, which reopens them first.
+        // Project opening and agent launch reopen closed workspaces before activation.
         if (!findOpenWorkspace(get().workspaces, id)) return;
         set({ activeWorkspaceId: id });
         void getWorkspaceApi().setActiveWorkspaceId(id);
       },
       openProject: async (rootPath: string, signal?: AbortSignal): Promise<Workspace> => {
-        if (!rootPath.startsWith('/')) throw new Error('Project path must be absolute');
-        const key = normalizeAbsolutePath(rootPath);
         try {
-          let opening = openingProjects.get(key);
-          if (!opening) {
-            opening = (async (): Promise<Workspace> => {
-              const state = get();
-              let workspace = findProjectWorkspace(state.workspaces, key, state.activeWorkspaceId);
-              if (!workspace) {
-                workspace = await getWorkspaceApi().create(getPathBasename(key), key);
-                const created = workspace;
-                set((current) => ({ workspaces: replaceWorkspace(current.workspaces, created) }));
-              } else if (!workspace.isOpen) {
-                await getWorkspaceApi().update(
-                  toWorkspaceUpdatePayload({ ...workspace, isOpen: true }),
-                );
-                const reopeningId = workspace.id;
-                const latest = get().workspaces.find((current) => current.id === reopeningId);
-                if (!latest) throw new Error('Project was deleted while opening');
-                // Preserve edits during IPC; queued persistence must see the reopened state.
-                workspace = { ...latest, isOpen: true };
-                updateWorkspaceState(workspace);
-                persistWorkspaceDebounced(workspace.id);
-              }
-              return workspace;
-            })();
-            openingProjects.set(key, opening);
-            void opening
-              .finally(() => openingProjects.delete(key))
-              .catch((_error: unknown) => {
-                // Each caller handles failure; cleanup must not create an unhandled rejection.
-              });
-          }
-          const workspace = await opening;
+          const workspace = await ensureProjectWorkspaceOpen(rootPath);
           // Cancellation cannot undo a durable create/reopen, but it must not move focus later.
           if (signal?.aborted) return workspace;
           await getWorkspaceApi().setActiveWorkspaceId(workspace.id);
@@ -463,6 +487,51 @@ export function createWorkspaceStore(
           set({ error: getErrorMessage(error) });
           throw error;
         }
+      },
+      launchAgent: async (target, preset, signal) => {
+        signal?.throwIfAborted();
+        const fieldsError = getAgentPresetFieldsError(preset.label, preset.command);
+        if (fieldsError) throw new Error(fieldsError);
+        if (
+          preset.rootPath !== undefined &&
+          (target.kind !== 'project' ||
+            normalizeAbsolutePath(preset.rootPath) !== normalizeAbsolutePath(target.rootPath))
+        ) {
+          throw new Error('Preset is not available for this project');
+        }
+        const resolved =
+          target.kind === 'home'
+            ? get().workspaces.find((workspace) => workspace.kind === 'home')
+            : await ensureProjectWorkspaceOpen(target.rootPath);
+        // A durable create/reopen may finish after dismissal. Do not add a one-shot command then.
+        signal?.throwIfAborted();
+        const workspace = resolved && findOpenWorkspace(get().workspaces, resolved.id);
+        if (!workspace) throw new Error('Workspace was closed or deleted while launching');
+        if (workspace.tabs.length >= MAX_WORKSPACE_TABS)
+          throw new Error('Workspace tab limit reached');
+        if (workspace.panes.length >= MAX_WORKSPACE_PANES)
+          throw new Error('Workspace pane limit reached');
+        // Preset text allows longer strings than persisted tab names; never truncate the command.
+        const tabName = (preset.label.trim() || preset.command.trim()).slice(
+          0,
+          MAX_WORKSPACE_NAME_LENGTH,
+        );
+        const { pane, tab } = createTabWithPane(createStoreId, {
+          cwd: workspace.rootPath,
+          initialCommand: preset.command,
+          tabName,
+          isCustomName: true,
+        });
+        // No await between the latest snapshot, limits, and commit: concurrent launches append safely.
+        updateWorkspacesState([
+          {
+            ...workspace,
+            tabs: [...workspace.tabs, tab],
+            panes: [...workspace.panes, pane],
+          },
+        ]);
+        persistWorkspaceDebounced(workspace.id);
+        return { workspaceId: workspace.id, tabId: tab.id, paneId: pane.id };
       },
       closeWorkspace: (id: string): void => {
         const state = get();

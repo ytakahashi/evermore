@@ -59,7 +59,7 @@ export interface AgentSessionGroup {
 export function collectAgentSessions(
   workspaces: readonly Workspace[],
   infosByPtyId: Readonly<Record<string, PaneRuntimeInfo>>,
-  options: { retainPaneId?: string } = {},
+  options: { retainPaneId?: string; retainPaneIds?: readonly string[] } = {},
 ): AgentSession[] {
   const sessions: AgentSession[] = [];
   const workspaceLabels = formatWorkspaceLabels(workspaces);
@@ -79,7 +79,11 @@ export function collectAgentSessions(
         }
 
         const info = infosByPtyId[pane.ptyId];
-        if (!info?.agent && pane.id !== options.retainPaneId) {
+        if (
+          !info?.agent &&
+          pane.id !== options.retainPaneId &&
+          !options.retainPaneIds?.includes(pane.id)
+        ) {
           continue;
         }
 

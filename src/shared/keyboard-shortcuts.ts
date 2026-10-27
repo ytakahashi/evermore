@@ -22,6 +22,7 @@ export type KeyboardShortcutActionId =
   | 'pane.focusUp'
   | 'pane.focusDown'
   | 'pane.toggleFullscreen'
+  | 'ui.launchAgent'
   | 'ui.openProject'
   | 'ui.openTabSearch'
   | 'ui.toggleSidebar'
@@ -42,6 +43,7 @@ export const KEYBOARD_SHORTCUT_ACTION_IDS: readonly KeyboardShortcutActionId[] =
   'pane.focusUp',
   'pane.focusDown',
   'pane.toggleFullscreen',
+  'ui.launchAgent',
   'ui.openProject',
   'ui.openTabSearch',
   'ui.toggleSidebar',
@@ -78,6 +80,7 @@ export const DEFAULT_KEYBINDINGS: Record<KeyboardShortcutActionId, string> = {
   'pane.focusUp': 'Command+Option+Up',
   'pane.focusDown': 'Command+Option+Down',
   'pane.toggleFullscreen': 'Command+Shift+F',
+  'ui.launchAgent': 'Command+Shift+N',
   'ui.openProject': 'Command+O',
   'ui.openTabSearch': 'Command+P',
   'ui.toggleSidebar': 'Command+B',
@@ -99,6 +102,7 @@ export const ACTION_LABELS: Record<KeyboardShortcutActionId, string> = {
   'pane.focusUp': 'Focus Upper Pane',
   'pane.focusDown': 'Focus Lower Pane',
   'pane.toggleFullscreen': 'Toggle Pane Full Screen',
+  'ui.launchAgent': 'Launch Agent…',
   'ui.openProject': 'Open Project…',
   'ui.openTabSearch': 'Search Tabs…',
   'ui.toggleSidebar': 'Toggle Sidebar',
