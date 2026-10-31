@@ -7,15 +7,30 @@ on:
   pull_request:
 
 jobs:
+  actions-lock:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+
+      - run: gh extension install github/gh-actions-lock --pin v0.4.0
+      - run: gh actions-lock --verify
+
   # OS-independent static checks run once.
   check:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
 
-      - uses: pnpm/action-setup@v6
-      - uses: actions/setup-node@v7
+      - uses: pnpm/action-setup@v6.0.10
+      - uses: actions/setup-node@v7.1.0
         with:
           node-version: 24.x
           cache: pnpm
@@ -36,10 +51,10 @@ jobs:
     runs-on: ${{ matrix.os }}
 
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
 
-      - uses: pnpm/action-setup@v6
-      - uses: actions/setup-node@v7
+      - uses: pnpm/action-setup@v6.0.10
+      - uses: actions/setup-node@v7.1.0
         with:
           node-version: 24.x
           cache: pnpm
@@ -56,10 +71,10 @@ jobs:
     runs-on: macos-latest
 
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
 
-      - uses: pnpm/action-setup@v6
-      - uses: actions/setup-node@v7
+      - uses: pnpm/action-setup@v6.0.10
+      - uses: actions/setup-node@v7.1.0
         with:
           node-version: 24.x
           cache: pnpm
