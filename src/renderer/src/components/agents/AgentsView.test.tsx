@@ -18,6 +18,7 @@ vi.mock('../../stores/workspaceStore', async (importOriginal) => {
         get: vi.fn(() => Promise.resolve(null)),
         create: vi.fn(() => Promise.reject(new Error('Not used by these tests'))),
         update: vi.fn(() => Promise.resolve()),
+        move: vi.fn(() => Promise.resolve()),
         delete: vi.fn(() => Promise.resolve()),
         setActiveWorkspaceId: vi.fn(() => Promise.resolve()),
       },

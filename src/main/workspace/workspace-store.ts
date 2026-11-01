@@ -6,6 +6,7 @@ import { normalizeAbsolutePath } from '../../shared/absolute-path';
 import { getPathBasename } from '../../shared/path-label';
 import type { Pane, PaneLayout, Tab, Workspace, WorkspaceKind } from '../../shared/types';
 import { canDeleteWorkspace, findFallbackWorkspace } from '../../shared/workspace-kind';
+import { moveWorkspace, type DropEdge } from '../../shared/workspace-order';
 import { createSilentLogger, type Logger } from '../logging/logger';
 import { ensureSingleHomeWorkspace } from './home-workspace';
 import type { WorkspaceStorageAdapter, WorkspaceStoreOptions } from './types';
@@ -418,6 +419,14 @@ export class WorkspaceStore {
     );
     if (!activeWorkspaceExists) {
       this.storage.setActiveWorkspaceId(findFallbackWorkspace(normalizedWorkspaces)?.id ?? null);
+    }
+  }
+
+  /** Persists a relative project move without changing timestamps or active selection. */
+  public move(workspaceId: string, targetWorkspaceId: string, edge: DropEdge): void {
+    const moved = moveWorkspace(this.ensureWorkspaces(), workspaceId, targetWorkspaceId, edge);
+    if (moved) {
+      this.storage.setWorkspaces(this.normalizeWorkspacesForStorage(moved));
     }
   }
 

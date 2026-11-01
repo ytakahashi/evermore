@@ -46,6 +46,7 @@ describe('MainTerminalArea tab move keeps the session', () => {
       configurable: true,
       value: {
         workspace: {
+          move: vi.fn(() => Promise.resolve()),
           update: vi.fn(() => Promise.resolve()),
           setActiveWorkspaceId: vi.fn(() => Promise.resolve()),
         },
@@ -97,6 +98,50 @@ describe('MainTerminalArea tab move keeps the session', () => {
     Reflect.deleteProperty(window, 'api');
     vi.useRealTimers();
   });
+
+  it.each([true, false])(
+    'preserves terminal nodes when an active=%s project is reordered',
+    (active) => {
+      // Given: two projects with live terminal subtrees and explicit active selection.
+      const source = useWorkspaceStore.getState().workspaces[1]!;
+      const other: Workspace = {
+        ...source,
+        id: 'other',
+        tabs: [leafTab('other-tab', 'other-pane')],
+        panes: [{ id: 'other-pane', cwd: '/other' }],
+        activeTabId: 'other-tab',
+      };
+      const activeWorkspaceId = active ? source.id : 'workspace-1';
+      useWorkspaceStore.setState((state) => ({
+        workspaces: [...state.workspaces, other],
+        activeWorkspaceId,
+      }));
+      render(<MainTerminalArea />);
+      const paneIds = ['pane-1', 'pane-a', 'pane-b', 'other-pane'];
+      const before = paneIds.map((id) => screen.getByTestId(`terminal-${id}`));
+      // When: the project moves past its neighbor via the real store action.
+      act(() => {
+        useWorkspaceStore.getState().moveWorkspace(source.id, other.id, 'after');
+      });
+      // Then: store and DOM order change while every terminal retains its identity and selection.
+      expect(useWorkspaceStore.getState().workspaces.map((workspace) => workspace.id)).toEqual([
+        'workspace-1',
+        'other',
+        'workspace-2',
+      ]);
+      expect(
+        screen
+          .getByTestId('terminal-other-pane')
+          .compareDocumentPosition(screen.getByTestId('terminal-pane-a')) &
+          Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBeTruthy();
+      before.forEach((node, index) =>
+        expect(screen.getByTestId(`terminal-${paneIds[index]}`)).toBe(node),
+      );
+      expect(terminalUnmounts).not.toHaveBeenCalled();
+      expect(useWorkspaceStore.getState().activeWorkspaceId).toBe(activeWorkspaceId);
+    },
+  );
 
   it('preserves the moved tab terminal node when it moves to another workspace', () => {
     // Given: the moved pane's terminal node is mounted (in a non-active workspace).

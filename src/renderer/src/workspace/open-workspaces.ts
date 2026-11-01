@@ -1,4 +1,42 @@
 import type { Workspace } from '../../../shared/types';
+import type { DropEdge } from '../../../shared/workspace-order';
+
+interface WorkspaceMoveAnchor {
+  targetWorkspaceId: string;
+  edge: DropEdge;
+}
+
+/** Resolves a sidebar drop onto home to the first visible project, since home cannot be an anchor. */
+export function resolveWorkspaceDropAnchor(
+  sidebarWorkspaces: readonly Workspace[],
+  targetWorkspaceId: string,
+  edge: DropEdge,
+): WorkspaceMoveAnchor | null {
+  const target = findOpenWorkspace(sidebarWorkspaces, targetWorkspaceId);
+  if (!target) return null;
+  if (target.kind === 'project') return { targetWorkspaceId, edge };
+  const firstProject = sidebarWorkspaces.find(
+    (workspace) => workspace.isOpen && workspace.kind === 'project',
+  );
+  return firstProject ? { targetWorkspaceId: firstProject.id, edge: 'before' } : null;
+}
+
+/** Resolves a menu move to the adjacent visible project, skipping home and closed entries. */
+export function resolveWorkspaceMoveAnchor(
+  sidebarWorkspaces: readonly Workspace[],
+  workspaceId: string,
+  direction: 'up' | 'down',
+): WorkspaceMoveAnchor | null {
+  const projects = sidebarWorkspaces.filter(
+    (workspace) => workspace.isOpen && workspace.kind === 'project',
+  );
+  const index = projects.findIndex((workspace) => workspace.id === workspaceId);
+  if (index === -1) return null;
+  const target = projects[index + (direction === 'up' ? -1 : 1)];
+  return target
+    ? { targetWorkspaceId: target.id, edge: direction === 'up' ? 'before' : 'after' }
+    : null;
+}
 
 /**
  * Returns the workspaces whose terminals are mounted, preserving storage order.
@@ -37,8 +75,7 @@ export function getSidebarWorkspaces(workspaces: readonly Workspace[]): Workspac
  *
  * Home is the place for work that belongs to no project, while agents mostly run in projects, so
  * the Agents view leads with projects. Both surfaces derive project order from storage order here;
- * only home's position differs. Home is never user-reorderable, so a future workspace reordering
- * feature only needs to change project order for both surfaces to follow.
+ * only home's position differs. Project reordering changes storage order so both surfaces follow.
  */
 export function getAgentsViewWorkspaces(workspaces: readonly Workspace[]): Workspace[] {
   const open = getOpenWorkspaces(workspaces);

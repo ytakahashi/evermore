@@ -55,6 +55,7 @@ vi.mock('../../../src/renderer/src/stores/workspaceStore', async (importOriginal
         create: (...args) => window.api.workspace.create(...args),
         update: (...args) => window.api.workspace.update(...args),
         delete: (...args) => window.api.workspace.delete(...args),
+        move: (...args) => window.api.workspace.move(...args),
         setActiveWorkspaceId: (...args) => window.api.workspace.setActiveWorkspaceId(...args),
       },
       debounceMs: 0,
@@ -117,6 +118,7 @@ beforeEach(async () => {
       saved = saved.map((entry) => (entry.id === updated.id ? updated : entry));
     }),
     delete: vi.fn(async () => {}),
+    move: vi.fn(async () => {}),
     setActiveWorkspaceId: vi.fn(async () => {}),
   };
   Object.defineProperty(window, 'api', { configurable: true, value: { workspace: api } });

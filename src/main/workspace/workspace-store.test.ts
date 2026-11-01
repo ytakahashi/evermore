@@ -82,6 +82,57 @@ describe('WorkspaceStore', () => {
     };
   }
 
+  it('persists consecutive moves across closed projects without changing content or selection', () => {
+    // Given: valid storage with home between projects and a closed project.
+    const a = createPersistedWorkspace('a', 'project', '/a');
+    const b = createPersistedWorkspace('b', 'project', '/b');
+    const c = createPersistedWorkspace('c', 'project', '/c');
+    const closed = { ...createPersistedWorkspace('closed', 'project', '/closed'), isOpen: false };
+    storage.workspaces = [
+      a,
+      createPersistedWorkspace('home', 'home', '/Users/tester'),
+      closed,
+      b,
+      c,
+    ];
+    storage.activeWorkspaceId = 'b';
+    const original = structuredClone(store.list());
+    // When: two moves persist, followed by a delayed update with an old workspace snapshot.
+    store.move('c', 'a', 'before');
+    store.move('a', 'b', 'after');
+    expect(storage.workspaces.map((entry) => entry.id)).toEqual(['c', 'home', 'closed', 'b', 'a']);
+    expect(storage.workspaces).toEqual(
+      ['c', 'home', 'closed', 'b', 'a'].map((id) => original.find((entry) => entry.id === id)),
+    );
+    now += 100;
+    store.update({ ...a, name: 'Renamed' });
+    // Then: reloading retains order, delayed contents save safely, and selection never changes.
+    const reloaded = createStore().list();
+    expect(reloaded.map((entry) => entry.id)).toEqual(['c', 'home', 'closed', 'b', 'a']);
+    expect(reloaded.find((entry) => entry.id === 'a')?.name).toBe('Renamed');
+    expect(storage.activeWorkspaceId).toBe('b');
+  });
+
+  it('does not write storage for refused or unchanged moves', () => {
+    // Given: normalized storage with adjacent projects.
+    storage.workspaces = [
+      createPersistedWorkspace('home', 'home', '/Users/tester'),
+      createPersistedWorkspace('a', 'project', '/a'),
+      createPersistedWorkspace('b', 'project', '/b'),
+    ];
+    store.list();
+    const save = vi.spyOn(storage, 'setWorkspaces');
+    // When: moves target home, a missing id, themselves, or their current position.
+    store.move('home', 'a', 'after');
+    store.move('a', 'home', 'before');
+    store.move('missing', 'a', 'after');
+    store.move('a', 'missing', 'after');
+    store.move('a', 'a', 'before');
+    store.move('a', 'b', 'before');
+    // Then: no move creates a persistence write.
+    expect(save).not.toHaveBeenCalled();
+  });
+
   it('creates a default workspace when storage is empty', () => {
     // Given: no workspaces have been persisted yet.
 

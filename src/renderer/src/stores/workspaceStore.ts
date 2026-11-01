@@ -1,6 +1,10 @@
 import { create, type StoreApi, type UseBoundStore } from 'zustand';
 import { normalizeAbsolutePath } from '../../../shared/absolute-path';
 import {
+  moveWorkspace as moveWorkspaceInOrder,
+  type DropEdge,
+} from '../../../shared/workspace-order';
+import {
   collectPaneIds,
   findFirstPaneId,
   replacePaneLayout,
@@ -75,6 +79,8 @@ export interface WorkspaceStoreState {
   /** Ends all terminal sessions while retaining the project layout for reopening. */
   closeWorkspace: (id: string) => void;
   deleteWorkspace: (id: string) => Promise<void>;
+  /** Moves a project optimistically, persisting order immediately without changing selection. */
+  moveWorkspace: (workspaceId: string, targetWorkspaceId: string, edge: DropEdge) => void;
   renameWorkspace: (id: string, name: string) => void;
   addTab: () => void;
   addWorkspaceTab: (workspaceId: string) => void;
@@ -442,6 +448,19 @@ export function createWorkspaceStore(
       activeWorkspaceId: null,
       isLoading: false,
       error: null,
+      moveWorkspace: (workspaceId, targetWorkspaceId, edge): void => {
+        const moved = moveWorkspaceInOrder(get().workspaces, workspaceId, targetWorkspaceId, edge);
+        if (!moved) return;
+
+        // Order is separate from workspace contents: delayed updates cannot undo this move, and
+        // pending cwd/layout saves must retain their existing timer and dirty workspace ids.
+        set({ workspaces: moved });
+        void getWorkspaceApi()
+          .move({ workspaceId, targetWorkspaceId, edge })
+          .catch((error: unknown) => {
+            set({ error: getErrorMessage(error) });
+          });
+      },
       loadWorkspaces: async (): Promise<void> => {
         set({ isLoading: true, error: null });
 

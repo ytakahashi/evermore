@@ -126,6 +126,8 @@ const api = {
       ipcRenderer.invoke(IPC.WS_CREATE, { name, rootPath }),
     update: (workspace: Workspace): Promise<void> =>
       ipcRenderer.invoke(IPC.WS_UPDATE, { workspace }),
+    move: (payload: Parameters<Api['workspace']['move']>[0]): Promise<void> =>
+      ipcRenderer.invoke(IPC.WS_MOVE, payload),
     delete: (id: string): Promise<void> => ipcRenderer.invoke(IPC.WS_DELETE, { id }),
     setActiveWorkspaceId: (id: string | null): Promise<void> =>
       ipcRenderer.invoke(IPC.WS_SET_ACTIVE_ID, { id }),

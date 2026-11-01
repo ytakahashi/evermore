@@ -16,6 +16,7 @@ export const IPC = {
   WS_GET: 'workspace:get',
   WS_CREATE: 'workspace:create',
   WS_UPDATE: 'workspace:update',
+  WS_MOVE: 'workspace:move',
   WS_DELETE: 'workspace:delete',
   WS_SET_ACTIVE_ID: 'workspace:set-active-id',
 

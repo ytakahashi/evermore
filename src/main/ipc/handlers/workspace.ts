@@ -8,6 +8,7 @@ import {
   MAX_ID_LENGTH,
   MAX_NAME_LENGTH,
   MAX_PATH_LENGTH,
+  assertIpcPayloadValid,
   readNullableStringField,
   readObject,
   readStringField,
@@ -71,6 +72,18 @@ export function registerWorkspaceHandlers(
   ipcMain.handle(IPC.WS_DELETE, (_event, payload: unknown) => {
     workspaceStore.delete(readStringIdPayload(payload, 'id', IPC.WS_DELETE));
   });
+  ipcMain.handle(IPC.WS_MOVE, (_event, payload: unknown) => {
+    const object = readObject(payload, IPC.WS_MOVE);
+    const workspaceId = readStringField(object, 'workspaceId', IPC.WS_MOVE, {
+      maxLength: MAX_ID_LENGTH,
+    });
+    const targetWorkspaceId = readStringField(object, 'targetWorkspaceId', IPC.WS_MOVE, {
+      maxLength: MAX_ID_LENGTH,
+    });
+    const edge = readStringField(object, 'edge', IPC.WS_MOVE);
+    assertIpcPayloadValid(IPC.WS_MOVE, edge === 'before' || edge === 'after');
+    workspaceStore.move(workspaceId, targetWorkspaceId, edge);
+  });
   ipcMain.handle(IPC.WS_SET_ACTIVE_ID, (_event, payload: unknown) => {
     workspaceStore.setActiveWorkspaceId(readActiveWorkspaceIdPayload(payload));
   });
@@ -81,6 +94,7 @@ export function registerWorkspaceHandlers(
     ipcMain.removeHandler(IPC.WS_CREATE);
     ipcMain.removeHandler(IPC.WS_UPDATE);
     ipcMain.removeHandler(IPC.WS_DELETE);
+    ipcMain.removeHandler(IPC.WS_MOVE);
     ipcMain.removeHandler(IPC.WS_SET_ACTIVE_ID);
   };
 }
