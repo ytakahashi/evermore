@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vite-plus/test';
+import type { DropEdge } from '../../../shared/workspace-order';
 import { IPC } from '../../../shared/ipc-channels';
 import type { Workspace } from '../../../shared/types';
 import type { WorkspaceStore } from '../../workspace/workspace-store';
@@ -18,6 +19,9 @@ interface TestWorkspaceStore {
   get: ReturnType<typeof vi.fn<(id: string) => Workspace | null>>;
   create: ReturnType<typeof vi.fn<(name: string, rootPath: string) => Workspace>>;
   update: ReturnType<typeof vi.fn<(workspace: Workspace) => void>>;
+  move: ReturnType<
+    typeof vi.fn<(workspaceId: string, targetWorkspaceId: string, edge: DropEdge) => void>
+  >;
   delete: ReturnType<typeof vi.fn<(id: string) => void>>;
   setActiveWorkspaceId: ReturnType<typeof vi.fn<(id: string | null) => void>>;
 }
@@ -51,6 +55,7 @@ function createWorkspaceStore(): TestWorkspaceStore {
     create: vi.fn(() => workspace),
     update: vi.fn(),
     delete: vi.fn(),
+    move: vi.fn(),
     setActiveWorkspaceId: vi.fn(),
   };
 }
@@ -255,6 +260,38 @@ describe('registerWorkspaceHandlers', () => {
     expect(workspaceStore.setActiveWorkspaceId).not.toHaveBeenCalled();
   });
 
+  it.each(['before', 'after'])('forwards a validated move (%s) without extra fields', (edge) => {
+    // Given: an injected persistence store.
+    const store = registerWithWorkspaceStore();
+    // When: a relative move arrives through IPC.
+    requireHandler(IPC.WS_MOVE)(
+      {},
+      { workspaceId: 'a', targetWorkspaceId: 'b', edge, extra: 'ignored' },
+    );
+    // Then: only the validated arguments reach the store.
+    expect(store.move).toHaveBeenCalledExactlyOnceWith('a', 'b', edge);
+  });
+
+  it.each([
+    null,
+    [],
+    {},
+    { workspaceId: '', targetWorkspaceId: 'b', edge: 'before' },
+    { workspaceId: 'a'.repeat(MAX_ID_LENGTH + 1), targetWorkspaceId: 'b', edge: 'before' },
+    { workspaceId: 'a', targetWorkspaceId: 42, edge: 'before' },
+    { workspaceId: 'a', targetWorkspaceId: '', edge: 'before' },
+    { workspaceId: 'a', targetWorkspaceId: 'b'.repeat(MAX_ID_LENGTH + 1), edge: 'before' },
+    { workspaceId: 'a', targetWorkspaceId: 'b' },
+    { workspaceId: 'a', targetWorkspaceId: 'b', edge: 'private-invalid-value' },
+    { workspaceId: 'a', targetWorkspaceId: 'b', edge: 1 },
+  ])('rejects invalid move payloads without exposing their contents: %j', (payload) => {
+    // Given: an injected persistence store.
+    const store = registerWithWorkspaceStore();
+    // When / Then: malformed requests produce a channel-only error before reaching persistence.
+    expectInvalidPayload(IPC.WS_MOVE, () => requireHandler(IPC.WS_MOVE)({}, payload));
+    expect(store.move).not.toHaveBeenCalled();
+  });
+
   it('removes every workspace handler during teardown', () => {
     // Given: workspace handlers have been registered.
     const workspaceStore = createWorkspaceStore();
@@ -271,6 +308,7 @@ describe('registerWorkspaceHandlers', () => {
     expect(ipcMainMock.removeHandler).toHaveBeenCalledWith(IPC.WS_CREATE);
     expect(ipcMainMock.removeHandler).toHaveBeenCalledWith(IPC.WS_UPDATE);
     expect(ipcMainMock.removeHandler).toHaveBeenCalledWith(IPC.WS_DELETE);
+    expect(ipcMainMock.removeHandler).toHaveBeenCalledWith(IPC.WS_MOVE);
     expect(ipcMainMock.removeHandler).toHaveBeenCalledWith(IPC.WS_SET_ACTIVE_ID);
   });
 });

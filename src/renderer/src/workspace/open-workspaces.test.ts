@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vite-plus/test';
 import type { Workspace } from '../../../shared/types';
 import {
   findOpenWorkspace,
+  resolveWorkspaceDropAnchor,
+  resolveWorkspaceMoveAnchor,
   getAgentsViewWorkspaces,
   getOpenWorkspaces,
   getSidebarWorkspaces,
@@ -71,4 +73,47 @@ it('places home last in Agents view order while keeping project order', () => {
     ),
   ).toEqual(['a', 'b', 'home']);
   expect(entries.map((entry) => entry.id)).toEqual(['home', 'a', 'closed', 'b']);
+});
+
+describe('workspace move anchors', () => {
+  it('resolves menu neighbors in visible project order, skipping home and closed projects', () => {
+    // Given: home is stored between projects, alongside a closed project.
+    const home = { ...workspace('home', true), kind: 'home' as const };
+    const entries = [workspace('a', true), home, workspace('closed', false), workspace('b', true)];
+    const sidebar = getSidebarWorkspaces(entries);
+    // When / Then: each direction targets only the neighboring visible project.
+    expect(resolveWorkspaceMoveAnchor(sidebar, 'a', 'down')).toEqual({
+      targetWorkspaceId: 'b',
+      edge: 'after',
+    });
+    expect(resolveWorkspaceMoveAnchor(sidebar, 'b', 'up')).toEqual({
+      targetWorkspaceId: 'a',
+      edge: 'before',
+    });
+    expect(resolveWorkspaceMoveAnchor(sidebar, 'a', 'up')).toBeNull();
+    expect(resolveWorkspaceMoveAnchor(sidebar, 'b', 'down')).toBeNull();
+    for (const id of ['home', 'closed', 'missing'])
+      expect(resolveWorkspaceMoveAnchor(sidebar, id, 'up')).toBeNull();
+    expect(resolveWorkspaceMoveAnchor([home, workspace('a', true)], 'a', 'up')).toBeNull();
+    expect(resolveWorkspaceMoveAnchor([home, workspace('a', true)], 'a', 'down')).toBeNull();
+  });
+
+  it('resolves home drops to the first visible project regardless of storage position', () => {
+    // Given: home follows a project in storage.
+    const home = { ...workspace('home', true), kind: 'home' as const };
+    const sidebar = getSidebarWorkspaces([workspace('a', true), home, workspace('b', true)]);
+    // When / Then: home maps to the first project, projects retain their edge, and missing anchors are refused.
+    for (const edge of ['before', 'after'] as const) {
+      expect(resolveWorkspaceDropAnchor(sidebar, 'home', edge)).toEqual({
+        targetWorkspaceId: 'a',
+        edge: 'before',
+      });
+      expect(resolveWorkspaceDropAnchor(sidebar, 'b', edge)).toEqual({
+        targetWorkspaceId: 'b',
+        edge,
+      });
+    }
+    expect(resolveWorkspaceDropAnchor([home], 'home', 'after')).toBeNull();
+    expect(resolveWorkspaceDropAnchor(sidebar, 'missing', 'after')).toBeNull();
+  });
 });

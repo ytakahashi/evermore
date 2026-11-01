@@ -20,7 +20,7 @@ import { useUiStore } from '../../stores/uiStore';
 import { useWorkspaceStore } from '../../stores/workspaceStore';
 import { requestTabClose } from '../../tab-close/tabClose';
 import { requestWorkspaceClose } from '../../workspace-close/workspaceClose';
-import { getSidebarWorkspaces } from '../../workspace/open-workspaces';
+import { getSidebarWorkspaces, resolveWorkspaceMoveAnchor } from '../../workspace/open-workspaces';
 import { formatWorkspaceLabels } from '../../workspace/workspace-labels';
 import { ContextMenu } from '../common/ContextMenu';
 import { hasActionableItem, type ContextMenuItem } from '../common/contextMenuItems';
@@ -204,6 +204,7 @@ export function WorkspacesView(): React.JSX.Element {
   const addWorkspaceTab = useWorkspaceStore((state) => state.addWorkspaceTab);
   const openProjectPalette = useUiStore((state) => state.openProjectPalette);
   const deleteWorkspace = useWorkspaceStore((state) => state.deleteWorkspace);
+  const moveWorkspace = useWorkspaceStore((state) => state.moveWorkspace);
   const renameWorkspace = useWorkspaceStore((state) => state.renameWorkspace);
   const renameWorkspaceTab = useWorkspaceStore((state) => state.renameWorkspaceTab);
   const selectWorkspacePane = useWorkspaceStore((state) => state.selectWorkspacePane);
@@ -297,11 +298,10 @@ export function WorkspacesView(): React.JSX.Element {
   if (dropTarget && !isOpenWorkspaceId(dropTarget.workspaceId)) setDropTarget(null);
   if (editingWorkspaceId && !isOpenWorkspaceId(editingWorkspaceId)) setEditingWorkspaceId(null);
   if (editingTab && !isOpenWorkspaceId(editingTab.workspaceId)) setEditingTab(null);
-  const canDeleteMenuWorkspace =
-    workspaceMenu !== null &&
-    workspaces.some(
-      (workspace) => workspace.id === workspaceMenu.workspaceId && canDeleteWorkspace(workspace),
-    );
+  const menuWorkspace = openWorkspaces.find(
+    (workspace) => workspace.id === workspaceMenu?.workspaceId,
+  );
+  const canDeleteMenuWorkspace = menuWorkspace !== undefined && canDeleteWorkspace(menuWorkspace);
 
   useEffect(() => {
     if (!editingWorkspaceId) return;
@@ -856,6 +856,25 @@ export function WorkspacesView(): React.JSX.Element {
     finishTabDrag();
   };
 
+  const workspaceMoveMenuItems: ContextMenuItem[] =
+    menuWorkspace?.kind === 'project'
+      ? [
+          ...(['up', 'down'] as const).map((direction): ContextMenuItem => {
+            const anchor = resolveWorkspaceMoveAnchor(openWorkspaces, menuWorkspace.id, direction);
+            return {
+              type: 'action',
+              id: `move-workspace-${direction}`,
+              label: direction === 'up' ? 'Move up' : 'Move down',
+              disabled: anchor === null,
+              onSelect: () => {
+                if (anchor) moveWorkspace(menuWorkspace.id, anchor.targetWorkspaceId, anchor.edge);
+              },
+            };
+          }),
+          { type: 'separator' },
+        ]
+      : [];
+
   return (
     <div className="mb-4" onDragOver={handleSidebarDragOver}>
       <div className="mb-1 flex items-center justify-between px-2 text-[10px] font-bold uppercase tracking-wider text-subtle">
@@ -1155,6 +1174,7 @@ export function WorkspacesView(): React.JSX.Element {
         <ContextMenu
           position={{ x: workspaceMenu.x, y: workspaceMenu.y }}
           items={[
+            ...workspaceMoveMenuItems,
             {
               type: 'action',
               id: 'delete-workspace',

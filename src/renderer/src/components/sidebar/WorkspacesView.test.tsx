@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
 import type { Workspace } from '../../../../shared/types';
 import { MAX_WORKSPACE_TABS } from '../../../../shared/workspace-constants';
@@ -179,6 +179,7 @@ describe('WorkspacesView', () => {
           create: workspaceCreate,
           delete: workspaceDelete,
           update: workspaceUpdate,
+          move: vi.fn(() => Promise.resolve()),
           setActiveWorkspaceId: vi.fn(() => Promise.resolve()),
         },
       } as unknown as Window['api'],
@@ -203,6 +204,109 @@ describe('WorkspacesView', () => {
     useTabDragStore.getState().end();
     Reflect.deleteProperty(window, 'api');
     vi.useRealTimers();
+  });
+
+  it('moves visible projects through the context menu, skipping closed records and preserving selection', () => {
+    // Given: home stored between projects, plus a closed record before the next visible project.
+    const closed = { ...newWorkspace, id: 'closed', name: 'Closed', isOpen: false };
+    useWorkspaceStore.setState({
+      workspaces: [workspace2, workspace1, closed, newWorkspace],
+      activeWorkspaceId: workspace2.id,
+    });
+    render(<WorkspacesView />);
+    // When: the first visible project moves down.
+    fireEvent.contextMenu(screen.getByRole('button', { name: 'Project' }));
+    expect(screen.getByRole('menuitem', { name: 'Move up' })).toBeDisabled();
+    expect(screen.getByRole('menuitem', { name: 'Move down' })).not.toBeDisabled();
+    const menu = within(screen.getByRole('menu'));
+    expect(Array.from(screen.getByRole('menu').children)).toEqual([
+      menu.getByRole('menuitem', { name: 'Move up' }),
+      menu.getByRole('menuitem', { name: 'Move down' }),
+      menu.getByRole('separator'),
+      menu.getByRole('menuitem', { name: 'Delete Workspace…' }),
+    ]);
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Move down' }));
+    // Then: the next visible project is the anchor and selection stays unchanged.
+    expect(useWorkspaceStore.getState().workspaces.map((entry) => entry.id)).toEqual([
+      workspace1.id,
+      'closed',
+      newWorkspace.id,
+      workspace2.id,
+    ]);
+    expect(window.api.workspace.move).toHaveBeenCalledExactlyOnceWith({
+      workspaceId: workspace2.id,
+      targetWorkspaceId: newWorkspace.id,
+      edge: 'after',
+    });
+    expect(useWorkspaceStore.getState().activeWorkspaceId).toBe(workspace2.id);
+    expect(screen.getByRole('button', { name: 'Project' })).toHaveAttribute('aria-current', 'page');
+    // When: the same project moves back up from the last visible position.
+    fireEvent.contextMenu(screen.getByRole('button', { name: 'Project' }));
+    expect(screen.getByRole('menuitem', { name: 'Move down' })).toBeDisabled();
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Move up' }));
+    // Then: reverse movement uses the visible predecessor and preserves home pinning.
+    expect(window.api.workspace.move).toHaveBeenLastCalledWith({
+      workspaceId: workspace2.id,
+      targetWorkspaceId: newWorkspace.id,
+      edge: 'before',
+    });
+    expect(useWorkspaceStore.getState().workspaces.map((entry) => entry.id)).toEqual([
+      workspace1.id,
+      'closed',
+      workspace2.id,
+      newWorkspace.id,
+    ]);
+  });
+
+  it('disables both move actions for a lone visible project and omits them for home', () => {
+    // Given: only one project is visible.
+    render(<WorkspacesView />);
+    // When / Then: the project has no neighboring destination.
+    fireEvent.contextMenu(screen.getByRole('button', { name: 'Project' }));
+    expect(screen.getByRole('menuitem', { name: 'Move up' })).toBeDisabled();
+    expect(screen.getByRole('menuitem', { name: 'Move down' })).toBeDisabled();
+    // When / Then: home retains only its disabled deletion action.
+    fireEvent.contextMenu(screen.getByRole('button', { name: 'Default' }));
+    expect(screen.queryByRole('menuitem', { name: 'Move up' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('menuitem', { name: 'Move down' })).not.toBeInTheDocument();
+    expect(within(screen.getByRole('menu')).queryByRole('separator')).not.toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: 'Delete Workspace…' })).toBeDisabled();
+  });
+
+  it('refreshes movement availability and anchors when neighboring projects change while the menu is open', () => {
+    // Given: a move-down menu with another open project.
+    useWorkspaceStore.setState({ workspaces: [workspace1, workspace2, newWorkspace] });
+    render(<WorkspacesView />);
+    fireEvent.contextMenu(screen.getByRole('button', { name: 'Project' }));
+    expect(screen.getByRole('menuitem', { name: 'Move down' })).not.toBeDisabled();
+    // When: the neighboring project closes before selection.
+    act(() => {
+      useWorkspaceStore.setState({
+        workspaces: [workspace1, workspace2, { ...newWorkspace, isOpen: false }],
+      });
+    });
+    // Then: the rendered menu disables movement relative to an invisible project.
+    expect(screen.getByRole('menuitem', { name: 'Move down' })).toBeDisabled();
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Move down' }));
+    expect(window.api.workspace.move).not.toHaveBeenCalled();
+
+    // When: the neighbor reopens before this project while the same menu remains open.
+    act(() => {
+      useWorkspaceStore.setState({ workspaces: [workspace1, newWorkspace, workspace2] });
+    });
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Move up' }));
+
+    // Then: the refreshed menu action uses the current predecessor as its anchor.
+    expect(window.api.workspace.move).toHaveBeenCalledExactlyOnceWith({
+      workspaceId: workspace2.id,
+      targetWorkspaceId: newWorkspace.id,
+      edge: 'before',
+    });
+    expect(useWorkspaceStore.getState().workspaces.map((workspace) => workspace.id)).toEqual([
+      workspace1.id,
+      workspace2.id,
+      newWorkspace.id,
+    ]);
   });
 
   it('renders workspace tabs with pane counts, pane details, and active state', () => {

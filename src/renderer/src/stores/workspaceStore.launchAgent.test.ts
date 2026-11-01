@@ -43,6 +43,7 @@ function setup(project = workspace('project')): {
     create: vi.fn(async () => project),
     update: vi.fn(async () => {}),
     delete: vi.fn(async () => {}),
+    move: vi.fn(async () => {}),
     setActiveWorkspaceId: vi.fn(async () => {}),
   };
   let id = 0;

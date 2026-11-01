@@ -55,12 +55,122 @@ describe('workspaceStore', () => {
       create: vi.fn(() => Promise.resolve(workspace)),
       update: vi.fn(() => Promise.resolve()),
       delete: vi.fn(() => Promise.resolve()),
+      move: vi.fn(async () => {}),
       setActiveWorkspaceId: vi.fn(() => Promise.resolve()),
     };
   });
 
   afterEach(() => {
     vi.useRealTimers();
+  });
+
+  describe('moving workspaces', () => {
+    it('updates immediately and persists consecutive moves while a cwd save is pending', async () => {
+      // Given: two projects, home stored between them, and a pending runtime cwd save.
+      vi.useFakeTimers();
+      const a = createWorkspace('a', '/a');
+      const b = createWorkspace('b', '/b');
+      a.panes[0] = { ...a.panes[0]!, ptyId: 'pty-a' };
+      const store = createWorkspaceStore({ workspaceApi, now: () => now });
+      store.setState({ workspaces: [a, workspace, b], activeWorkspaceId: a.id });
+      store.getState().updatePaneCwdByPtyId('pty-a', '/a/sub');
+      const latestA = store.getState().workspaces[0];
+      const snapshots: string[][] = [];
+      workspaceApi.move = vi.fn(() => {
+        snapshots.push(store.getState().workspaces.map((entry) => entry.id));
+        return Promise.resolve();
+      });
+      now = 99;
+      // When: moves happen synchronously before either IPC completes or the debounce expires.
+      store.getState().moveWorkspace('b', 'a', 'before');
+      store.getState().moveWorkspace('a', 'b', 'before');
+      // Then: each IPC observes its optimistic state, without focus, content, or timestamp changes.
+      expect(snapshots).toEqual([
+        ['b', 'a', workspace.id],
+        ['a', 'b', workspace.id],
+      ]);
+      expect(workspaceApi.move).toHaveBeenNthCalledWith(1, {
+        workspaceId: 'b',
+        targetWorkspaceId: 'a',
+        edge: 'before',
+      });
+      expect(workspaceApi.move).toHaveBeenNthCalledWith(2, {
+        workspaceId: 'a',
+        targetWorkspaceId: 'b',
+        edge: 'before',
+      });
+      expect(store.getState().workspaces[0]).toBe(latestA);
+      expect(store.getState().activeWorkspaceId).toBe('a');
+      expect(workspaceApi.setActiveWorkspaceId).not.toHaveBeenCalled();
+      expect(workspaceApi.update).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(workspaceApi.update).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({ id: 'a', panes: [{ id: 'a-pane-1', cwd: '/a/sub' }] }),
+      );
+      expect(store.getState().workspaces.map((entry) => entry.id)).toEqual([
+        'a',
+        'b',
+        workspace.id,
+      ]);
+    });
+
+    it('does not update state or invoke IPC for refused or unchanged moves', () => {
+      // Given: adjacent projects and home.
+      const entries = [workspace, createWorkspace('a', '/a'), createWorkspace('b', '/b')];
+      const store = createWorkspaceStore({ workspaceApi });
+      store.setState({ workspaces: entries });
+      const listener = vi.fn();
+      store.subscribe(listener);
+      // When: callers move home, target home, use missing ids, or keep the same position.
+      store.getState().moveWorkspace(workspace.id, 'a', 'after');
+      store.getState().moveWorkspace('a', workspace.id, 'before');
+      store.getState().moveWorkspace('missing', 'a', 'after');
+      store.getState().moveWorkspace('a', 'missing', 'before');
+      store.getState().moveWorkspace('a', 'a', 'after');
+      store.getState().moveWorkspace('a', 'b', 'before');
+      // Then: rejected operations are inert.
+      expect(store.getState().workspaces).toBe(entries);
+      expect(listener).not.toHaveBeenCalled();
+      expect(workspaceApi.move).not.toHaveBeenCalled();
+    });
+
+    it('records a persistence failure without rolling back a later move', async () => {
+      // Given: a deferred move that will fail after another move succeeds.
+      let rejectMove: (error: Error) => void = () => {};
+      workspaceApi.move = vi
+        .fn()
+        .mockImplementationOnce(
+          () =>
+            new Promise<void>((_resolve, reject) => {
+              rejectMove = reject;
+            }),
+        )
+        .mockResolvedValue(undefined);
+      const store = createWorkspaceStore({ workspaceApi });
+      store.setState({
+        workspaces: [
+          workspace,
+          createWorkspace('a', '/a'),
+          createWorkspace('b', '/b'),
+          createWorkspace('c', '/c'),
+        ],
+        activeWorkspaceId: workspace.id,
+      });
+      // When: another move follows the optimistic first move, then the first write fails.
+      store.getState().moveWorkspace('c', 'a', 'before');
+      store.getState().moveWorkspace('b', 'c', 'before');
+      rejectMove(new Error('disk unavailable'));
+      await Promise.resolve();
+      // Then: the latest UI order and active workspace survive; the error remains inspectable.
+      expect(store.getState().workspaces.map((entry) => entry.id)).toEqual([
+        workspace.id,
+        'b',
+        'c',
+        'a',
+      ]);
+      expect(store.getState().activeWorkspaceId).toBe(workspace.id);
+      expect(store.getState().error).toBe('disk unavailable');
+    });
   });
 
   describe('closing workspaces', () => {

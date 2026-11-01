@@ -1,3 +1,7 @@
+import type { DropEdge } from '../../../../shared/workspace-order';
+
+export type { DropEdge } from '../../../../shared/workspace-order';
+
 /**
  * Shared helpers for the native HTML5 drag-and-drop used to reorder workspace tabs (horizontally in
  * the TabBar) and to reorder / move them (vertically in the sidebar tree).
@@ -12,9 +16,6 @@ export const TAB_DND_MIME = 'application/x-evermore-tab';
 
 /** Layout axis of a tab list: the TabBar is horizontal, the sidebar tree is vertical. */
 export type Axis = 'horizontal' | 'vertical';
-
-/** Which side of a hovered tab the drop would land on. */
-export type DropEdge = 'before' | 'after';
 
 export interface Point {
   x: number;

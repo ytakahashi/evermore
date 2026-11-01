@@ -1,4 +1,5 @@
 import type { KeyboardShortcutActionId } from './keyboard-shortcuts';
+import type { DropEdge } from './workspace-order';
 import type {
   Workspace,
   AppSettings,
@@ -37,6 +38,12 @@ export interface Api {
     get: (id: string) => Promise<Workspace | null>;
     create: (name: string, rootPath: string) => Promise<Workspace>;
     update: (workspace: Workspace) => Promise<void>;
+    /** Persists a relative project move without changing workspace contents or active selection. */
+    move: (payload: {
+      workspaceId: string;
+      targetWorkspaceId: string;
+      edge: DropEdge;
+    }) => Promise<void>;
     delete: (id: string) => Promise<void>;
     setActiveWorkspaceId: (id: string | null) => Promise<void>;
   };

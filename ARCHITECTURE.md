@@ -282,6 +282,15 @@ The renderer is a single React 19 app rendered into `#root` by `main.tsx` with `
   order through `getOpenWorkspaces()`. Closed workspaces are also excluded from agent sessions
   before runtime cleanup finishes. The sidebar close button retains records; explicit deletion is a
   separate context-menu action and remains unavailable for home.
+- **Project order is persisted as the workspace array order.** `shared/workspace-order.ts` applies
+  relative moves while refusing home as either source or anchor and preserving the relative order of
+  every other record. Sidebar context-menu moves target the adjacent open project, skipping closed
+  records. Home remains pinned only for display; its stored index can shift when a project crosses
+  it. A move changes neither workspace contents/timestamps nor active selection. The renderer
+  updates order optimistically and invokes `workspace:move` immediately, independently of pending
+  debounced content updates. Main `update()` replaces a record in place, so a late content save
+  cannot undo ordering. Failed moves set the renderer's `error` without rollback; this state does
+  not imply a visible error notification in the normal workspace view.
 - **The renderer must not block on IPC errors.** Connection / tunnel stores preserve the last
   successful snapshot on failure so the sidebar keeps showing usable controls.
 - **Workspace persistence is debounced** in the renderer (`workspaceStore`) and flushed via
@@ -305,6 +314,9 @@ The IPC surface is the most important boundary in the app and follows a strict s
   which always return an unsubscribe function.
 - Payloads are objects, not positional arguments, so handlers can accept additions without breaking
   older callers (e.g. `{ id, data }` instead of `(id, data)`).
+- `workspace:move` takes `{ workspaceId, targetWorkspaceId, edge }`, with bounded nonempty ids and
+  an edge of `before` or `after`. Malformed payloads are rejected at the handler; missing records,
+  home moves, and unchanged storage order are safe no-ops in the shared move policy.
 - Native confirmation dialogs use purpose-built IPC methods whose payloads contain only validated
   state needed to select main-owned copy. Renderer-provided strings must not flow into native dialog
   titles, messages, or details.
