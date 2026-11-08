@@ -44,6 +44,9 @@ export interface UiStoreState {
   launchPaletteFocusRequest: number;
   lastAgentPresetId: string | null;
   pendingAgentSelectionPaneId: string | null;
+  /** List navigation target, independent of the borrowed terminal preview. */
+  agentCursorPaneId: string | null;
+  setAgentCursor: (paneId: string | null) => void;
   openLaunchPalette: () => void;
   closeLaunchPalette: () => void;
   /** Records a successful launch for the next preset selection. */
@@ -124,6 +127,8 @@ export const useUiStore = create<UiStoreState>((set, get) => ({
   launchPaletteFocusRequest: 0,
   lastAgentPresetId: null,
   pendingAgentSelectionPaneId: null,
+  agentCursorPaneId: null,
+  setAgentCursor: (agentCursorPaneId) => set({ agentCursorPaneId }),
   openLaunchPalette: () =>
     set((state) => ({
       launchPaletteOpen: true,

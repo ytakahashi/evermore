@@ -105,6 +105,11 @@ function row(agent: string): HTMLElement {
 
 describe('Agents view terminal borrowing', () => {
   beforeEach(() => {
+    // jsdom has no layout or scrolling implementation.
+    Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
+      configurable: true,
+      value: vi.fn(),
+    });
     useWorkspaceStore.setState({
       workspaces: [workspace],
       activeWorkspaceId: 'ws',
@@ -122,6 +127,7 @@ describe('Agents view terminal borrowing', () => {
     useUiStore.setState({ activeView: 'workspace' });
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
+    Reflect.deleteProperty(HTMLElement.prototype, 'scrollIntoView');
   });
 
   it('releases a preview when its workspace closes and keeps other sessions usable', () => {
@@ -188,8 +194,6 @@ describe('Agents view terminal borrowing', () => {
     const list = screen.getByLabelText('Agent sessions');
     const firstRow = row('Claude');
     const secondRow = row('Codex');
-    firstRow.scrollIntoView = vi.fn();
-    secondRow.scrollIntoView = vi.fn();
 
     // When: arrows move through both cards.
     fireEvent.keyDown(list, { key: 'ArrowDown' });
@@ -203,8 +207,8 @@ describe('Agents view terminal borrowing', () => {
     expect(second.fit).not.toHaveBeenCalled();
     expect(terminalHostRegistry.getBorrowedHost()).toBeUndefined();
 
-    // When: the focused card is activated (as Space would), and terminal-originated keys bubble.
-    fireEvent.click(secondRow);
+    // When: Space opens the focused card, and terminal-originated keys bubble.
+    fireEvent.keyDown(secondRow, { key: ' ' });
     const input = second.element.querySelector('textarea')!;
     input.focus();
     for (const key of ['ArrowUp', 'ArrowDown', 'Enter']) fireEvent.keyDown(input, { key });
@@ -231,14 +235,14 @@ describe('Agents view terminal borrowing', () => {
     const second = register('p2');
     render(createElement(StrictMode, null, createElement(AgentsView)));
     row('Claude').focus();
-    // When: selection switches between sessions, then is toggled off.
+    // When: selection switches between sessions, then Space closes the preview.
     fireEvent.click(row('Claude'));
     expect(first.element.closest('[aria-label="Selected agent terminal"]')).not.toBeNull();
     expect(row('Claude')).toHaveFocus();
     fireEvent.click(row('Codex'));
     expect(first.element.parentElement).toBe(first.home);
     expect(second.element.closest('[aria-label="Selected agent terminal"]')).not.toBeNull();
-    fireEvent.click(row('Codex'));
+    fireEvent.keyDown(row('Codex'), { key: ' ' });
     // Then: both roots return to their original containers.
     expect(second.element.parentElement).toBe(second.home);
     expect(screen.queryByLabelText('Selected agent terminal')).not.toBeInTheDocument();
@@ -304,7 +308,9 @@ describe('Agents view terminal borrowing', () => {
     // Then: neither update returns or reborrows the live terminal.
     expect(terminal.element.parentElement).toBe(host);
     expect(terminal.fit).toHaveBeenCalledTimes(fits);
-    fireEvent.click(screen.getByRole('button', { name: /No agent running/ }));
+    // When: Space closes the ended preview.
+    fireEvent.keyDown(screen.getByRole('button', { name: /No agent running/ }), { key: ' ' });
+    // Then: the terminal returns home and the retained row disappears.
     expect(terminal.element.parentElement).toBe(terminal.home);
     expect(screen.getByText('No agents detected')).toBeInTheDocument();
   });

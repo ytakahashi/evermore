@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vite-plus/test';
 import type { PaneLayout, PaneRuntimeInfo, Workspace } from '../../../../shared/types';
-import { collectAgentSessions, formatAgentCwdLabel, groupAgentSessions } from './agent-sessions';
+import {
+  collectAgentSessions,
+  formatAgentCwdLabel,
+  groupAgentSessions,
+  resolveAgentCursor,
+} from './agent-sessions';
 
 function runtimeInfo(ptyId: string, overrides: Partial<PaneRuntimeInfo> = {}): PaneRuntimeInfo {
   return {
@@ -429,5 +434,54 @@ describe('formatAgentCwdLabel', () => {
     expect(formatAgentCwdLabel('/Users/tester/ghq', 'project', root, undefined)).toBe(
       '/Users/tester/ghq',
     );
+  });
+});
+
+describe('resolveAgentCursor', () => {
+  it.each([
+    { label: 'initial selection', previous: [], current: ['a', 'b'], cursor: null, expected: 'a' },
+    {
+      label: 'reordered selection',
+      previous: ['a', 'b'],
+      current: ['b', 'a'],
+      cursor: 'b',
+      expected: 'b',
+    },
+    {
+      label: 'middle removal',
+      previous: ['a', 'b', 'c'],
+      current: ['a', 'c'],
+      cursor: 'b',
+      expected: 'c',
+    },
+    { label: 'last removal', previous: ['a', 'b'], current: ['a'], cursor: 'b', expected: 'a' },
+    {
+      label: 'multiple removals',
+      previous: ['a', 'b', 'c'],
+      current: ['a'],
+      cursor: 'c',
+      expected: 'a',
+    },
+    {
+      label: 'unknown selection',
+      previous: ['a'],
+      current: ['a', 'b'],
+      cursor: 'missing',
+      expected: 'a',
+    },
+    { label: 'empty list', previous: ['a'], current: [], cursor: 'a', expected: null },
+    { label: 'first arriving session', previous: [], current: ['a'], cursor: null, expected: 'a' },
+  ])('resolves $label', ({ previous, current, cursor, expected }) => {
+    // Given: committed order and a cursor before the list changes.
+    const previousOrder = [...previous];
+    const currentOrder = [...current];
+
+    // When: navigation resolves against the current list.
+    const result = resolveAgentCursor(currentOrder, previousOrder, cursor);
+
+    // Then: identity or position is preserved without mutating either snapshot.
+    expect(result).toBe(expected);
+    expect(previousOrder).toEqual(previous);
+    expect(currentOrder).toEqual(current);
   });
 });
