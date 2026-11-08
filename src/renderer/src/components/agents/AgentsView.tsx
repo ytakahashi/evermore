@@ -1,13 +1,19 @@
-import { useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Plus } from 'lucide-react';
 import { formatAgentActivityDetail } from '../../../../shared/agent-label';
+import {
+  DEFAULT_KEYBINDINGS,
+  formatAcceleratorForDisplay,
+} from '../../../../shared/keyboard-shortcuts';
 import { shortenHomePath } from '../../../../shared/path-label';
 import { usePaneInfoStore } from '../../stores/paneInfoStore';
-import { useUiStore } from '../../stores/uiStore';
+import { useSettingsStore } from '../../stores/settingsStore';
+import { selectIsPaletteOpen, useUiStore } from '../../stores/uiStore';
 import { useWorkspaceStore } from '../../stores/workspaceStore';
 import { getPaneRunningIndicator } from '../common/pane-running-indicator';
 import { SparklesIcon } from '../common/SparklesIcon';
 import { AgentTerminalPanel } from './AgentTerminalPanel';
+import { isOpenInWorkspaceChord, OPEN_IN_WORKSPACE_HINT } from './open-in-workspace-shortcut';
 import {
   collectAgentSessions,
   formatAgentCwdLabel,
@@ -151,6 +157,14 @@ function AgentSessionsView(): React.JSX.Element {
   const selectWorkspacePane = useWorkspaceStore((state) => state.selectWorkspacePane);
   const showWorkspaceView = useUiStore((state) => state.showWorkspaceView);
   const pendingPaneId = useUiStore((state) => state.pendingAgentSelectionPaneId);
+  // An empty string means the user explicitly unbound the action, so the hint is dropped.
+  const toggleAgentsHint = formatAcceleratorForDisplay(
+    useSettingsStore(
+      (state) =>
+        state.settings?.shortcuts.keybindings['ui.openAgents'] ??
+        DEFAULT_KEYBINDINGS['ui.openAgents'],
+    ),
+  );
   const [selectedPaneId, setSelectedPaneId] = useState<string | null>(null);
   const listRef = useRef<HTMLDivElement | null>(null);
   const viewRef = useRef<HTMLElement | null>(null);
@@ -209,6 +223,46 @@ function AgentSessionsView(): React.JSX.Element {
     selectWorkspacePane(session.workspaceId, session.tabId, session.paneId);
     showWorkspaceView();
   };
+
+  // Cmd+Enter opens a session from anywhere in the view, including the borrowed agent terminal,
+  // where a plain Enter submits agent input. It is view-local rather than a menu accelerator so
+  // the workspace view keeps Cmd+Enter free. The window capture phase runs before xterm's textarea
+  // handler, and stopping propagation keeps xterm from also writing a CR to the agent's PTY.
+  // Capture sees keys from the whole window, so events originating outside the view (e.g. a
+  // sidebar rename input) are left alone.
+  // Being view-local, the chord is outside the Shortcuts settings conflict check: if the user binds
+  // the same chord to a menu action, the menu accelerator shadows it without any warning.
+  const openWorkspaceShortcutRef = useRef<(event: KeyboardEvent) => void>(() => {});
+  const handleOpenWorkspaceShortcut = (event: KeyboardEvent): void => {
+    if (
+      !isOpenInWorkspaceChord(event) ||
+      event.defaultPrevented ||
+      !(event.target instanceof Node) ||
+      !viewRef.current?.contains(event.target) ||
+      // Modal pickers own Enter; navigating behind one would leave it open over the workspace.
+      selectIsPaletteOpen(useUiStore.getState())
+    )
+      return;
+    const focusedCard =
+      document.activeElement instanceof HTMLElement
+        ? document.activeElement.closest<HTMLElement>('[data-agent-pane-id]')
+        : null;
+    const paneId = focusedCard?.dataset.agentPaneId ?? selectedPaneId;
+    const session = sessions.find((candidate) => candidate.paneId === paneId);
+    if (!session) return;
+    event.preventDefault();
+    event.stopPropagation();
+    openWorkspace(session);
+  };
+  // The listener is registered once and reads the latest render's sessions through the ref.
+  useLayoutEffect(() => {
+    openWorkspaceShortcutRef.current = handleOpenWorkspaceShortcut;
+  });
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent): void => openWorkspaceShortcutRef.current(event);
+    window.addEventListener('keydown', handleKeyDown, { capture: true });
+    return () => window.removeEventListener('keydown', handleKeyDown, { capture: true });
+  }, []);
 
   const handleListKeyDown = (event: React.KeyboardEvent<HTMLDivElement>): void => {
     if (
@@ -292,9 +346,16 @@ function AgentSessionsView(): React.JSX.Element {
             <Plus size={16} />
           </button>
         </div>
+        {/* Modifier chords come first because they also work from the agent terminal, where the
+            plain keys belong to the agent. */}
         <p className="text-xs text-muted">
-          In the list: <kbd>Esc</kbd> Back · <kbd>↑↓</kbd> Move · <kbd>Space</kbd> Preview ·{' '}
-          <kbd>Enter</kbd> Open in workspace · <kbd>N</kbd> New
+          {toggleAgentsHint && (
+            <>
+              <kbd>{toggleAgentsHint}</kbd> Back ·{' '}
+            </>
+          )}
+          <kbd>{OPEN_IN_WORKSPACE_HINT}</kbd> Open in workspace · In the list: <kbd>Esc</kbd> Back ·{' '}
+          <kbd>↑↓</kbd> Move · <kbd>Space</kbd> Preview · <kbd>Enter</kbd> Open · <kbd>N</kbd> New
         </p>
       </header>
       <div className="flex min-h-0 min-w-0 flex-1">

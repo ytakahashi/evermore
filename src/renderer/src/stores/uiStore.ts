@@ -74,6 +74,12 @@ export interface UiStoreState {
   openSettings: (section?: SettingsSectionId) => void;
   /** Switches the main pane to the AgentsView. Idempotent; no-op when already active. */
   openAgents: () => void;
+  /**
+   * Leaves the AgentsView for the workspace when it is active, and opens it from any other view.
+   * Lets one modifier shortcut both enter and leave the view, even while a borrowed agent terminal
+   * has focus and would consume Esc / Enter.
+   */
+  toggleAgents: () => void;
   /** Returns the main pane to the workspace view. Idempotent; no-op when already active. */
   showWorkspaceView: () => void;
 }
@@ -214,6 +220,10 @@ export const useUiStore = create<UiStoreState>((set, get) => ({
     if (get().activeView !== 'agents') {
       set({ activeView: 'agents' });
     }
+  },
+  toggleAgents: () => {
+    if (get().activeView === 'agents') get().showWorkspaceView();
+    else get().openAgents();
   },
   showWorkspaceView: () => {
     if (get().activeView !== 'workspace') {

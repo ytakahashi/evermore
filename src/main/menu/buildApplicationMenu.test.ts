@@ -161,7 +161,7 @@ describe('buildApplicationMenu', () => {
     const template = buildApplicationMenu(defaultOptions({ dispatchers }));
 
     // When: the Agents item is located and clicked.
-    const agents = findItemByLabel(template, 'Agents');
+    const agents = findItemByLabel(template, 'Toggle Agents');
     clickMenuItem(agents);
 
     // Then: the mode-switching view is reachable from the menu bar with its accelerator, which is

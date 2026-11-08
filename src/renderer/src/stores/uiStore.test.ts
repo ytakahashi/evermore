@@ -124,6 +124,25 @@ describe('useUiStore', () => {
     expect(useUiStore.getState().activeView).toBe('workspace');
   });
 
+  it('toggles the agents view from any view and back to the workspace', () => {
+    // Given: the Settings view is active.
+    useUiStore.getState().openSettings();
+
+    // When: the agents view is toggled.
+    useUiStore.getState().toggleAgents();
+
+    // Then: it opens, as it would from the workspace view.
+    expect(useUiStore.getState().activeView).toBe('agents');
+
+    // When: a pending launch selection exists and the view is toggled again.
+    useUiStore.setState({ pendingAgentSelectionPaneId: 'pane-1' });
+    useUiStore.getState().toggleAgents();
+
+    // Then: it returns to the workspace, not the previous Settings view, and drops the handoff.
+    expect(useUiStore.getState().activeView).toBe('workspace');
+    expect(useUiStore.getState().pendingAgentSelectionPaneId).toBeNull();
+  });
+
   it('switches directly between the settings and agents views', () => {
     // Given: the user is on the settings view.
     useUiStore.getState().openSettings();

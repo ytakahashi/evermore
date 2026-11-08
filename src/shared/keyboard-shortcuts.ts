@@ -27,6 +27,8 @@ export type KeyboardShortcutActionId =
   | 'ui.openTabSearch'
   | 'ui.toggleSidebar'
   | 'ui.openSettings'
+  // Toggles the Agents view. The id keeps its original name because it is the key under which
+  // user-customised keybindings are persisted; renaming it would silently drop those bindings.
   | 'ui.openAgents';
 
 export const KEYBOARD_SHORTCUT_ACTION_IDS: readonly KeyboardShortcutActionId[] = [
@@ -107,7 +109,7 @@ export const ACTION_LABELS: Record<KeyboardShortcutActionId, string> = {
   'ui.openTabSearch': 'Search Tabs…',
   'ui.toggleSidebar': 'Toggle Sidebar',
   'ui.openSettings': 'Preferences…',
-  'ui.openAgents': 'Agents',
+  'ui.openAgents': 'Toggle Agents',
 };
 
 /**

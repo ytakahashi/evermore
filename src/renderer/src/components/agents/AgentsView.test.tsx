@@ -415,6 +415,104 @@ describe('AgentsView', () => {
     expect(useUiStore.getState().activeView).toBe('agents');
   });
 
+  it('opens the selected session in its workspace on Cmd+Enter from the agent terminal', () => {
+    // Given: a selected session whose terminal panel holds focus, standing in for xterm's textarea.
+    usePaneInfoStore.setState({ infosByPtyId: { 'pty-2': agentInfo('pty-2') } });
+    render(<AgentsView />);
+    fireEvent.click(screen.getByRole('button', { name: /server/ }));
+    const panel = screen.getByRole('region', { name: 'Selected agent terminal' });
+    const terminalInput = document.createElement('textarea');
+    panel.append(terminalInput);
+    terminalInput.focus();
+    const terminalKeyDown = vi.fn();
+    terminalInput.addEventListener('keydown', terminalKeyDown);
+
+    // When: Cmd+Enter is pressed inside the terminal.
+    const event = new KeyboardEvent('keydown', {
+      key: 'Enter',
+      metaKey: true,
+      bubbles: true,
+      cancelable: true,
+    });
+    fireEvent(terminalInput, event);
+
+    // Then: the view navigates to the session and the key never reaches the terminal.
+    expect(event.defaultPrevented).toBe(true);
+    expect(terminalKeyDown).not.toHaveBeenCalled();
+    expect(useUiStore.getState().activeView).toBe('workspace');
+    expect(useWorkspaceStore.getState().activeWorkspaceId).toBe(workspace2.id);
+  });
+
+  it('opens the focused card over the selected session on Cmd+Enter', () => {
+    // Given: one session selected while focus rests on another card.
+    usePaneInfoStore.setState({
+      infosByPtyId: { 'pty-1': agentInfo('pty-1'), 'pty-2': agentInfo('pty-2') },
+    });
+    render(<AgentsView />);
+    fireEvent.click(screen.getByRole('button', { name: /zsh/ }));
+    screen.getByRole('button', { name: /server/ }).focus();
+
+    // When: Cmd+Enter is pressed.
+    fireEvent.keyDown(document.activeElement as Element, { key: 'Enter', metaKey: true });
+
+    // Then: the focused card wins, matching the plain Enter behavior.
+    expect(useWorkspaceStore.getState().activeWorkspaceId).toBe(workspace2.id);
+  });
+
+  it('leaves Cmd+Enter alone when it originates outside the view', () => {
+    // Given: a selected session while focus sits in an input outside the view, like a sidebar
+    // rename field.
+    usePaneInfoStore.setState({ infosByPtyId: { 'pty-2': agentInfo('pty-2') } });
+    render(<AgentsView />);
+    fireEvent.click(screen.getByRole('button', { name: /server/ }));
+    const outsideInput = document.createElement('input');
+    document.body.append(outsideInput);
+    outsideInput.focus();
+
+    // When: Cmd+Enter is pressed in that input.
+    const event = new KeyboardEvent('keydown', {
+      key: 'Enter',
+      metaKey: true,
+      bubbles: true,
+      cancelable: true,
+    });
+    fireEvent(outsideInput, event);
+
+    // Then: the key reaches the input and the view stays.
+    expect(event.defaultPrevented).toBe(false);
+    expect(useUiStore.getState().activeView).toBe('agents');
+    outsideInput.remove();
+  });
+
+  it.each([
+    { label: 'no session', setup: (): void => {} },
+    {
+      label: 'an open picker',
+      setup: (): void => {
+        fireEvent.click(screen.getByRole('button', { name: /server/ }));
+        act(() => useUiStore.setState({ launchPaletteOpen: true }));
+      },
+    },
+  ])('leaves Cmd+Enter alone with $label', ({ setup }) => {
+    // Given: a session that may be selected, and the given blocking condition.
+    usePaneInfoStore.setState({ infosByPtyId: { 'pty-2': agentInfo('pty-2') } });
+    render(<AgentsView />);
+    setup();
+
+    // When: Cmd+Enter is pressed.
+    const event = new KeyboardEvent('keydown', {
+      key: 'Enter',
+      metaKey: true,
+      bubbles: true,
+      cancelable: true,
+    });
+    fireEvent(screen.getByLabelText('Agent sessions'), event);
+
+    // Then: the key passes through and the view stays.
+    expect(event.defaultPrevented).toBe(false);
+    expect(useUiStore.getState().activeView).toBe('agents');
+  });
+
   it('leaves empty-list and settings-button keys alone', () => {
     // Given: an empty view.
     render(<AgentsView />);

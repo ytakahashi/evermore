@@ -236,6 +236,12 @@ describe('useShortcutBridge', () => {
     // Then: the Agents view comes up — like the other chrome actions it is not view-gated, since a
     // mode switch is exactly what the user is asking for.
     expect(useUiStore.getState().activeView).toBe('agents');
+
+    // When: the same action fires again from the Agents view.
+    emit('ui.openAgents');
+
+    // Then: it toggles back to the workspace, so one chord both enters and leaves the view.
+    expect(useUiStore.getState().activeView).toBe('workspace');
   });
 
   it('opens tab search via ui.openTabSearch regardless of current view', () => {
