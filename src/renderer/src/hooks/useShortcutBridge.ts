@@ -26,7 +26,9 @@ import {
  *  - `pane.toggleFullscreen` runs in either fullscreen state (that is the toggle), but is still
  *    gated to the workspace view so it does not silently affect a hidden tab.
  *  - `ui.toggleSidebar`, `ui.openSettings` and `ui.openAgents` are always allowed — they only
- *    affect chrome.
+ *    affect chrome. `ui.openAgents` toggles: it is the way back from the Agents view that still
+ *    works while the borrowed agent terminal has focus, because menu accelerators resolve before
+ *    xterm and Command chords never reach the PTY.
  */
 export function useShortcutBridge(): void {
   useEffect(() => {
@@ -122,7 +124,7 @@ function handleShortcut(actionId: KeyboardShortcutActionId): void {
       uiState.openSettings();
       return;
     case 'ui.openAgents':
-      uiState.openAgents();
+      uiState.toggleAgents();
       return;
     default: {
       const _exhaustive: never = actionId;

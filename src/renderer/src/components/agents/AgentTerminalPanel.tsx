@@ -4,6 +4,10 @@ import { getTruncatedPathLabel } from '../../../../shared/path-label';
 import { useResizeObserver } from '../../hooks/useResizeObserver';
 import { terminalHostRegistry } from '../../terminal-host/terminalHostRegistry';
 import { getAgentSessionName, type AgentSession } from './agent-sessions';
+import {
+  OPEN_IN_WORKSPACE_ARIA_KEYSHORTCUTS,
+  OPEN_IN_WORKSPACE_HINT,
+} from './open-in-workspace-shortcut';
 
 interface AgentTerminalPanelProps {
   session: AgentSession;
@@ -72,12 +76,18 @@ export function AgentTerminalPanel({
             {getTruncatedPathLabel(session.cwd)}
           </p>
         </div>
+        {/* The chord is handled by AgentsView; the hint is hidden from the accessible name so the
+            button is still announced as "Open in workspace". */}
         <button
           type="button"
-          className="rounded border border-border px-2 py-1 text-xs hover:bg-raised"
+          aria-keyshortcuts={OPEN_IN_WORKSPACE_ARIA_KEYSHORTCUTS}
+          className="flex items-center gap-1.5 rounded border border-border px-2 py-1 text-xs hover:bg-raised"
           onClick={onOpenWorkspace}
         >
           Open in workspace
+          <kbd aria-hidden="true" className="text-muted">
+            {OPEN_IN_WORKSPACE_HINT}
+          </kbd>
         </button>
         <button
           type="button"
