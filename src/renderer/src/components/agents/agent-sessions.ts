@@ -34,6 +34,17 @@ export interface AgentSessionGroup {
   sessions: AgentSession[];
 }
 
+/** Preserves cursor identity, or its previous position when a session disappears. */
+export function resolveAgentCursor(
+  paneIds: readonly string[],
+  previousPaneIds: readonly string[],
+  cursorPaneId: string | null,
+): string | null {
+  if (cursorPaneId !== null && paneIds.includes(cursorPaneId)) return cursorPaneId;
+  const previousIndex = cursorPaneId === null ? 0 : previousPaneIds.indexOf(cursorPaneId);
+  return paneIds[Math.min(Math.max(previousIndex, 0), paneIds.length - 1)] ?? null;
+}
+
 /**
  * Collects every pane running an agent, in Agents view order: projects as the Workspaces sidebar
  * lists them, then home.

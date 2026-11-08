@@ -13,6 +13,7 @@ interface AgentTerminalPanelProps {
   session: AgentSession;
   onClose: () => void;
   onOpenWorkspace: () => void;
+  onFocusCapture: () => void;
 }
 
 /** Displays an existing pane's terminal without taking ownership of its xterm or PTY. */
@@ -20,6 +21,7 @@ export function AgentTerminalPanel({
   session,
   onClose,
   onOpenWorkspace,
+  onFocusCapture,
 }: AgentTerminalPanelProps): React.JSX.Element {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const [host, setHost] = useState<HTMLDivElement | null>(null);
@@ -67,6 +69,7 @@ export function AgentTerminalPanel({
   return (
     <section
       aria-label="Selected agent terminal"
+      onFocusCapture={onFocusCapture}
       className="flex min-h-0 min-w-0 flex-1 flex-col border-l border-border"
     >
       <header className="flex shrink-0 flex-wrap items-center gap-2 border-b border-border px-4 py-2">

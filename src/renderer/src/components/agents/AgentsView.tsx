@@ -168,7 +168,8 @@ function AgentSessionsView(): React.JSX.Element {
     handleFocusCapture,
     handleBlurCapture,
     handleListKeyDown,
-    toggleSelection,
+    selectPreview,
+    handleTerminalFocusCapture,
     closeSelection,
     openWorkspace,
   } = useAgentsNavigation();
@@ -208,7 +209,8 @@ function AgentSessionsView(): React.JSX.Element {
             </>
           )}
           <kbd>{OPEN_IN_WORKSPACE_HINT}</kbd> Open in workspace · In the list: <kbd>Esc</kbd> Back ·{' '}
-          <kbd>↑↓</kbd> Move · <kbd>Space</kbd> Preview · <kbd>Enter</kbd> Open · <kbd>N</kbd> New
+          <kbd>↑↓</kbd> Move · <kbd>Space</kbd> Toggle preview · <kbd>Enter</kbd> Open ·{' '}
+          <kbd>N</kbd> New
         </p>
       </header>
       <div className="flex min-h-0 min-w-0 flex-1">
@@ -217,7 +219,7 @@ function AgentSessionsView(): React.JSX.Element {
           tabIndex={-1}
           aria-label="Agent sessions"
           onKeyDown={handleListKeyDown}
-          className={`min-h-0 overflow-y-auto p-4 ${selectedSession ? 'w-80 shrink-0' : 'min-w-0 flex-1'}`}
+          className={`min-h-0 overflow-y-auto p-4 outline-none ${selectedSession ? 'w-80 shrink-0' : 'min-w-0 flex-1'}`}
         >
           {sessions.length === 0 ? (
             <EmptyState />
@@ -258,7 +260,7 @@ function AgentSessionsView(): React.JSX.Element {
                         session={session}
                         compact={!!selectedSession}
                         selected={session.paneId === selectedPaneId}
-                        onSelect={() => toggleSelection(session.paneId)}
+                        onSelect={() => selectPreview(session.paneId)}
                       />
                     ))}
                   </section>
@@ -271,6 +273,7 @@ function AgentSessionsView(): React.JSX.Element {
           <AgentTerminalPanel
             key={selectedSession.paneId}
             session={selectedSession}
+            onFocusCapture={handleTerminalFocusCapture}
             onClose={closeSelection}
             onOpenWorkspace={() => openWorkspace(selectedSession)}
           />
