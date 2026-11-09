@@ -1,4 +1,5 @@
 import { formatAcceleratorForDisplay } from '../../../../shared/keyboard-shortcuts';
+import { isExactCommandChord } from '../common/command-chord';
 
 /**
  * Fixed chord that opens an agent session in its workspace from the Agents view.
@@ -20,14 +21,5 @@ export const OPEN_IN_WORKSPACE_HINT = formatAcceleratorForDisplay(OPEN_IN_WORKSP
  * composition.
  */
 export function isOpenInWorkspaceChord(event: KeyboardEvent): boolean {
-  return (
-    event.key === 'Enter' &&
-    event.metaKey &&
-    !event.ctrlKey &&
-    !event.altKey &&
-    !event.shiftKey &&
-    // WebKit can report `isComposing: false` for the key that ends composition.
-    !event.isComposing &&
-    event.keyCode !== 229
-  );
+  return event.key === 'Enter' && isExactCommandChord(event);
 }

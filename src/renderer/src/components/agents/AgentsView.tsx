@@ -11,6 +11,7 @@ import { useWorkspaceStore } from '../../stores/workspaceStore';
 import { getPaneRunningIndicator } from '../common/pane-running-indicator';
 import { SparklesIcon } from '../common/SparklesIcon';
 import { AgentTerminalPanel } from './AgentTerminalPanel';
+import { FOCUS_LIST_HINT, FOCUS_TERMINAL_HINT } from './agent-focus-shortcuts';
 import { OPEN_IN_WORKSPACE_HINT } from './open-in-workspace-shortcut';
 import { useAgentsNavigation } from './useAgentsNavigation';
 import {
@@ -163,6 +164,9 @@ function AgentSessionsView(): React.JSX.Element {
     sessions,
     selectedPaneId,
     selectedSession,
+    shouldFocusTerminal,
+    claimTerminalFocus,
+    terminalPanelRef,
     listRef,
     viewRef,
     handleFocusCapture,
@@ -208,8 +212,9 @@ function AgentSessionsView(): React.JSX.Element {
               <kbd>{toggleAgentsHint}</kbd> Back ·{' '}
             </>
           )}
-          <kbd>{OPEN_IN_WORKSPACE_HINT}</kbd> Open in workspace · In the list: <kbd>Esc</kbd> Back ·{' '}
-          <kbd>↑↓</kbd> Move · <kbd>Space</kbd> Toggle preview · <kbd>Enter</kbd> Open ·{' '}
+          <kbd>{OPEN_IN_WORKSPACE_HINT}</kbd> Open in workspace · <kbd>{FOCUS_LIST_HINT}</kbd> List
+          · <kbd>{FOCUS_TERMINAL_HINT}</kbd> Terminal · In the list: <kbd>Esc</kbd> Back ·{' '}
+          <kbd>↑↓</kbd> Move · <kbd>Space</kbd> Toggle preview · <kbd>Enter</kbd> Focus terminal ·{' '}
           <kbd>N</kbd> New
         </p>
       </header>
@@ -273,6 +278,9 @@ function AgentSessionsView(): React.JSX.Element {
           <AgentTerminalPanel
             key={selectedSession.paneId}
             session={selectedSession}
+            panelRef={terminalPanelRef}
+            shouldFocus={shouldFocusTerminal}
+            claimFocus={claimTerminalFocus}
             onFocusCapture={handleTerminalFocusCapture}
             onClose={closeSelection}
             onOpenWorkspace={() => openWorkspace(selectedSession)}

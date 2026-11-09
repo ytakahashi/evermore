@@ -3,12 +3,16 @@ import { usePaneInfoStore } from '../../stores/paneInfoStore';
 import { selectIsPaletteOpen, useUiStore } from '../../stores/uiStore';
 import { useWorkspaceStore } from '../../stores/workspaceStore';
 import { collectAgentSessions, resolveAgentCursor, type AgentSession } from './agent-sessions';
+import { getAgentFocusDirection } from './agent-focus-shortcuts';
 import { isOpenInWorkspaceChord } from './open-in-workspace-shortcut';
 
 interface AgentsNavigation {
   sessions: AgentSession[];
   selectedPaneId: string | null;
   selectedSession: AgentSession | undefined;
+  shouldFocusTerminal: boolean;
+  claimTerminalFocus: () => boolean;
+  terminalPanelRef: RefObject<HTMLElement | null>;
   listRef: RefObject<HTMLDivElement | null>;
   viewRef: RefObject<HTMLElement | null>;
   handleFocusCapture: (event: React.FocusEvent<HTMLElement>) => void;
@@ -31,6 +35,8 @@ export function useAgentsNavigation(): AgentsNavigation {
   const setAgentCursor = useUiStore((state) => state.setAgentCursor);
   const isPaletteOpen = useUiStore(selectIsPaletteOpen);
   const [selectedPaneId, setSelectedPaneId] = useState<string | null>(null);
+  const [pendingTerminalFocusPaneId, setPendingTerminalFocusPaneId] = useState<string | null>(null);
+  const terminalPanelRef = useRef<HTMLElement | null>(null);
   const listRef = useRef<HTMLDivElement | null>(null);
   const viewRef = useRef<HTMLElement | null>(null);
   const focusedElementRef = useRef<HTMLElement | null>(null);
@@ -38,6 +44,7 @@ export function useAgentsNavigation(): AgentsNavigation {
   const initializedRef = useRef(false);
   const restoreCursorFocusRef = useRef(false);
   const wasPaletteOpenRef = useRef(false);
+  const enterMovedFocusRef = useRef(false);
   const sessions = collectAgentSessions(workspaces, infosByPtyId, {
     retainPaneIds: [selectedPaneId, pendingPaneId].filter((id): id is string => id !== null),
   });
@@ -59,9 +66,13 @@ export function useAgentsNavigation(): AgentsNavigation {
 
   // Reset against the structural model, not polling: ended agents remain usable shells.
   // Adopt a ready launch request before paint, then consume the external handoff after commit.
-  if (pendingSession && pendingSession.paneId !== selectedPaneId)
+  if (pendingSession && pendingSession.paneId !== selectedPaneId) {
     setSelectedPaneId(pendingSession.paneId);
-  else if (selectedPaneId && !selectedSession) setSelectedPaneId(null);
+    setPendingTerminalFocusPaneId(pendingSession.paneId);
+  } else if (selectedPaneId && !selectedSession) {
+    setSelectedPaneId(null);
+    setPendingTerminalFocusPaneId(null);
+  }
 
   const focusCard = (paneId: string | null, scroll = false): void => {
     const card = Array.from(
@@ -85,7 +96,13 @@ export function useAgentsNavigation(): AgentsNavigation {
 
   useLayoutEffect(() => {
     // External stores cannot be updated during render, so publish the resolved cursor at commit.
-    if (useUiStore.getState().agentCursorPaneId !== cursorPaneId) setAgentCursor(cursorPaneId);
+    // A child layout effect can focus xterm and update the cursor first. Do not overwrite that
+    // newer focus event with this render's snapshot.
+    if (
+      storedCursorPaneId !== cursorPaneId &&
+      useUiStore.getState().agentCursorPaneId === storedCursorPaneId
+    )
+      setAgentCursor(cursorPaneId);
   });
 
   useLayoutEffect(() => {
@@ -146,6 +163,25 @@ export function useAgentsNavigation(): AgentsNavigation {
     openWorkspace(session);
   };
 
+  const moveFocusFromShortcut = (event: KeyboardEvent): void => {
+    if (!(event.target instanceof Node)) return;
+    const direction = getAgentFocusDirection(event);
+    if (direction === 'list' && terminalPanelRef.current?.contains(event.target)) {
+      event.preventDefault();
+      event.stopPropagation();
+      setPendingTerminalFocusPaneId(null);
+      focusCard(cursorPaneId, true);
+    } else if (
+      direction === 'terminal' &&
+      listRef.current?.contains(event.target) &&
+      selectedSession
+    ) {
+      event.preventDefault();
+      event.stopPropagation();
+      setPendingTerminalFocusPaneId(selectedSession.paneId);
+    }
+  };
+
   // View-level chords must work from the borrowed terminal too. The window capture phase runs
   // before xterm's textarea handler, and stopping propagation keeps xterm from also writing the
   // key to the agent's PTY. Capture sees keys from the whole window, so events originating outside
@@ -162,7 +198,21 @@ export function useAgentsNavigation(): AgentsNavigation {
       selectIsPaletteOpen(useUiStore.getState())
     )
       return;
+    if (!event.repeat) {
+      enterMovedFocusRef.current = false;
+    } else if (
+      enterMovedFocusRef.current &&
+      event.key === 'Enter' &&
+      terminalPanelRef.current?.contains(event.target)
+    ) {
+      // The list's Enter moves focus on the first keydown, so OS key repeat lands in xterm. It must
+      // not become agent input, where it could confirm a permission prompt.
+      event.preventDefault();
+      event.stopPropagation();
+      return;
+    }
     if (isOpenInWorkspaceChord(event)) openWorkspaceFromShortcut(event);
+    else moveFocusFromShortcut(event);
   };
   // The listener is registered once and reads the latest render's sessions through the ref.
   useLayoutEffect(() => {
@@ -202,6 +252,7 @@ export function useAgentsNavigation(): AgentsNavigation {
       event.preventDefault();
       useUiStore.getState().openLaunchPalette();
     } else if (event.key === ' ') {
+      setPendingTerminalFocusPaneId(null);
       if (!paneId) return;
       // Suppress native button activation so Space toggles while clicks only open previews.
       event.preventDefault();
@@ -212,10 +263,13 @@ export function useAgentsNavigation(): AgentsNavigation {
     } else if (event.key === 'Enter') {
       const session = sessions.find((candidate) => candidate.paneId === paneId);
       if (!session) return;
-      // Suppress native activation after navigation.
+      // Suppress native activation so opening the preview does not return focus to the card.
       event.preventDefault();
-      openWorkspace(session);
+      enterMovedFocusRef.current = true;
+      setSelectedPaneId(session.paneId);
+      setPendingTerminalFocusPaneId(session.paneId);
     } else if (event.key === 'ArrowUp' || event.key === 'ArrowDown') {
+      setPendingTerminalFocusPaneId(null);
       if (sessions.length === 0) return;
       event.preventDefault();
       // Arrows move focus only; Space opens the terminal panel.
@@ -234,15 +288,25 @@ export function useAgentsNavigation(): AgentsNavigation {
   };
 
   const closeSelection = (): void => {
+    setPendingTerminalFocusPaneId(null);
     setSelectedPaneId(null);
     restoreCursorFocusRef.current = true;
   };
 
   const selectPreview = (paneId: string): void => {
+    setPendingTerminalFocusPaneId(null);
     setAgentCursor(paneId);
     setSelectedPaneId(paneId);
     // macOS mouse activation need not focus a button; make the next Space target explicit.
     focusCard(paneId);
+  };
+
+  const claimTerminalFocus = (): boolean => {
+    setPendingTerminalFocusPaneId(null);
+    // A terminal can become ready long after the request. If the user has since moved outside the
+    // view, such as into a sidebar rename field, drop the request rather than take their input.
+    const active = document.activeElement;
+    return active === document.body || (viewRef.current?.contains(active) ?? false);
   };
 
   const handleFocusCapture = (event: React.FocusEvent<HTMLElement>): void => {
@@ -265,6 +329,12 @@ export function useAgentsNavigation(): AgentsNavigation {
     sessions,
     selectedPaneId,
     selectedSession,
+    shouldFocusTerminal:
+      !isPaletteOpen &&
+      selectedSession !== undefined &&
+      pendingTerminalFocusPaneId === selectedSession.paneId,
+    claimTerminalFocus,
+    terminalPanelRef,
     listRef,
     viewRef,
     handleFocusCapture,

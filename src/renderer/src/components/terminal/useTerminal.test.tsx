@@ -514,6 +514,22 @@ describe('useTerminal', () => {
     expect(xtermMock.terminalInstances[0]?.focus).not.toHaveBeenCalled();
   });
 
+  it('exposes direct terminal focus for an inactive pane borrowed by Agents', async () => {
+    // Given: an inactive workspace pane stays mounted while Agents owns the visible terminal.
+    useUiStore.setState({ activeView: 'agents' });
+    render(<TestTerminal isActive={false} />);
+    await waitFor(() => expect(ptyApi.create).toHaveBeenCalled());
+    const terminal = xtermMock.terminalInstances[0];
+    expect(terminal?.focus).not.toHaveBeenCalled();
+
+    // When: the display host requests focus through the registry.
+    terminalHostRegistry.getHandle('pane-1')?.focus();
+
+    // Then: xterm receives focus independently of workspace activation, without a new PTY.
+    expect(terminal?.focus).toHaveBeenCalledOnce();
+    expect(ptyApi.create).toHaveBeenCalledOnce();
+  });
+
   it('focuses the terminal when it becomes active after mount', async () => {
     // Given: a terminal starts inactive but mounted.
     const { rerender } = render(<TestTerminal isActive={false} />);

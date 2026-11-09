@@ -316,6 +316,7 @@ describe('command block display with real xterm and controllers', () => {
       element: f.root,
       home: f.home,
       fit: () => undefined,
+      focus: () => f.terminal.focus(),
     });
     try {
       await write(f.terminal, command());
