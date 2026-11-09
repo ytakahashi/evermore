@@ -3,6 +3,7 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
 import { cloneDefaultSettings } from '../../../../shared/settings-defaults';
 import type { Workspace } from '../../../../shared/types';
+import type { LaunchTarget } from '../../agents/launchTarget';
 import { useSettingsStore } from '../../stores/settingsStore';
 import { useUiStore } from '../../stores/uiStore';
 import { useWorkspaceStore } from '../../stores/workspaceStore';
@@ -145,6 +146,161 @@ describe('LaunchAgentPalette', () => {
     await waitFor(() => expect(selectWorkspacePane).toHaveBeenCalled());
     expect(useUiStore.getState().activeView).toBe('workspace');
   });
+
+  const cursorWorkspaceFields = {
+    id: 'cursor-workspace',
+    name: 'Cursor workspace',
+    // Equivalent to home's root, so a project here must stay distinct from the home workspace.
+    rootPath: '/home/./',
+    panes: [{ id: 'cursor-pane', cwd: '/home' }],
+  };
+  const cursorWorkspaceCases: Array<{
+    workspaces: Workspace[];
+    activeWorkspaceId: string;
+    expectedTarget: LaunchTarget;
+  }> = [
+    {
+      workspaces: [
+        home,
+        { ...home, ...cursorWorkspaceFields, kind: 'project' },
+        { ...home, id: 'active', kind: 'project', rootPath: '/active' },
+      ],
+      activeWorkspaceId: 'active',
+      expectedTarget: { kind: 'project', rootPath: '/home/./' },
+    },
+    {
+      workspaces: [
+        { ...home, id: 'project', kind: 'project', name: 'Project', rootPath: '/work' },
+        { ...home, ...cursorWorkspaceFields },
+      ],
+      activeWorkspaceId: 'project',
+      expectedTarget: { kind: 'home' },
+    },
+  ];
+
+  it.each(cursorWorkspaceCases)(
+    'starts with presets for the cursor workspace ($expectedTarget.kind) and restores its project selection',
+    async ({ workspaces, activeWorkspaceId, expectedTarget }) => {
+      // Given: the cursor belongs to a workspace other than the active one.
+      useWorkspaceStore.setState({ workspaces, activeWorkspaceId });
+      useUiStore.setState({ activeView: 'agents', agentCursorPaneId: 'cursor-pane' });
+
+      // When: the picker opens.
+      render(<LaunchAgentPalette />);
+
+      // Then: it starts at the presets for the cursor workspace.
+      expect(presetStep()).toHaveFocus();
+      expect(screen.getByRole('button', { name: 'Change project' })).toHaveTextContent(
+        'Cursor workspace',
+      );
+
+      // When: Escape returns to workspace selection.
+      fireEvent.keyDown(presetStep(), { key: 'Escape' });
+
+      // Then: the cursor workspace is selected without changing the actual active workspace.
+      expect(projectStep()).toHaveFocus();
+      expect(screen.getByRole('option', { selected: true })).toHaveTextContent('Cursor workspace');
+      expect(screen.getByRole('option', { selected: true })).toHaveTextContent('Open');
+      expect(screen.getByText('Active')).toBeInTheDocument();
+
+      // When: the restored workspace and its default preset are confirmed.
+      enter(projectStep());
+      enter(presetStep());
+
+      // Then: the agent launches in that workspace without navigating away.
+      await waitFor(() => expect(launchAgent).toHaveBeenCalledTimes(1));
+      expect(launchAgent).toHaveBeenCalledWith(
+        expectedTarget,
+        expect.any(Object),
+        expect.any(AbortSignal),
+      );
+      expect(selectWorkspacePane).not.toHaveBeenCalled();
+    },
+  );
+
+  it('resolves cursor presets after settings load without resetting the chosen workspace', () => {
+    // Given: the cursor workspace is available before settings finish loading.
+    const settings = cloneDefaultSettings();
+    settings.agents.presets.push({
+      id: 'scoped',
+      label: 'Scoped command',
+      command: 'agent',
+      rootPath: '/work',
+    });
+    useSettingsStore.setState({ settings: null, isLoading: true });
+    useWorkspaceStore.setState({
+      workspaces: [
+        home,
+        {
+          ...home,
+          id: 'project',
+          kind: 'project',
+          rootPath: '/work',
+          panes: [{ id: 'cursor-pane', cwd: '/work' }],
+        },
+      ],
+    });
+    useUiStore.setState({ activeView: 'agents', agentCursorPaneId: 'cursor-pane' });
+    render(<LaunchAgentPalette />);
+    expect(screen.getByRole('status')).toHaveTextContent('Loading launch options');
+
+    // When: settings arrive and the cursor changes while the picker is open.
+    act(() => {
+      useUiStore.getState().setAgentCursor(null);
+      useSettingsStore.setState({ settings, isLoading: false });
+    });
+
+    // Then: preset selection uses the entry workspace and its scoped commands.
+    expect(presetStep()).toHaveFocus();
+    expect(screen.getByRole('option', { selected: true })).toHaveTextContent('Scoped command');
+  });
+
+  it('returns to project selection when the chosen destination disappears', () => {
+    // Given: preset selection started from a cursor workspace absent from registered projects.
+    useWorkspaceStore.setState({
+      workspaces: [
+        ...useWorkspaceStore.getState().workspaces,
+        {
+          ...home,
+          id: 'temporary',
+          kind: 'project',
+          rootPath: '/temporary',
+          panes: [{ id: 'cursor-pane', cwd: '/temporary' }],
+        },
+      ],
+    });
+    useUiStore.setState({ activeView: 'agents', agentCursorPaneId: 'cursor-pane' });
+    render(<LaunchAgentPalette />);
+    expect(presetStep()).toHaveFocus();
+
+    // When: the chosen workspace is removed while the picker remains open.
+    act(() =>
+      useWorkspaceStore.setState({
+        workspaces: useWorkspaceStore
+          .getState()
+          .workspaces.filter((workspace) => workspace.id !== 'temporary'),
+      }),
+    );
+
+    // Then: the picker offers workspace selection instead of retaining a stale launch target.
+    expect(projectStep()).toHaveFocus();
+    expect(launchAgent).not.toHaveBeenCalled();
+  });
+
+  it.each([null, 'missing-pane'])(
+    'starts at project selection without a valid cursor (%s)',
+    (cursor) => {
+      // Given: Agents has no resolvable cursor workspace.
+      useUiStore.setState({ activeView: 'agents', agentCursorPaneId: cursor });
+
+      // When: the picker opens.
+      render(<LaunchAgentPalette />);
+
+      // Then: the existing two-step flow defaults to the active workspace.
+      expect(projectStep()).toHaveFocus();
+      expect(screen.getByRole('option', { selected: true })).toHaveTextContent('Project');
+    },
+  );
 
   it('distinguishes no presets from no search matches and links to the settings section', () => {
     // Given: only a preset scoped to another project.

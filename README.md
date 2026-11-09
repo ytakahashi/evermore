@@ -33,27 +33,22 @@ Zsh shell integration gives the workspace UI shell-level accuracy and responsive
 
 ### AI Agent Hook Integration
 
-The **Agents** view shows prompts and activity across workspaces, grouped under a heading per
-workspace with projects first and the home workspace last. Each card shows its tab and its cwd
-relative to the project root. Select a session to operate its existing terminal alongside the list
-without switching workspaces. Space toggles the preview, and the panel's **×** button closes it.
-Enter focuses the terminal; `Command+Left` returns to the list and `Command+Right` focuses the
-previewed terminal. **Open in workspace** (`Command+Enter`) navigates to the original pane. Esc
-reaches the agent while the terminal has focus; outside the terminal, it returns to the workspace.
-Selection resets when you leave the Agents view.
+Evermore helps you monitor and operate AI agents across workspaces:
 
-Use **Launch Agent…** (`Command+Shift+N`), the **+** button in Agents, or **N** while the list has
-focus to choose a project and a command preset. Home is also available as a launch target. Manage
-shared and project-specific commands in **Settings > Agent presets**; project presets appear first
-in the launcher. Launching from Agents keeps the overview open and selects and focuses the new
-session once its terminal is ready. Launching from another view opens the new terminal in its
-workspace. The shortcut can be customized in **Settings > Shortcuts**.
-
-With AI agent hooks configured, the sidebar reflects per-pane agent status in real time:
-
-- **Live Activity Status**: Shows when an agent turn is in progress.
-- **Awaiting Input Alerts**: Highlights panes blocked on a permission prompt.
-- **Ready on Completion**: Shows the pane as ready when the agent finishes its turn.
+- **Agents Overview**: The **Agents** view groups prompts and activity by workspace, with projects
+  first and home last.
+- **Terminal Preview**: Select a session to use its terminal beside the list. Space toggles the
+  preview, and **×** closes it.
+- **Keyboard Navigation**: Enter focuses the terminal, `Command+Left` returns to the list,
+  `Command+Right` focuses the previewed terminal, and `Command+Enter` opens the session in its
+  workspace. Esc reaches the agent from the terminal and returns to the workspace outside it.
+- **Agent Launcher**: Use **Launch Agent…** (`Command+Shift+N`, customizable in **Settings >
+  Shortcuts**), **+**, or **N** in the list to run a command preset in a project or home. From
+  Agents, the picker starts with the cursor row's workspace, and the new terminal takes focus when
+  ready.
+- **Command Presets**: Manage shared and project-specific commands in **Settings > Agent presets**.
+- **Live Agent Status**: With AI agent hooks configured, the sidebar shows active turns, permission
+  prompts awaiting input, and finished turns.
 
 ## Recommended Setup
 
