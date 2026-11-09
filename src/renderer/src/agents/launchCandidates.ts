@@ -8,6 +8,11 @@ export interface LaunchCandidate extends ProjectCandidate {
   target: LaunchTarget;
 }
 
+/** Identifies a launch destination by kind and normalized project path. */
+export function getLaunchTargetKey(target: LaunchTarget): string {
+  return target.kind === 'home' ? 'home' : `project:${normalizeAbsolutePath(target.rootPath)}`;
+}
+
 /** Combines project candidates with home last, selecting the active workspace by kind and path. */
 export function createLaunchTargets(
   directories: string[],
@@ -20,13 +25,13 @@ export function createLaunchTargets(
     activeWorkspaceId,
   ).map((candidate) => ({
     ...candidate,
-    key: `project:${normalizeAbsolutePath(candidate.rootPath)}`,
+    key: getLaunchTargetKey({ kind: 'project', rootPath: candidate.rootPath }),
     target: { kind: 'project', rootPath: candidate.rootPath },
   }));
   const home = workspaces.find((workspace) => workspace.kind === 'home');
   if (home)
     candidates.push({
-      key: 'home',
+      key: getLaunchTargetKey({ kind: 'home' }),
       target: { kind: 'home' },
       name: home.name,
       rootPath: home.rootPath,
@@ -35,11 +40,7 @@ export function createLaunchTargets(
   const active = workspaces.find(
     (workspace) => workspace.id === activeWorkspaceId && workspace.isOpen,
   );
-  const defaultKey = active
-    ? active.kind === 'home'
-      ? 'home'
-      : `project:${normalizeAbsolutePath(active.rootPath)}`
-    : (candidates[0]?.key ?? null);
+  const defaultKey = active ? getLaunchTargetKey(active) : (candidates[0]?.key ?? null);
   return { candidates, defaultKey };
 }
 

@@ -3,6 +3,7 @@ import { Search, X } from 'lucide-react';
 import {
   createLaunchTargets,
   filterLaunchPresets,
+  getLaunchTargetKey,
   getPresetsForTarget,
   pickDefaultPreset,
   type LaunchCandidate,
@@ -33,8 +34,16 @@ function LaunchPicker(): React.JSX.Element {
   // The entry view, rather than the current view after asynchronous work, decides navigation.
   const [originView] = useState(() => useUiStore.getState().activeView);
   const [projectQuery, setProjectQuery] = useState('');
-  const [projectKey, setProjectKey] = useState<string | null>(null);
-  const [chosen, setChosen] = useState<LaunchCandidate | null>(null);
+  // Read once at entry: the session keeps its destination even if the cursor moves behind the
+  // modal. The Agents view clears the cursor on departure, so other views start at the first step.
+  const [chosenKey, setChosenKey] = useState<string | null>(() => {
+    const cursorPaneId = useUiStore.getState().agentCursorPaneId;
+    const workspace = workspaces.find((entry) =>
+      entry.panes.some((pane) => pane.id === cursorPaneId),
+    );
+    return workspace ? getLaunchTargetKey(workspace) : null;
+  });
+  const [projectKey, setProjectKey] = useState(chosenKey);
   const [presetQuery, setPresetQuery] = useState('');
   const [presetId, setPresetId] = useState<string | null>(null);
   const { dialogRef, inputRef, busy, error, close, submit, onKeyDown } = usePickerSession({
@@ -47,6 +56,8 @@ function LaunchPicker(): React.JSX.Element {
     workspaces,
     activeWorkspaceId,
   );
+  // Store only the key: the candidate is rebuilt from current workspaces and settings each render.
+  const chosen = candidates.find((candidate) => candidate.key === chosenKey);
   // The generic filter keeps each candidate's target identity.
   const projects = filterProjectCandidates(candidates, projectQuery);
   const selectedProject =
@@ -72,18 +83,18 @@ function LaunchPicker(): React.JSX.Element {
     dialogRef.current
       ?.querySelector(`[id="launch-option-${selectedIndex}"]`)
       ?.scrollIntoView?.({ block: 'nearest' });
-  }, [dialogRef, selectedIndex, chosen, projectQuery, presetQuery]);
+  }, [dialogRef, selectedIndex, chosen?.key, projectQuery, presetQuery]);
 
   const chooseProject = (candidate: LaunchCandidate): void => {
     if (!ready || busy) return;
     setProjectKey(candidate.key);
-    setChosen(candidate);
+    setChosenKey(candidate.key);
     setPresetQuery('');
     setPresetId(null);
     inputRef.current?.focus();
   };
   const back = (): void => {
-    setChosen(null);
+    setChosenKey(null);
     inputRef.current?.focus();
   };
   const launch = async (preset: AgentPreset): Promise<void> => {
