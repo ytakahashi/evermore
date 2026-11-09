@@ -1,4 +1,4 @@
-import { StrictMode } from 'react';
+import { StrictMode, type RefObject } from 'react';
 import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
 import type { PaneRuntimeInfo, Workspace } from '../../../../shared/types';
@@ -35,12 +35,21 @@ vi.mock('./AgentTerminalPanel', () => ({
     onClose,
     onOpenWorkspace,
     onFocusCapture,
+    panelRef,
+    shouldFocus,
   }: {
     onClose: () => void;
     onOpenWorkspace: () => void;
     onFocusCapture: () => void;
+    panelRef: RefObject<HTMLElement | null>;
+    shouldFocus: boolean;
   }) => (
-    <section aria-label="Selected agent terminal" onFocusCapture={onFocusCapture}>
+    <section
+      ref={panelRef}
+      aria-label="Selected agent terminal"
+      onFocusCapture={onFocusCapture}
+      data-focus-requested={shouldFocus}
+    >
       <button type="button" onClick={onClose}>
         Close agent terminal
       </button>
@@ -308,7 +317,7 @@ describe('AgentsView', () => {
     expect(last).toHaveAttribute('aria-pressed', 'true');
   });
 
-  it('opens the focused card in its workspace on Enter', () => {
+  it('requests terminal focus for the focused card on Enter', () => {
     // Given: a focused, unselected session in another workspace.
     usePaneInfoStore.setState({ infosByPtyId: { 'pty-2': agentInfo('pty-2') } });
     render(<AgentsView />);
@@ -319,29 +328,36 @@ describe('AgentsView', () => {
     const event = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true });
     fireEvent(card, event);
 
-    // Then: the native button click is suppressed and workspace navigation completes.
+    // Then: native activation is suppressed and the terminal is selected without leaving Agents.
     expect(event.defaultPrevented).toBe(true);
-    expect(useUiStore.getState().activeView).toBe('workspace');
-    const state = useWorkspaceStore.getState();
-    expect(state.activeWorkspaceId).toBe(workspace2.id);
-    expect(state.workspaces[1].activeTabId).toBe(workspace2.activeTabId);
-    expect(state.workspaces[1].tabs[0].activePaneId).toBe(workspace2.panes[0].id);
+    expect(useUiStore.getState().activeView).toBe('agents');
+    expect(useWorkspaceStore.getState().activeWorkspaceId).toBe(workspace1.id);
+    expect(card).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('region', { name: 'Selected agent terminal' })).toHaveAttribute(
+      'data-focus-requested',
+      'true',
+    );
   });
 
-  it('opens the selected session in its workspace on Enter from the list', () => {
-    // Given: a selected session in another workspace, with focus on the list container.
-    usePaneInfoStore.setState({ infosByPtyId: { 'pty-2': agentInfo('pty-2') } });
+  it('requests terminal focus for the cursor on Enter from the list', () => {
+    // Given: an unselected cursor and a different preview.
+    usePaneInfoStore.setState({
+      infosByPtyId: { 'pty-1': agentInfo('pty-1'), 'pty-2': agentInfo('pty-2') },
+    });
     render(<AgentsView />);
     fireEvent.click(screen.getByRole('button', { name: /server/ }));
-    const list = screen.getByLabelText('Agent sessions');
-    list.focus();
+    act(() => screen.getByRole('button', { name: /zsh/ }).focus());
 
-    // When: Enter is pressed on the list.
-    fireEvent.keyDown(list, { key: 'Enter' });
+    // When: Enter reaches the list container.
+    fireEvent.keyDown(screen.getByLabelText('Agent sessions'), { key: 'Enter' });
 
-    // Then: navigation targets the selected session.
-    expect(useUiStore.getState().activeView).toBe('workspace');
-    expect(useWorkspaceStore.getState().activeWorkspaceId).toBe(workspace2.id);
+    // Then: the cursor becomes the preview and receives the focus request.
+    expect(screen.getByRole('button', { name: /zsh/ })).toHaveAttribute('aria-pressed', 'true');
+    expect(useUiStore.getState().activeView).toBe('agents');
+    expect(screen.getByRole('region', { name: 'Selected agent terminal' })).toHaveAttribute(
+      'data-focus-requested',
+      'true',
+    );
   });
 
   it.each([

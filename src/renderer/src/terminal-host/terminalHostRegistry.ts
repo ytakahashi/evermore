@@ -4,6 +4,8 @@ export interface TerminalHostHandle {
   home: HTMLElement;
   /** Fits the existing xterm and resizes its existing PTY to the current parent. */
   fit: () => void;
+  /** Focuses xterm in its current display host, independently of workspace selection. */
+  focus: () => void;
 }
 
 interface Registration {

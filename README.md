@@ -36,17 +36,18 @@ Zsh shell integration gives the workspace UI shell-level accuracy and responsive
 The **Agents** view shows prompts and activity across workspaces, grouped under a heading per
 workspace with projects first and the home workspace last. Each card shows its tab and its cwd
 relative to the project root. Select a session to operate its existing terminal alongside the list
-without switching workspaces. Click the selected row again or close the panel to return to the
-full-width list. **Open in workspace** navigates to the original pane. Esc reaches the agent while
-the terminal has focus; outside the terminal, it returns to the workspace. Selection resets when you
-leave the Agents view.
+without switching workspaces. Space toggles the preview, and the panel's **×** button closes it.
+Enter focuses the terminal; `Command+Left` returns to the list and `Command+Right` focuses the
+previewed terminal. **Open in workspace** (`Command+Enter`) navigates to the original pane. Esc
+reaches the agent while the terminal has focus; outside the terminal, it returns to the workspace.
+Selection resets when you leave the Agents view.
 
 Use **Launch Agent…** (`Command+Shift+N`), the **+** button in Agents, or **N** while the list has
 focus to choose a project and a command preset. Home is also available as a launch target. Manage
 shared and project-specific commands in **Settings > Agent presets**; project presets appear first
-in the launcher. Launching from Agents keeps the overview open and selects the new session once its
-terminal is ready. Launching from another view opens the new terminal in its workspace. The shortcut
-can be customized in **Settings > Shortcuts**.
+in the launcher. Launching from Agents keeps the overview open and selects and focuses the new
+session once its terminal is ready. Launching from another view opens the new terminal in its
+workspace. The shortcut can be customized in **Settings > Shortcuts**.
 
 With AI agent hooks configured, the sidebar reflects per-pane agent status in real time:
 

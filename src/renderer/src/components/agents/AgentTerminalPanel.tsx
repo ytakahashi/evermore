@@ -1,4 +1,11 @@
-import { useCallback, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
+import {
+  useCallback,
+  useLayoutEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type RefObject,
+} from 'react';
 import { X } from 'lucide-react';
 import { getTruncatedPathLabel } from '../../../../shared/path-label';
 import { useResizeObserver } from '../../hooks/useResizeObserver';
@@ -11,6 +18,10 @@ import {
 
 interface AgentTerminalPanelProps {
   session: AgentSession;
+  panelRef: RefObject<HTMLElement | null>;
+  shouldFocus: boolean;
+  /** Consumes the focus request and reports whether the terminal may still take focus. */
+  claimFocus: () => boolean;
   onClose: () => void;
   onOpenWorkspace: () => void;
   onFocusCapture: () => void;
@@ -19,6 +30,9 @@ interface AgentTerminalPanelProps {
 /** Displays an existing pane's terminal without taking ownership of its xterm or PTY. */
 export function AgentTerminalPanel({
   session,
+  panelRef,
+  shouldFocus,
+  claimFocus,
   onClose,
   onOpenWorkspace,
   onFocusCapture,
@@ -62,12 +76,19 @@ export function AgentTerminalPanel({
   }, [handle, host, isBlocked, session.paneId]);
 
   const isBorrowedHere = host !== null && borrowedHost === host;
+  useLayoutEffect(() => {
+    // Wait for registration and the lease: focusing a hidden home would lose the request.
+    if (!shouldFocus || !isBorrowedHere || !handle) return;
+    if (claimFocus()) handle.focus();
+  }, [shouldFocus, isBorrowedHere, handle, claimFocus]);
+
   useResizeObserver(hostRef, () => {
     if (isBorrowedHere) handle?.fit();
   });
 
   return (
     <section
+      ref={panelRef}
       aria-label="Selected agent terminal"
       onFocusCapture={onFocusCapture}
       className="flex min-h-0 min-w-0 flex-1 flex-col border-l border-border"

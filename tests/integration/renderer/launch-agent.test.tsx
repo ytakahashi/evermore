@@ -30,10 +30,17 @@ vi.mock('../../../src/renderer/src/components/terminal/TerminalView', () => ({
       const home = homeRef.current!;
       const element = document.createElement('div');
       element.textContent = `Terminal ${paneId}`;
+      const input = document.createElement('textarea');
+      element.appendChild(input);
       home.appendChild(element);
       terminal.mount(paneId, initial.current.cwd);
       if (initial.current.initialCommand) terminal.command(paneId, initial.current.initialCommand);
-      const unregister = terminalHostRegistry.register(paneId, { element, home, fit: () => {} });
+      const unregister = terminalHostRegistry.register(paneId, {
+        element,
+        home,
+        fit: () => {},
+        focus: () => input.focus(),
+      });
       return () => {
         unregister();
         element.remove();
@@ -180,6 +187,7 @@ describe('agent launch wiring', () => {
     // Then: the existing terminal is borrowed and selected, without remounting any owner.
     const panel = await screen.findByRole('region', { name: 'Selected agent terminal' });
     expect(panel).toHaveTextContent(`Terminal ${paneId}`);
+    expect(panel.querySelector('textarea')).toHaveFocus();
     expect(useUiStore.getState().pendingAgentSelectionPaneId).toBeNull();
     expect(useUiStore.getState().activeView).toBe('agents');
     expect(screen.getByTestId('terminal-owner-home-pane')).toBe(homeOwner);

@@ -6,7 +6,7 @@ function handle(): TerminalHostHandle {
   const element = document.createElement('div');
   home.appendChild(element);
   document.body.appendChild(home);
-  return { home, element, fit: vi.fn() };
+  return { home, element, fit: vi.fn(), focus: vi.fn() };
 }
 
 describe('terminal host registry', () => {

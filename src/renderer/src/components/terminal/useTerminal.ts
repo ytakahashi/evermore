@@ -196,6 +196,7 @@ export function useTerminal(options: UseTerminalOptions): UseTerminalResult {
             element: terminal.element,
             home: container,
             fit: fitAndResize,
+            focus: () => terminal.focus(),
           })
         : undefined;
     fitAndResize();

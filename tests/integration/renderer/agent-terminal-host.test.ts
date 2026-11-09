@@ -89,7 +89,7 @@ function register(paneId: string): TerminalHostHandle {
   element.appendChild(input);
   home.appendChild(element);
   document.body.appendChild(home);
-  const handle = { home, element, fit: vi.fn() };
+  const handle = { home, element, fit: vi.fn(), focus: vi.fn(() => input.focus()) };
   const unregister = terminalHostRegistry.register(paneId, handle);
   cleanups.push(() => {
     unregister();
@@ -119,15 +119,273 @@ describe('Agents view terminal borrowing', () => {
     usePaneInfoStore.setState({
       infosByPtyId: { 'pty-1': info('pty-1', 'claude'), 'pty-2': info('pty-2', 'codex') },
     });
-    useUiStore.setState({ activeView: 'agents' });
+    useUiStore.setState({
+      activeView: 'agents',
+      launchPaletteOpen: false,
+      projectPaletteOpen: false,
+      tabSearchOpen: false,
+      pendingAgentSelectionPaneId: null,
+      agentCursorPaneId: null,
+    });
   });
   afterEach(() => {
     cleanup();
     for (const dispose of cleanups.splice(0)) dispose();
-    useUiStore.setState({ activeView: 'workspace' });
+    useUiStore.setState({
+      activeView: 'workspace',
+      launchPaletteOpen: false,
+      pendingAgentSelectionPaneId: null,
+    });
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
     Reflect.deleteProperty(HTMLElement.prototype, 'scrollIntoView');
+  });
+
+  it('focuses the borrowed terminal on Enter and moves back and forth with Command arrows', () => {
+    // Given: a registered terminal and a focused agent card.
+    const terminal = register('p1');
+    render(createElement(AgentsView));
+    const card = row('Claude');
+    act(() => card.focus());
+    const input = terminal.element.querySelector('textarea')!;
+    const terminalKeyDown = vi.fn();
+    input.addEventListener('keydown', terminalKeyDown);
+
+    // When: Enter opens the preview and focuses the borrowed terminal.
+    fireEvent.keyDown(card, { key: 'Enter' });
+
+    // Then: focus is inside the panel and workspace navigation has not happened.
+    expect(input).toHaveFocus();
+    expect(useUiStore.getState().activeView).toBe('agents');
+    expect(terminal.element.closest('[aria-label="Selected agent terminal"]')).not.toBeNull();
+
+    // When: Command+Left returns to the list.
+    fireEvent.keyDown(input, { key: 'ArrowLeft', metaKey: true });
+
+    // Then: the preview stays open and xterm never receives the chord.
+    expect(card).toHaveFocus();
+    expect(card).toHaveAttribute('aria-pressed', 'true');
+    expect(terminalKeyDown).not.toHaveBeenCalled();
+
+    // When: the cursor moves away and Command+Right returns to the preview.
+    fireEvent.keyDown(card, { key: 'ArrowDown' });
+    fireEvent.keyDown(document.activeElement!, { key: 'ArrowRight', metaKey: true });
+
+    // Then: terminal focus realigns the cursor, and N remains terminal input.
+    expect(input).toHaveFocus();
+    expect(useUiStore.getState().agentCursorPaneId).toBe('p1');
+    fireEvent.keyDown(input, { key: 'n' });
+    expect(useUiStore.getState().launchPaletteOpen).toBe(false);
+    expect(terminalKeyDown).toHaveBeenCalledTimes(1);
+  });
+
+  it('waits for terminal registration before fulfilling an Enter focus request', () => {
+    // Given: a preview request before xterm is registered.
+    render(createElement(AgentsView));
+    fireEvent.keyDown(row('Claude'), { key: 'Enter' });
+    let terminal!: TerminalHostHandle;
+
+    // When: the owner registers its terminal later.
+    act(() => {
+      terminal = register('p1');
+    });
+
+    // Then: borrowing completes before focus is applied.
+    expect(terminal.element.querySelector('textarea')).toHaveFocus();
+    expect(terminal.focus).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps a held Enter out of the terminal until a new key press', () => {
+    // Given: Enter moved focus from a card into the borrowed terminal.
+    const terminal = register('p1');
+    render(createElement(AgentsView));
+    const card = row('Claude');
+    act(() => card.focus());
+    fireEvent.keyDown(card, { key: 'Enter' });
+    const input = terminal.element.querySelector('textarea')!;
+    const terminalKeyDown = vi.fn();
+    input.addEventListener('keydown', terminalKeyDown);
+
+    // When: OS key repeat delivers the held Enter to the terminal.
+    const repeated = new KeyboardEvent('keydown', {
+      key: 'Enter',
+      repeat: true,
+      bubbles: true,
+      cancelable: true,
+    });
+    fireEvent(input, repeated);
+
+    // Then: xterm never sees the repeat.
+    expect(repeated.defaultPrevented).toBe(true);
+    expect(terminalKeyDown).not.toHaveBeenCalled();
+
+    // When: the user presses and then holds Enter inside the terminal.
+    fireEvent.keyDown(input, { key: 'Enter' });
+    fireEvent.keyDown(input, { key: 'Enter', repeat: true });
+
+    // Then: both reach the agent as ordinary terminal input.
+    expect(terminalKeyDown).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not take focus from an input outside the view when the terminal arrives late', () => {
+    // Given: a pending focus request and the user typing outside the Agents view.
+    render(createElement(AgentsView));
+    fireEvent.keyDown(row('Claude'), { key: 'Enter' });
+    const outside = document.createElement('input');
+    document.body.appendChild(outside);
+    cleanups.push(() => outside.remove());
+    act(() => outside.focus());
+    let terminal!: TerminalHostHandle;
+
+    // When: the owner registers its terminal.
+    act(() => {
+      terminal = register('p1');
+    });
+
+    // Then: the request is dropped and the outside input keeps focus.
+    expect(terminal.focus).not.toHaveBeenCalled();
+    expect(outside).toHaveFocus();
+  });
+
+  it('fulfills a late focus request when focus has fallen to the body', () => {
+    // Given: a pending focus request and no element holding focus.
+    render(createElement(AgentsView));
+    fireEvent.keyDown(row('Claude'), { key: 'Enter' });
+    act(() => (document.activeElement as HTMLElement).blur());
+    let terminal!: TerminalHostHandle;
+
+    // When: the owner registers its terminal.
+    act(() => {
+      terminal = register('p1');
+    });
+
+    // Then: the terminal takes focus because nothing else claimed it.
+    expect(terminal.element.querySelector('textarea')).toHaveFocus();
+  });
+
+  it.each(['ArrowDown', ' ', 'click', 'close'])(
+    'cancels delayed terminal focus after %s',
+    (action) => {
+      // Given: Enter requested focus while the terminal was unavailable.
+      render(createElement(AgentsView));
+      const card = row('Claude');
+      fireEvent.keyDown(card, { key: 'Enter' });
+
+      // When: the user continues navigating before registration.
+      if (action === 'click') fireEvent.click(card);
+      else if (action === 'close')
+        fireEvent.click(screen.getByRole('button', { name: 'Close agent terminal' }));
+      else fireEvent.keyDown(card, { key: action });
+      let terminal!: TerminalHostHandle;
+      act(() => {
+        terminal = register('p1');
+      });
+
+      // Then: late registration cannot steal focus.
+      expect(terminal.focus).not.toHaveBeenCalled();
+      expect(terminal.element.querySelector('textarea')).not.toHaveFocus();
+    },
+  );
+
+  it('defers launch focus while a modal picker is open', () => {
+    // Given: a picker is open when the launched pane becomes ready.
+    const terminal = register('p1');
+    render(createElement(AgentsView));
+    act(() => {
+      useUiStore.getState().openLaunchPalette();
+      useUiStore.getState().requestAgentSelection('p1');
+    });
+
+    // Then: the request selects the session without focusing behind the modal.
+    expect(row('Claude')).toHaveAttribute('aria-pressed', 'true');
+    expect(terminal.focus).not.toHaveBeenCalled();
+
+    // When: the picker closes.
+    act(() => useUiStore.getState().closeLaunchPalette());
+
+    // Then: launch focus reaches the newly borrowed terminal.
+    expect(terminal.element.querySelector('textarea')).toHaveFocus();
+  });
+
+  it.each(['outside', 'picker', 'composition', 'prevented'])(
+    'ignores Command arrows for %s events',
+    (source) => {
+      // Given: an open preview with terminal focus.
+      const terminal = register('p1');
+      render(createElement(AgentsView));
+      fireEvent.keyDown(row('Claude'), { key: 'Enter' });
+      const input = terminal.element.querySelector('textarea')!;
+      if (source === 'picker') act(() => useUiStore.getState().openLaunchPalette());
+      const event = new KeyboardEvent('keydown', {
+        key: 'ArrowLeft',
+        metaKey: true,
+        bubbles: true,
+        cancelable: true,
+        isComposing: source === 'composition',
+      });
+      if (source === 'prevented') event.preventDefault();
+
+      // When: the excluded chord arrives.
+      fireEvent(source === 'outside' ? document.body : input, event);
+
+      // Then: focus stays on the terminal and no new interception occurs.
+      expect(input).toHaveFocus();
+      expect(event.defaultPrevented).toBe(source === 'prevented');
+    },
+  );
+
+  it.each([
+    { key: 'ArrowLeft', source: 'card' },
+    { key: 'ArrowRight', source: 'terminal' },
+  ] as const)('leaves Command+$key from the $source alone', ({ key, source }) => {
+    // Given: an open preview and focus on the surface that must retain this chord.
+    const terminal = register('p1');
+    render(createElement(AgentsView));
+    const card = row('Claude');
+    fireEvent.keyDown(card, { key: 'Enter' });
+    const input = terminal.element.querySelector('textarea')!;
+    const target = source === 'card' ? card : input;
+    act(() => target.focus());
+    const targetKeyDown = vi.fn();
+    target.addEventListener('keydown', targetKeyDown);
+
+    // When: the chord points toward the surface that already has focus.
+    const event = new KeyboardEvent('keydown', {
+      key,
+      metaKey: true,
+      bubbles: true,
+      cancelable: true,
+    });
+    fireEvent(target, event);
+
+    // Then: native handling receives the chord without interception or a focus change.
+    expect(event.defaultPrevented).toBe(false);
+    expect(targetKeyDown).toHaveBeenCalledOnce();
+    expect(target).toHaveFocus();
+    expect(card).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('leaves Command+Right alone without a preview', () => {
+    // Given: a focused list card without an open terminal panel.
+    render(createElement(AgentsView));
+    const card = row('Claude');
+    act(() => card.focus());
+
+    // When: Command+Right is pressed.
+    const event = new KeyboardEvent('keydown', {
+      key: 'ArrowRight',
+      metaKey: true,
+      bubbles: true,
+      cancelable: true,
+    });
+    fireEvent(card, event);
+
+    // Then: no preview or focus request is created.
+    expect(card).toHaveFocus();
+    expect(event.defaultPrevented).toBe(false);
+    expect(
+      screen.queryByRole('region', { name: 'Selected agent terminal' }),
+    ).not.toBeInTheDocument();
   });
 
   it('releases a preview when its workspace closes and keeps other sessions usable', () => {
@@ -157,7 +415,12 @@ describe('Agents view terminal borrowing', () => {
         retiredRoot = element;
         home.appendChild(element);
         document.body.appendChild(home);
-        const unregister = terminalHostRegistry.register('p1', { home, element, fit: vi.fn() });
+        const unregister = terminalHostRegistry.register('p1', {
+          home,
+          element,
+          fit: vi.fn(),
+          focus: vi.fn(),
+        });
         return () => {
           unregister();
           element.remove();
@@ -218,9 +481,9 @@ describe('Agents view terminal borrowing', () => {
     expect(input).toHaveFocus();
     expect(useUiStore.getState().activeView).toBe('agents');
 
-    // When: Enter is pressed back on the second card.
+    // When: Command+Enter is pressed back on the second card.
     secondRow.focus();
-    fireEvent.keyDown(secondRow, { key: 'Enter' });
+    fireEvent.keyDown(secondRow, { key: 'Enter', metaKey: true });
 
     // Then: navigation selects the other pane in the same tab and returns its original root.
     expect(useWorkspaceStore.getState().workspaces[0].tabs[0].activePaneId).toBe('p2');
@@ -479,7 +742,11 @@ describe('Agents view terminal borrowing', () => {
 
     // When: the view departs and its layout cleanup releases the root.
     act(() => {
-      useUiStore.setState({ activeView: 'workspace' });
+      useUiStore.setState({
+        activeView: 'workspace',
+        launchPaletteOpen: false,
+        pendingAgentSelectionPaneId: null,
+      });
     });
 
     // Then: the workspace sibling remains mounted and the borrow is cleared.

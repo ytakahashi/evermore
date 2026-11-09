@@ -21,5 +21,6 @@ describe('open-in-workspace shortcut', () => {
       expect(press({ key: 'Enter', metaKey: true, [modifier]: true })).toBe(false);
     }
     expect(press({ key: 'Enter', metaKey: true, isComposing: true })).toBe(false);
+    expect(press({ key: 'Enter', metaKey: true, keyCode: 229 })).toBe(false);
   });
 });
