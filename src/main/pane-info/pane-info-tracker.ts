@@ -1,4 +1,5 @@
 import {
+  AGENT_PRE_INVOCATION_EVENT,
   AGENT_USER_PROMPT_SUBMIT_EVENT,
   type EvermoreAgentEvent,
   type PaneRuntimeSignal,
@@ -465,12 +466,15 @@ export class PaneInfoTracker {
     }
 
     const status = event.status === 'complete' ? 'ready' : event.status;
+    // Captured before the overwrite below so prompt capture can tell a mid-turn event (the agent
+    // was already running) from the first event of a new turn.
+    const previousAgent = process.agent;
     const nextAgent: PaneAgentInfo = {
       ...agentInfoFromKind(event.agent),
       status,
       source: 'agent-protocol',
       observedAt: this.computeAgentEventObservedAt(process.agent, event.agent, status, now),
-      ...agentDetailFromEvent(event),
+      ...resolveAgentDetailForEvent(process, event, status),
     };
 
     process.agent = nextAgent;
@@ -483,19 +487,29 @@ export class PaneInfoTracker {
           }
         : undefined;
 
-    this.captureUserPrompt(process, event);
+    this.captureUserPrompt(process, event, previousAgent);
   }
 
   /**
    * Records the prompt carried by a prompt-submitting agent event.
    *
-   * Restricted to `user_prompt_submit` so that only text the user actually typed can reach the UI;
-   * the hook helper enforces the same restriction on its side. Events without a usable prompt leave
-   * the previous one alone rather than clearing it — a `PostToolUse` in the middle of a turn must
-   * not erase the instruction that started that turn.
+   * Restricted to `user_prompt_submit` and `pre_invocation` so that only text the user actually
+   * typed can reach the UI; the hook helper enforces the same restriction on its side. Events
+   * without a usable prompt leave the previous one alone rather than clearing it — a `PostToolUse`
+   * in the middle of a turn must not erase the instruction that started that turn.
+   *
+   * `previousAgent` is the agent slot as it was before this event was applied, used to recognize
+   * Antigravity's repeated mid-turn `PreInvocation` events.
    */
-  private captureUserPrompt(process: RegisteredPaneProcess, event: EvermoreAgentEvent): void {
-    if (event.event !== AGENT_USER_PROMPT_SUBMIT_EVENT) {
+  private captureUserPrompt(
+    process: RegisteredPaneProcess,
+    event: EvermoreAgentEvent,
+    previousAgent: PaneAgentInfo | undefined,
+  ): void {
+    if (
+      event.event !== AGENT_USER_PROMPT_SUBMIT_EVENT &&
+      event.event !== AGENT_PRE_INVOCATION_EVENT
+    ) {
       return;
     }
 
@@ -508,6 +522,27 @@ export class PaneInfoTracker {
     // identity is directly comparable with what command-line detection produces later.
     const agentIdentity = toAgentIdentity(agentInfoFromKind(event.agent));
     if (!agentIdentity) {
+      return;
+    }
+
+    // Antigravity repeats `PreInvocation` (with the same `lastUserInput`) before every model call
+    // in a turn. Rebuilding `userPrompt` on those mid-turn events would drop a `foregroundPgid`
+    // that `reconcileUserPromptWithObservation` already bound (for example when the agent runs
+    // behind a `node` launcher that `detectAgentFromCommand` cannot name) and could grant a fresh
+    // `ignoreInFlightPoll` reprieve mid-turn.
+    //
+    // Scoped to `pre_invocation` while the same agent was already running so that a genuinely new
+    // submission is always rebuilt, even when its text matches the previous one (e.g. `continue`
+    // sent again after a restart): reusing the old record there would keep a `foregroundPgid`
+    // that belongs to the previous session and drop the prompt on the next poll.
+    if (
+      event.event === AGENT_PRE_INVOCATION_EVENT &&
+      previousAgent?.source === 'agent-protocol' &&
+      previousAgent.status === 'running' &&
+      toAgentIdentity(previousAgent) === agentIdentity &&
+      process.userPrompt?.agentIdentity === agentIdentity &&
+      process.userPrompt.text === text
+    ) {
       return;
     }
 
@@ -759,6 +794,49 @@ function agentInfoFromKind(kind: string): Pick<PaneAgentInfo, 'known' | 'kind'> 
     default:
       return { kind };
   }
+}
+
+/**
+ * Resolves the `detail` payload for an incoming agent event.
+ *
+ * Antigravity CLI fires `PreInvocation` before every model call in a turn, including immediately
+ * after `PostToolUse`. Because `PreInvocation` carries no `activityLabel` or `toolName`, replacing
+ * `detail` unconditionally would overwrite the `PostToolUse` tool summary with `pre_invocation`
+ * milliseconds after it arrived. When a bare `pre_invocation` arrives for an agent that is already
+ * `running` in the same turn (and not switching to a new `userPrompt`), the prior `detail` is
+ * retained so the sidebar continues showing the most recent tool activity while the model thinks.
+ *
+ * A new turn is recognized by its prompt text differing from the recorded one. A turn that repeats
+ * the previous prompt verbatim therefore relies on `Stop` having moved the agent to `ready` first;
+ * if `Stop` was never delivered (for example an interrupted turn), the previous tool summary stays
+ * visible until the next `PostToolUse` replaces it.
+ */
+function resolveAgentDetailForEvent(
+  process: RegisteredPaneProcess,
+  event: EvermoreAgentEvent,
+  status: PaneAgentInfo['status'],
+): Partial<Pick<PaneAgentInfo, 'detail'>> {
+  const incoming = agentDetailFromEvent(event);
+  const previous = process.agent;
+  if (
+    event.event === AGENT_PRE_INVOCATION_EVENT &&
+    status === 'running' &&
+    !incoming.detail?.message &&
+    !incoming.detail?.activityLabel &&
+    !incoming.detail?.toolName &&
+    previous?.source === 'agent-protocol' &&
+    previous.status === 'running' &&
+    previous.detail &&
+    toAgentIdentity(previous) === toAgentIdentity(agentInfoFromKind(event.agent))
+  ) {
+    const incomingPrompt = sanitizeUserPromptText(event.userPrompt, AGENT_USER_PROMPT_MAX_CHARS);
+    const isNewPromptTurn = Boolean(incomingPrompt) && incomingPrompt !== process.userPrompt?.text;
+    if (!isNewPromptTurn) {
+      return { detail: previous.detail };
+    }
+  }
+
+  return incoming;
 }
 
 function agentDetailFromEvent(event: EvermoreAgentEvent): Partial<Pick<PaneAgentInfo, 'detail'>> {

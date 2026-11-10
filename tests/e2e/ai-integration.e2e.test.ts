@@ -315,6 +315,44 @@ describe('Evermore AI integration helper script', () => {
     expect(payload.activityLabel).toBe('apply_patch');
   });
 
+  it.skipIf(!hasJq)('builds toolName and activityLabel from Antigravity toolCall payloads', () => {
+    // Given: Antigravity PostToolUse payloads carrying nested toolCall.name and toolCall.args.
+    // When: the shared helper builds the OSC 777 payloads for command and file tools.
+    const commandPayload = runHelper('antigravity', 'running', 'post_tool_use', {
+      conversationId: 'agy-conv-1',
+      workspacePaths: ['/tmp/agy-project'],
+      toolCall: {
+        name: 'run_command',
+        args: { CommandLine: 'pnpm test' },
+      },
+    });
+    const filePayload = runHelper('antigravity', 'running', 'post_tool_use', {
+      toolCall: {
+        name: 'edit_file',
+        args: { Path: 'src/main/index.ts' },
+      },
+    });
+    const malformedToolCall = runHelper('antigravity', 'running', 'post_tool_use', {
+      toolCall: 'not-an-object',
+    });
+
+    // Then: Antigravity tool names and targets are normalized into toolName and activityLabel.
+    expect(commandPayload).toMatchObject({
+      agent: 'antigravity',
+      sessionId: 'agy-conv-1',
+      cwd: '/tmp/agy-project',
+      toolName: 'run_command',
+      activityLabel: 'run_command: pnpm test',
+    });
+    expect(filePayload).toMatchObject({
+      agent: 'antigravity',
+      toolName: 'edit_file',
+      activityLabel: 'edit_file: src/main/index.ts',
+    });
+    expect(malformedToolCall.toolName).toBeUndefined();
+    expect(malformedToolCall.activityLabel).toBeUndefined();
+  });
+
   it.skipIf(!hasJq)('carries the submitted prompt on the prompt-submission event', () => {
     // Given: a UserPromptSubmit hook whose stdin contains the prompt the user typed.
     // When: the helper builds the OSC 777 payload.
@@ -331,6 +369,25 @@ describe('Evermore AI integration helper script', () => {
     });
   });
 
+  it.skipIf(!hasJq)('carries lastUserInput on Antigravity PreInvocation events', () => {
+    // Given: an Antigravity PreInvocation hook carrying the common lastUserInput field.
+    // When: the helper builds the OSC 777 payload.
+    const payload = runHelper('antigravity', 'running', 'pre_invocation', {
+      conversationId: 'agy-conv-1',
+      workspacePaths: ['/tmp/agy-project'],
+      lastUserInput: 'Fix the failing unit test',
+    });
+
+    // Then: lastUserInput is normalized to userPrompt for the turn start.
+    expect(payload).toMatchObject({
+      agent: 'antigravity',
+      event: 'pre_invocation',
+      sessionId: 'agy-conv-1',
+      cwd: '/tmp/agy-project',
+      userPrompt: 'Fix the failing unit test',
+    });
+  });
+
   it.skipIf(!hasJq)('accepts user_prompt and userPrompt as compatibility fallbacks', () => {
     // Given / When: agents that name the field differently submit a prompt.
     // Then: both spellings are normalized to userPrompt.
@@ -342,23 +399,44 @@ describe('Evermore AI integration helper script', () => {
     ).toBe('camel case');
   });
 
+  it.skipIf(!hasJq)('does not treat lastUserInput as a prompt on user_prompt_submit', () => {
+    // Given: a prompt-submission payload carrying only Antigravity's lastUserInput field.
+    // When: the helper builds the OSC 777 payload.
+    const payload = runHelper('codex', 'running', 'user_prompt_submit', {
+      lastUserInput: 'antigravity-only field',
+    });
+
+    // Then: lastUserInput is reserved for pre_invocation and contributes no userPrompt here.
+    expect(payload.userPrompt).toBeUndefined();
+  });
+
   it.skipIf(!hasJq)('never reads a prompt from an event that does not submit one', () => {
-    // Given: non-prompt events whose payloads happen to carry a prompt-shaped key. Text from these
-    // is agent-authored (subagent instructions, tool arguments) and must not be shown as something
-    // the user typed.
+    // Given: non-prompt events whose payloads happen to carry a prompt-shaped key, or a
+    // PreInvocation carrying a generic prompt key rather than Antigravity's lastUserInput. Text
+    // from these is agent-authored or ambient metadata and must not be shown as something the user
+    // typed on that event.
     // When: the helper builds each OSC 777 payload.
     const postToolUse = runHelper('claude', 'running', 'post_tool_use', {
       tool_name: 'Task',
       prompt: 'agent-authored subagent instruction',
     });
+    const agyPostToolUse = runHelper('antigravity', 'running', 'post_tool_use', {
+      lastUserInput: 'Fix the failing unit test',
+      toolCall: { name: 'run_command', args: { CommandLine: 'pnpm test' } },
+    });
     const preInvocation = runHelper('antigravity', 'running', 'pre_invocation', {
       prompt: 'unconfirmed antigravity payload',
     });
-    const stop = runHelper('claude', 'complete', 'stop', { prompt: 'leftover' });
+    const stop = runHelper('claude', 'complete', 'stop', {
+      prompt: 'leftover',
+      lastUserInput: 'leftover',
+    });
 
     // Then: none of them contribute a userPrompt, while their status fields are unaffected.
     expect(postToolUse.userPrompt).toBeUndefined();
     expect(postToolUse.toolName).toBe('Task');
+    expect(agyPostToolUse.userPrompt).toBeUndefined();
+    expect(agyPostToolUse.activityLabel).toBe('run_command: pnpm test');
     expect(preInvocation.userPrompt).toBeUndefined();
     expect(preInvocation.status).toBe('running');
     expect(stop.userPrompt).toBeUndefined();
