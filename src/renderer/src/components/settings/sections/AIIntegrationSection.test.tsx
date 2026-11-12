@@ -74,6 +74,7 @@ describe('AIIntegrationSection', () => {
     expect(screen.getByText('~/.gemini/config/hooks.json')).toBeInTheDocument();
     expect(screen.getByText(/sidebar shows Antigravity as running/i)).toBeInTheDocument();
     expect(screen.getByText(/may not change the sidebar to awaiting input/i)).toBeInTheDocument();
+    expect(screen.getByText(/PreInvocation captures lastUserInput/i)).toBeInTheDocument();
   });
 
   it('copies only the selected agent snippet', async () => {

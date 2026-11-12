@@ -2,7 +2,7 @@ import {
   AGENT_USER_PROMPT_HOOK_MAX_CHARS,
   OSC_777_PAYLOAD_MAX_BYTES,
 } from '../pane-integration-constants';
-import { AGENT_USER_PROMPT_SUBMIT_EVENT } from '../pane-runtime-signal';
+import { AGENT_PRE_INVOCATION_EVENT, AGENT_USER_PROMPT_SUBMIT_EVENT } from '../pane-runtime-signal';
 
 /**
  * Shared shell helper for AI agent hook integrations.
@@ -92,8 +92,11 @@ build_payload() {
         else {}
         end;
 
+      def hook_tool_call($h):
+        if (($h.toolCall // null) | type) == "object" then $h.toolCall else null end;
+
       def hook_tool_name($h):
-        $h.tool_name // $h.toolName // "";
+        $h.tool_name // $h.toolName // (hook_tool_call($h) | .name) // "";
 
       def apply_patch_target($tool; $tool_input):
         if $tool == "apply_patch" and (($tool_input.command // null) | type) == "string"
@@ -107,12 +110,13 @@ build_payload() {
 
       def target_hint($h):
         (hook_tool_name($h)) as $tool
-        | ($h.tool_input // null) as $tool_input
+        | ($h.tool_input // (hook_tool_call($h) | .args) // null) as $tool_input
         | if ($tool_input | type) == "object"
           then (
             apply_patch_target($tool; $tool_input) //
             $tool_input.file_path //
-            if $tool == "apply_patch" then null else $tool_input.command end //
+            $tool_input.Path //
+            if $tool == "apply_patch" then null else ($tool_input.command // $tool_input.CommandLine) end //
             $tool_input.pattern //
             $tool_input.description //
             null
@@ -151,13 +155,25 @@ build_payload() {
         | map(if . == 10 then . elif . == 13 then empty elif . < 32 or . == 127 then 32 else . end)
         | implode;
 
-      # Restricted to the prompt-submission event on purpose. Reading any "prompt"-shaped key
-      # wherever one appears would let subagent instructions or tool arguments surface in the UI as
-      # if the user had typed them.
+      # Restricted to prompt-submitting events on purpose. Reading any "prompt"-shaped key wherever
+      # one appears would let subagent instructions or tool arguments surface in the UI as if the
+      # user had typed them. Antigravity PreInvocation events are further restricted to the
+      # dedicated lastUserInput metadata field. PreInvocation fires before every model call in a
+      # turn and the hook cannot tell the first one apart, so the prompt is re-sent each time and
+      # PaneInfoTracker deduplicates it; PostToolUse/Stop copies of lastUserInput are ignored
+      # because they would only repeat what the preceding PreInvocation already delivered.
+      def raw_submitted_prompt($h):
+        if $event == "${AGENT_USER_PROMPT_SUBMIT_EVENT}"
+        then ($h.prompt // $h.user_prompt // $h.userPrompt // null)
+        elif $event == "${AGENT_PRE_INVOCATION_EVENT}"
+        then ($h.lastUserInput // null)
+        else null
+        end;
+
       def submitted_prompt($h):
-        if $withPrompt and $event == "${AGENT_USER_PROMPT_SUBMIT_EVENT}"
+        if $withPrompt
         then (
-          ($h.prompt // $h.user_prompt // $h.userPrompt // null) as $p
+          (raw_submitted_prompt($h)) as $p
           | if ($p | type) == "string"
             then ($p | scrub_control_chars | .[0:$promptMaxChars])
             else null
@@ -179,7 +195,7 @@ build_payload() {
             $in.cwd //
             if ($in.workspacePaths | type) == "array" then $in.workspacePaths[0] else null end
           ))
-        + string_field("toolName"; ($in.tool_name // $in.toolName))
+        + string_field("toolName"; hook_tool_name($in))
         + string_field("activityLabel"; built_activity_label($in))
         + string_field("userPrompt"; submitted_prompt($in))
     '
@@ -247,7 +263,7 @@ export const CLAUDE_CODE_HOOK_SNIPPET = `{
         "hooks": [
           {
             "type": "command",
-            "command": "$HOME/.config/evermore/evermore-agent-status.sh claude running user_prompt_submit terminalSequence"
+            "command": "$HOME/.config/evermore/evermore-agent-status.sh claude running ${AGENT_USER_PROMPT_SUBMIT_EVENT} terminalSequence"
           }
         ]
       }
@@ -295,7 +311,7 @@ export const CODEX_CLI_HOOK_SNIPPET = `{
         "hooks": [
           {
             "type": "command",
-            "command": "$HOME/.config/evermore/evermore-agent-status.sh codex running user_prompt_submit tty",
+            "command": "$HOME/.config/evermore/evermore-agent-status.sh codex running ${AGENT_USER_PROMPT_SUBMIT_EVENT} tty",
             "timeout": 5
           }
         ]
@@ -347,7 +363,7 @@ export const ANTIGRAVITY_CLI_HOOK_SNIPPET = `{
     "PreInvocation": [
       {
         "type": "command",
-        "command": "$HOME/.config/evermore/evermore-agent-status.sh antigravity running pre_invocation tty"
+        "command": "$HOME/.config/evermore/evermore-agent-status.sh antigravity running ${AGENT_PRE_INVOCATION_EVENT} tty"
       }
     ],
     "PostToolUse": [

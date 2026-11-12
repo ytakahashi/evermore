@@ -1609,6 +1609,145 @@ describe('PaneInfoTracker', () => {
     });
   });
 
+  it('retains PostToolUse detail across mid-turn pre_invocation events and resets on the next turn', async () => {
+    // Given: Antigravity is running in the foreground and starts a turn with pre_invocation.
+    tracker.register('pty-1', 123, '/tmp');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    rows = [
+      shellRow(456),
+      { pid: 456, ppid: 123, pgid: 456, tpgid: 456, command: 'agy', args: 'agy' },
+    ];
+    now = 1002;
+    await tracker.poll();
+
+    now = 1003;
+    tracker.applySignal('pty-1', {
+      type: 'agent-event',
+      source: 'evermore-osc777',
+      event: {
+        v: 1,
+        type: 'agent-status',
+        agent: 'antigravity',
+        status: 'running',
+        event: 'pre_invocation',
+        userPrompt: 'First request',
+      },
+    });
+    expect(tracker.list()[0]?.agent?.detail).toEqual({ event: 'pre_invocation' });
+
+    // When: PostToolUse reports tool activity, followed immediately by a mid-turn pre_invocation.
+    now = 1004;
+    tracker.applySignal('pty-1', {
+      type: 'agent-event',
+      source: 'evermore-osc777',
+      event: {
+        v: 1,
+        type: 'agent-status',
+        agent: 'antigravity',
+        status: 'running',
+        event: 'post_tool_use',
+        toolName: 'read_file',
+        activityLabel: 'read_file: src/main/index.ts',
+      },
+    });
+    now = 1005;
+    tracker.applySignal('pty-1', {
+      type: 'agent-event',
+      source: 'evermore-osc777',
+      event: {
+        v: 1,
+        type: 'agent-status',
+        agent: 'antigravity',
+        status: 'running',
+        event: 'pre_invocation',
+        userPrompt: 'First request',
+      },
+    });
+
+    // Then: the PostToolUse detail is preserved rather than overwritten by pre_invocation.
+    expect(tracker.list()[0]?.agent?.detail).toEqual({
+      event: 'post_tool_use',
+      toolName: 'read_file',
+      activityLabel: 'read_file: src/main/index.ts',
+    });
+
+    // When: the turn completes and a new turn starts with pre_invocation.
+    now = 1006;
+    tracker.applySignal('pty-1', {
+      type: 'agent-event',
+      source: 'evermore-osc777',
+      event: {
+        v: 1,
+        type: 'agent-status',
+        agent: 'antigravity',
+        status: 'complete',
+        event: 'stop',
+      },
+    });
+    now = 1007;
+    tracker.applySignal('pty-1', {
+      type: 'agent-event',
+      source: 'evermore-osc777',
+      event: {
+        v: 1,
+        type: 'agent-status',
+        agent: 'antigravity',
+        status: 'running',
+        event: 'pre_invocation',
+        userPrompt: 'Second request',
+      },
+    });
+
+    // Then: the new turn starts fresh with pre_invocation rather than echoing the previous turn's tool.
+    expect(tracker.list()[0]?.agent?.detail).toEqual({ event: 'pre_invocation' });
+  });
+
+  it('resets PostToolUse detail on pre_invocation with a new prompt even if no previous prompt was recorded', async () => {
+    // Given: Antigravity started a turn without a userPrompt (e.g. degraded payload) and ran a tool.
+    tracker.register('pty-1', 123, '/tmp');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    rows = [
+      shellRow(456),
+      { pid: 456, ppid: 123, pgid: 456, tpgid: 456, command: 'agy', args: 'agy' },
+    ];
+    now = 1002;
+    await tracker.poll();
+
+    now = 1003;
+    tracker.applySignal('pty-1', {
+      type: 'agent-event',
+      source: 'evermore-osc777',
+      event: {
+        v: 1,
+        type: 'agent-status',
+        agent: 'antigravity',
+        status: 'running',
+        event: 'post_tool_use',
+        toolName: 'read_file',
+        activityLabel: 'read_file: src/main/index.ts',
+      },
+    });
+
+    // When: a new turn starts with a userPrompt while the previous status is still running.
+    now = 1004;
+    tracker.applySignal('pty-1', {
+      type: 'agent-event',
+      source: 'evermore-osc777',
+      event: {
+        v: 1,
+        type: 'agent-status',
+        agent: 'antigravity',
+        status: 'running',
+        event: 'pre_invocation',
+        userPrompt: 'Fresh turn prompt',
+      },
+    });
+
+    // Then: the new prompt is recognized as a new turn and resets detail to pre_invocation.
+    expect(tracker.list()[0]?.agent?.detail).toEqual({ event: 'pre_invocation' });
+    expect(tracker.list()[0]?.userPrompt).toBe('Fresh turn prompt');
+  });
+
   it('ignores remote Evermore agent events while ssh is the foreground session', async () => {
     // Given: ps classifies the local foreground session as ssh.
     tracker.register('pty-1', 123, '/tmp');
@@ -1882,19 +2021,30 @@ describe('PaneInfoTracker', () => {
     });
 
     it.each([
-      { protocolAgent: 'cursor', executable: 'cursor-agent' },
-      { protocolAgent: 'cursor', executable: 'agent' },
-      { protocolAgent: 'antigravity', executable: 'agy' },
+      { protocolAgent: 'cursor', executable: 'cursor-agent', event: 'user_prompt_submit' },
+      { protocolAgent: 'cursor', executable: 'agent', event: 'user_prompt_submit' },
+      { protocolAgent: 'antigravity', executable: 'agy', event: 'pre_invocation' },
     ])(
-      'emits a $protocolAgent prompt once ps identifies the agent as $executable',
-      async ({ protocolAgent, executable }) => {
+      'emits a $protocolAgent prompt from $event once ps identifies the agent as $executable',
+      async ({ protocolAgent, executable, event }) => {
         // Given: an agent whose hook protocol name differs from its executable basename, launched
         // in one shot so the prompt arrives before ps has observed anything. The idle recompute
         // drops the protocol agent, so the agent slot is rebuilt from the command line on the next
         // poll — and the two paths spell the same agent differently.
         await registerAndSettle();
         now = 1002;
-        submitPrompt(protocolAgent, 'Ask the agent');
+        tracker.applySignal('pty-1', {
+          type: 'agent-event',
+          source: 'evermore-osc777',
+          event: {
+            v: 1,
+            type: 'agent-status',
+            agent: protocolAgent,
+            status: 'running',
+            event,
+            userPrompt: 'Ask the agent',
+          },
+        });
 
         // When: the first poll to catch the pane running identifies it by executable name.
         rows = agentRows(executable);
@@ -1985,6 +2135,81 @@ describe('PaneInfoTracker', () => {
       // reports no agent at all, so a rule that re-identified the agent by name would conclude the
       // session had ended while it is plainly still running.
       expect(tracker.list()[0]?.userPrompt).toBe('Tidy up the lint rules');
+    });
+
+    it('preserves the bound foregroundPgid across mid-turn pre_invocation events for a node-launched agent', async () => {
+      // Given: Antigravity is running behind node, and a poll after the initial pre_invocation has
+      // bound the prompt to that session's foreground process group (456).
+      const agyUnderNode = 'node /Users/tester/.local/share/agy/index.js';
+      await registerAndSettle();
+      rows = agentRows(agyUnderNode, 456);
+      now = 1002;
+      await tracker.poll();
+      now = 1003;
+      tracker.applySignal('pty-1', {
+        type: 'agent-event',
+        source: 'evermore-osc777',
+        event: {
+          v: 1,
+          type: 'agent-status',
+          agent: 'antigravity',
+          status: 'running',
+          event: 'pre_invocation',
+          userPrompt: 'First request',
+        },
+      });
+      now = 1004;
+      await tracker.poll();
+      expect(tracker.list()[0]?.userPrompt).toBe('First request');
+
+      // When: a mid-turn pre_invocation repeats the same lastUserInput, and the session then exits
+      // and is replaced by an ordinary command in a new process group (789).
+      now = 1005;
+      tracker.applySignal('pty-1', {
+        type: 'agent-event',
+        source: 'evermore-osc777',
+        event: {
+          v: 1,
+          type: 'agent-status',
+          agent: 'antigravity',
+          status: 'running',
+          event: 'pre_invocation',
+          userPrompt: 'First request',
+        },
+      });
+      rows = agentRows('pnpm test', 789);
+      now = 1006;
+      await tracker.poll();
+
+      // Then: the prompt is discarded when the process group changes rather than re-adopting 789
+      // because the mid-turn pre_invocation wiped foregroundPgid.
+      expect(tracker.list()[0]?.userPrompt).toBeUndefined();
+    });
+
+    it('rebinds a resubmitted identical prompt to a restarted node-launched agent', async () => {
+      // Given: Codex running behind node, with its prompt bound to process group 456 by a poll.
+      const codexUnderNode = 'node /Users/tester/.local/bin/codex';
+      await registerAndSettle();
+      rows = agentRows(codexUnderNode, 456);
+      now = 1002;
+      await tracker.poll();
+      now = 1003;
+      submitPrompt('codex', 'continue');
+      now = 1004;
+      await tracker.poll();
+      expect(tracker.list()[0]?.userPrompt).toBe('continue');
+
+      // When: Codex is restarted in a new process group (789) before any poll sees the gap, and the
+      // user submits the same text again.
+      rows = agentRows(codexUnderNode, 789);
+      now = 1005;
+      submitPrompt('codex', 'continue');
+      now = 1006;
+      await tracker.poll();
+
+      // Then: the resubmission is recorded afresh and adopts the new session instead of being
+      // discarded for carrying the previous session's process group.
+      expect(tracker.list()[0]?.userPrompt).toBe('continue');
     });
 
     it('does not resurrect the previous prompt when the same agent is restarted', async () => {

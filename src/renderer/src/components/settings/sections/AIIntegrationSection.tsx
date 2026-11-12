@@ -106,8 +106,7 @@ const AGENT_SNIPPETS: readonly [AgentSnippet, ...AgentSnippet[]] = [
       'Antigravity CLI can write the OSC sequence directly to /dev/tty from the hook process.',
       'After setup, the sidebar shows Antigravity as running while a turn is active and ready when the turn completes.',
       'Approval prompts may not change the sidebar to awaiting input yet because Antigravity does not expose a reliable approval hook.',
-      "The helper script also tries to show the target file or command it is currently working on. This extraction is tuned for Claude Code's tool payload shape and is unconfirmed for Antigravity, so it may fall back to just the tool name.",
-      'Submitted prompts are not captured for Antigravity: PreInvocation is not confirmed to carry the prompt text, so the Agents view shows the summary without the prompt for these panes.',
+      'PreInvocation captures lastUserInput for the Agents view prompt summary, and PostToolUse shows the target file or command from toolCall in the sidebar label. Tools whose arguments carry neither fall back to showing just the tool name.',
     ],
     snippet: {
       id: 'antigravity-cli-hooks',
@@ -115,7 +114,7 @@ const AGENT_SNIPPETS: readonly [AgentSnippet, ...AgentSnippet[]] = [
       target: '~/.gemini/config/hooks.json',
       language: 'json',
       description:
-        'Updates the sidebar as Antigravity starts running and finishes a turn. Awaiting-input is not enabled for this CLI yet.',
+        'Updates the sidebar as Antigravity starts running, uses tools, and finishes a turn. Awaiting-input is not enabled for this CLI yet.',
       content: ANTIGRAVITY_CLI_HOOK_SNIPPET,
     },
   },

@@ -43,13 +43,20 @@ export interface EvermoreAgentEvent {
 }
 
 /**
- * `EvermoreAgentEvent.event` value the hook snippets use for prompt submission.
+ * `EvermoreAgentEvent.event` value that Claude Code and Codex CLI hook snippets use for prompt
+ * submission.
  *
- * Shared between the helper script (which only extracts a prompt for this event) and
- * `PaneInfoTracker` (which only accepts one for this event), so the two ends of the restriction
+ * Shared between the helper script (which only extracts a prompt for prompt-submitting events) and
+ * `PaneInfoTracker` (which only accepts one for those events), so the two ends of the restriction
  * cannot drift apart.
  */
 export const AGENT_USER_PROMPT_SUBMIT_EVENT = 'user_prompt_submit';
+
+/**
+ * `EvermoreAgentEvent.event` value that the Antigravity CLI hook snippet uses before model
+ * invocation, where the hook stdin carries `lastUserInput`.
+ */
+export const AGENT_PRE_INVOCATION_EVENT = 'pre_invocation';
 
 /**
  * Known sources for cwd-bearing terminal runtime signals.

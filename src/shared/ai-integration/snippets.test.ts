@@ -32,7 +32,7 @@ describe('AI integration snippets', () => {
     expect(EVERMORE_AGENT_STATUS_HELPER_SCRIPT).toContain('string_field("activityLabel"');
   });
 
-  it('extracts the submitted prompt only for the prompt-submission event', () => {
+  it('extracts the submitted prompt only for prompt-submitting events', () => {
     // Given / When: the helper script text is inspected.
     // Then: the prompt builder is wired into the payload and gated on the event name, so hooks that
     // merely happen to carry a prompt-shaped key cannot contribute user-attributed text.
@@ -40,6 +40,7 @@ describe('AI integration snippets', () => {
     expect(EVERMORE_AGENT_STATUS_HELPER_SCRIPT).toContain('submitted_prompt');
     expect(EVERMORE_AGENT_STATUS_HELPER_SCRIPT).toContain('string_field("userPrompt"');
     expect(EVERMORE_AGENT_STATUS_HELPER_SCRIPT).toContain('$event == "user_prompt_submit"');
+    expect(EVERMORE_AGENT_STATUS_HELPER_SCRIPT).toContain('$event == "pre_invocation"');
   });
 
   it('keeps every hook-derived value out of the jq argument vector', () => {
