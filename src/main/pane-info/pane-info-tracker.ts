@@ -25,6 +25,7 @@ import { classifyForegroundSession } from './foreground-session';
 import { isIntegrationStale } from './integration-staleness';
 import { observePaneActivity, ProcessInspector } from './process-inspector';
 import {
+  type AgentSessionRecord,
   DEFAULT_PS_POLL_INTERVAL_MS,
   type ObservedPaneActivity,
   type PaneInfoTrackerCallbacks,
@@ -277,7 +278,7 @@ export class PaneInfoTracker {
       // would spend it on the next poll instead — one that started after the prompt and is
       // therefore authoritative. That delay is enough for an agent to exit and relaunch unnoticed,
       // which would resurrect the previous session's prompt.
-      this.releaseUserPromptPollReprieve();
+      this.releaseAgentSessionPollReprieve();
     } finally {
       this.isPolling = false;
     }
@@ -351,9 +352,9 @@ export class PaneInfoTracker {
       process.sshShellLifecycleActive = false;
       process.lastForegroundPgid = observed.foregroundPgid;
       // Must run before the recompute: the recompute builds the snapshot that gets emitted, so a
-      // discard applied afterwards would still ship the stale prompt and leave it on screen until
+      // discard applied afterwards would still ship the stale session and leave it on screen until
       // some later change happened to trigger another emit.
-      this.reconcileUserPromptWithObservation(process, observed);
+      this.reconcileAgentSessionWithObservation(process, observed);
       this.recomputeInfo(process, { emit: true, observedAt });
     }
   }
@@ -361,25 +362,25 @@ export class PaneInfoTracker {
   /**
    * Clears the in-flight-poll reprieve on every pane after a poll failed to deliver rows.
    *
-   * Pairs with the flag set in `captureUserPrompt`: the reprieve is defined against one specific
+   * Pairs with the flag set in `createAgentSession`: the reprieve is defined against one specific
    * poll, so it must be released whenever that poll ends without reaching `updateFromRows()`.
    */
-  private releaseUserPromptPollReprieve(): void {
+  private releaseAgentSessionPollReprieve(): void {
     for (const process of this.processes.values()) {
-      if (process.userPrompt?.ignoreInFlightPoll) {
-        process.userPrompt = { ...process.userPrompt, ignoreInFlightPoll: false };
+      if (process.agentSession?.ignoreInFlightPoll) {
+        process.agentSession = { ...process.agentSession, ignoreInFlightPoll: false };
       }
     }
   }
 
   /**
-   * Drops the retained prompt once the process table shows the agent session has ended.
+   * Drops the retained agent session once the process table shows that the session has ended.
    *
    * Identity is the foreground process group, not the agent binary. Re-detecting the agent from the
    * foreground command line looks equivalent but is not: an agent installed through a launcher
    * appears as `node /path/to/codex`, which `detectAgentFromCommand()` reads as `node`. Under a
    * name-based rule every such session would look like "the agent is gone" on the first poll after
-   * the prompt, and the prompt would vanish for agents that are plainly still running. The process
+   * the prompt, and the session would vanish for agents that are plainly still running. The process
    * group needs no interpretation and changes exactly when the pane moves to a different job —
    * including a relaunch of the same agent, which a name-based rule cannot see at all.
    *
@@ -388,42 +389,42 @@ export class PaneInfoTracker {
    * clears it — an intentional rule that makes protocol status outrank command-line detection —
    * so reusing it here would inherit that stickiness and never notice the session ending.
    */
-  private reconcileUserPromptWithObservation(
+  private reconcileAgentSessionWithObservation(
     process: RegisteredPaneProcess,
     observed: ObservedPaneActivity,
   ): void {
-    const userPrompt = process.userPrompt;
-    if (!userPrompt) {
+    const session = process.agentSession;
+    if (!session) {
       return;
     }
 
-    if (userPrompt.ignoreInFlightPoll) {
-      // This observation predates the prompt, so it proves nothing about the agent. Consume the
+    if (session.ignoreInFlightPoll) {
+      // This observation predates the session record, so it proves nothing about the agent. Consume the
       // reprieve — it is worth exactly one observation — and let the next poll decide.
       //
       // Pointing at "the one observation to skip" with a boolean is only sound because `poll()`
       // rejects re-entry while `isPolling` is set and is the sole caller of `updateFromRows()`, so
       // at most one poll is ever in flight. Allowing concurrent polls would break that and require
       // a poll sequence number instead.
-      process.userPrompt = { ...userPrompt, ignoreInFlightPoll: false };
+      process.agentSession = { ...session, ignoreInFlightPoll: false };
       return;
     }
 
     if (observed.foregroundPgid === undefined) {
       // The pane is back at its shell prompt, so whatever ran the turn has exited.
-      process.userPrompt = undefined;
+      process.agentSession = undefined;
       return;
     }
 
-    if (userPrompt.foregroundPgid === undefined) {
-      // First observation to catch the pane running since the prompt arrived: this is the job the
-      // prompt was submitted into, so adopt it as the session's identity.
-      process.userPrompt = { ...userPrompt, foregroundPgid: observed.foregroundPgid };
+    if (session.foregroundPgid === undefined) {
+      // First observation to catch the pane running since the record was built: this is the job
+      // the session runs in, so adopt it as the session's identity.
+      process.agentSession = { ...session, foregroundPgid: observed.foregroundPgid };
       return;
     }
 
-    if (observed.foregroundPgid !== userPrompt.foregroundPgid) {
-      process.userPrompt = undefined;
+    if (observed.foregroundPgid !== session.foregroundPgid) {
+      process.agentSession = undefined;
     }
   }
 
@@ -526,8 +527,8 @@ export class PaneInfoTracker {
     }
 
     // Antigravity repeats `PreInvocation` (with the same `lastUserInput`) before every model call
-    // in a turn. Rebuilding `userPrompt` on those mid-turn events would drop a `foregroundPgid`
-    // that `reconcileUserPromptWithObservation` already bound (for example when the agent runs
+    // in a turn. Rebuilding the session on those mid-turn events would drop a `foregroundPgid`
+    // that `reconcileAgentSessionWithObservation` already bound (for example when the agent runs
     // behind a `node` launcher that `detectAgentFromCommand` cannot name) and could grant a fresh
     // `ignoreInFlightPoll` reprieve mid-turn.
     //
@@ -540,15 +541,29 @@ export class PaneInfoTracker {
       previousAgent?.source === 'agent-protocol' &&
       previousAgent.status === 'running' &&
       toAgentIdentity(previousAgent) === agentIdentity &&
-      process.userPrompt?.agentIdentity === agentIdentity &&
-      process.userPrompt.text === text
+      process.agentSession?.agentIdentity === agentIdentity &&
+      process.agentSession.prompt === text
     ) {
       return;
     }
 
+    process.agentSession = this.createAgentSession(process, agentIdentity, text);
+  }
+
+  /**
+   * Builds a session record bound to the pane's current foreground job.
+   *
+   * Every (re)build of the record must go through here so that the process-group binding and the
+   * in-flight-poll reprieve are applied the same way regardless of which event created the record.
+   */
+  private createAgentSession(
+    process: RegisteredPaneProcess,
+    agentIdentity: string,
+    prompt: string,
+  ): AgentSessionRecord {
     const foregroundPgid = resolveInitialForegroundPgid(process, agentIdentity);
-    process.userPrompt = {
-      text,
+    return {
+      prompt,
       agentIdentity,
       ...(foregroundPgid === undefined ? {} : { foregroundPgid }),
       // A poll that started before this moment may be looking at a process table without the agent
@@ -615,9 +630,9 @@ export class PaneInfoTracker {
   private clearAgentProtocolState(process: RegisteredPaneProcess): void {
     process.agent = undefined;
     process.attention = undefined;
-    // The shell has taken the foreground back, so whatever agent the prompt was addressed to is
-    // gone. This is one of the two explicit transitions allowed to drop the prompt.
-    process.userPrompt = undefined;
+    // The shell has taken the foreground back, so whatever agent session the pane held is gone.
+    // This is one of the two explicit transitions allowed to drop the session record.
+    process.agentSession = undefined;
   }
 
   private recomputeInfo(
@@ -647,10 +662,10 @@ export class PaneInfoTracker {
     }
     if (isInSshShellLifecycle(process)) {
       // Moving into an ssh session takes the pane out of local agent classification entirely, so
-      // the prompt goes with it. Note this deliberately does not extend to the `idle` case above:
-      // a signal-driven recompute routinely observes `idle` in the window before ps notices the
-      // agent, and dropping the prompt there would lose it for the whole turn.
-      process.userPrompt = undefined;
+      // the agent session goes with it. Note this deliberately does not extend to the `idle` case
+      // above: a signal-driven recompute routinely observes `idle` in the window before ps notices
+      // the agent, and dropping the session there would lose the prompt for the whole turn.
+      process.agentSession = undefined;
     }
     process.agent = this.computeAgent(
       process,
@@ -658,7 +673,7 @@ export class PaneInfoTracker {
       foregroundCommand,
       options.observedAt,
     );
-    const userPrompt = resolveEmittableUserPrompt(process);
+    const agentSession = resolveEmittableAgentSession(process);
     const nextInfo: PaneRuntimeInfo = {
       ptyId: process.ptyId,
       processActivity,
@@ -671,7 +686,7 @@ export class PaneInfoTracker {
       ...(process.cwd ? { cwd: process.cwd } : {}),
       ...(process.attention ? { attention: process.attention } : {}),
       ...(process.agent ? { agent: process.agent } : {}),
-      ...(userPrompt ? { userPrompt } : {}),
+      ...(agentSession ? { userPrompt: agentSession.prompt } : {}),
     };
 
     this.upsertInfo(nextInfo, options.emit);
@@ -830,7 +845,8 @@ function resolveAgentDetailForEvent(
     toAgentIdentity(previous) === toAgentIdentity(agentInfoFromKind(event.agent))
   ) {
     const incomingPrompt = sanitizeUserPromptText(event.userPrompt, AGENT_USER_PROMPT_MAX_CHARS);
-    const isNewPromptTurn = Boolean(incomingPrompt) && incomingPrompt !== process.userPrompt?.text;
+    const isNewPromptTurn =
+      Boolean(incomingPrompt) && incomingPrompt !== process.agentSession?.prompt;
     if (!isNewPromptTurn) {
       return { detail: previous.detail };
     }
@@ -861,9 +877,9 @@ function agentDetailFromEvent(event: EvermoreAgentEvent): Partial<Pick<PaneAgent
 }
 
 /**
- * Returns the retained prompt only when it belongs to the agent the pane currently shows.
+ * Returns the retained session only when it belongs to the agent the pane currently shows.
  *
- * This is the second of the two guards protecting the prompt from being attributed to the wrong
+ * This is the second of the two guards protecting the session from being attributed to the wrong
  * session, and it covers what the process-table check cannot: the interval inside a single poll
  * period. Leaving `claude` and starting `codex` there produces a protocol event that swaps
  * `process.agent` immediately, while ps has not yet reported anything — without this comparison the
@@ -873,13 +889,15 @@ function agentDetailFromEvent(event: EvermoreAgentEvent): Partial<Pick<PaneAgent
  * `undefined` and the prompt simply stays unemitted until the agent is confirmed, rather than being
  * thrown away.
  */
-function resolveEmittableUserPrompt(process: RegisteredPaneProcess): string | undefined {
-  const userPrompt = process.userPrompt;
-  if (!userPrompt || toAgentIdentity(process.agent) !== userPrompt.agentIdentity) {
+function resolveEmittableAgentSession(
+  process: RegisteredPaneProcess,
+): AgentSessionRecord | undefined {
+  const session = process.agentSession;
+  if (!session || toAgentIdentity(process.agent) !== session.agentIdentity) {
     return undefined;
   }
 
-  return userPrompt.text;
+  return session;
 }
 
 /**
