@@ -39,6 +39,12 @@ export interface EvermoreAgentEvent {
    * (subagent instructions, tool arguments) can never be presented as something the user typed.
    */
   userPrompt?: string;
+  /**
+   * Title the agent stored for the session the hook belongs to (for example Claude Code's
+   * `ai-title` or Codex CLI's `thread_name`). Any event may carry it; `PaneInfoTracker` decides
+   * whether it applies to the session the pane is currently showing.
+   */
+  sessionTitle?: string;
   toolInput?: unknown;
 }
 

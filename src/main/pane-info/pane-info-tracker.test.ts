@@ -3,8 +3,10 @@ import {
   AGENT_DETAIL_ACTIVITY_LABEL_MAX_CHARS,
   AGENT_DETAIL_MESSAGE_MAX_CHARS,
   AGENT_DETAIL_TOOL_NAME_MAX_CHARS,
+  AGENT_SESSION_TITLE_MAX_CHARS,
   AGENT_USER_PROMPT_MAX_CHARS,
 } from '../../shared/pane-integration-constants';
+import type { EvermoreAgentEvent } from '../../shared/pane-runtime-signal';
 import type { PaneRuntimeInfo } from '../../shared/types';
 import { createLogger, type LogRecord, type LogTransport } from '../logging/logger';
 import { PaneInfoTracker } from './pane-info-tracker';
@@ -2233,6 +2235,421 @@ describe('PaneInfoTracker', () => {
       // Then: the new session starts empty instead of inheriting the previous session's prompt.
       expect(tracker.list()[0]?.agent).toMatchObject({ kind: 'claude' });
       expect(tracker.list()[0]?.userPrompt).toBeUndefined();
+    });
+
+    describe('session titles', () => {
+      function sendEvent(fields: Partial<EvermoreAgentEvent>): void {
+        tracker.applySignal('pty-1', {
+          type: 'agent-event',
+          source: 'evermore-osc777',
+          event: { v: 1, type: 'agent-status', agent: 'claude', status: 'running', ...fields },
+        });
+      }
+
+      function submitInSession(
+        sessionId: string | undefined,
+        userPrompt: string,
+        sessionTitle?: string,
+      ): void {
+        sendEvent({
+          event: 'user_prompt_submit',
+          userPrompt,
+          ...(sessionId === undefined ? {} : { sessionId }),
+          ...(sessionTitle === undefined ? {} : { sessionTitle }),
+        });
+      }
+
+      /** Starts a claude session that ps has confirmed and that has both a prompt and a title. */
+      async function startTitledSession(): Promise<void> {
+        await registerAndSettle();
+        rows = agentRows('claude');
+        now = 1002;
+        await tracker.poll();
+        now = 1003;
+        submitInSession('session-a', 'First request', 'Fix the flaky e2e suite');
+      }
+
+      it('emits the title alongside the prompt', async () => {
+        // Given / When: a prompt arrives with the session title.
+        await startTitledSession();
+
+        // Then: both reach the runtime info.
+        expect(tracker.list()[0]).toMatchObject({
+          userPrompt: 'First request',
+          sessionTitle: 'Fix the flaky e2e suite',
+        });
+      });
+
+      it('keeps the title when the same session submits another prompt', async () => {
+        // Given: a titled session.
+        await startTitledSession();
+
+        // When: the next prompt of the same session arrives before the hook re-reads the title.
+        now = 1004;
+        submitInSession('session-a', 'Second request');
+
+        // Then: the prompt is replaced while the title stays.
+        expect(tracker.list()[0]).toMatchObject({
+          userPrompt: 'Second request',
+          sessionTitle: 'Fix the flaky e2e suite',
+        });
+      });
+
+      it('drops the previous title when a prompt arrives for a different session', async () => {
+        // Given: a titled session.
+        await startTitledSession();
+
+        // When: the pane switches to another session (for example `/clear`) and its first prompt
+        // arrives before that session has a title.
+        now = 1004;
+        submitInSession('session-b', 'Start over');
+
+        // Then: only the new prompt is shown.
+        expect(tracker.list()[0]?.userPrompt).toBe('Start over');
+        expect(tracker.list()[0]?.sessionTitle).toBeUndefined();
+      });
+
+      it('keeps the prompt and title through events that carry no session id', async () => {
+        // Given: a titled session.
+        await startTitledSession();
+
+        // When: a payload shrunk to its minimal form (no session id, no title) arrives, followed by
+        // a prompt whose session id was not reported either.
+        now = 1004;
+        sendEvent({ status: 'complete', event: 'stop' });
+
+        // Then: neither is treated as a different session.
+        expect(tracker.list()[0]).toMatchObject({
+          userPrompt: 'First request',
+          sessionTitle: 'Fix the flaky e2e suite',
+        });
+
+        // When: a prompt arrives without a session id.
+        now = 1005;
+        submitInSession(undefined, 'Second request');
+
+        // Then: the prompt is replaced and the title is kept.
+        expect(tracker.list()[0]).toMatchObject({
+          userPrompt: 'Second request',
+          sessionTitle: 'Fix the flaky e2e suite',
+        });
+      });
+
+      it('ignores the session id and title of a non-prompt event from another session', async () => {
+        // Given: a titled session.
+        await startTitledSession();
+
+        // When: a subagent's hook reports its own session id and title from a tool event.
+        now = 1004;
+        sendEvent({
+          event: 'post_tool_use',
+          sessionId: 'subagent-session',
+          sessionTitle: 'Explore the repository',
+        });
+
+        // Then: the parent's prompt and title stay on the pane.
+        expect(tracker.list()[0]).toMatchObject({
+          userPrompt: 'First request',
+          sessionTitle: 'Fix the flaky e2e suite',
+        });
+
+        // When: the parent submits its next prompt.
+        now = 1005;
+        submitInSession('session-a', 'Second request');
+
+        // Then: it is still recognized as the same session, so the title is kept.
+        expect(tracker.list()[0]?.sessionTitle).toBe('Fix the flaky e2e suite');
+      });
+
+      it('updates the title from a non-prompt event of the same session', async () => {
+        // Given: a titled session.
+        await startTitledSession();
+
+        // When: the agent regenerated its title and the next tool event reports it.
+        now = 1004;
+        sendEvent({
+          event: 'post_tool_use',
+          sessionId: 'session-a',
+          sessionTitle: 'Stabilize e2e',
+        });
+
+        // Then: the new title replaces the old one and the prompt is untouched.
+        expect(tracker.list()[0]).toMatchObject({
+          userPrompt: 'First request',
+          sessionTitle: 'Stabilize e2e',
+        });
+      });
+
+      it('takes the title from a prompt-submitting event whose prompt was dropped', async () => {
+        // Given: a titled session.
+        await startTitledSession();
+
+        // When: a prompt-submitting event arrives with the prompt removed to fit the payload, from
+        // a different session id.
+        now = 1004;
+        sendEvent({ event: 'user_prompt_submit', sessionId: 'session-b', sessionTitle: 'Other' });
+
+        // Then: without a prompt it cannot switch sessions, so the held session is unchanged.
+        expect(tracker.list()[0]).toMatchObject({
+          userPrompt: 'First request',
+          sessionTitle: 'Fix the flaky e2e suite',
+        });
+
+        // When: the same happens for the held session.
+        now = 1005;
+        sendEvent({ event: 'user_prompt_submit', sessionId: 'session-a', sessionTitle: 'Renamed' });
+
+        // Then: the title is updated and the previous prompt is kept.
+        expect(tracker.list()[0]).toMatchObject({
+          userPrompt: 'First request',
+          sessionTitle: 'Renamed',
+        });
+      });
+
+      it('creates a session from a title that arrives before any prompt', async () => {
+        // Given: a claude session that started before Evermore, confirmed by ps.
+        await registerAndSettle();
+        rows = agentRows('claude');
+        now = 1002;
+        await tracker.poll();
+
+        // When: the first event Evermore sees carries only a title.
+        now = 1003;
+        sendEvent({
+          status: 'complete',
+          event: 'stop',
+          sessionId: 'session-a',
+          sessionTitle: 'Fix the flaky e2e suite',
+        });
+
+        // Then: the title is shown without a prompt.
+        expect(tracker.list()[0]?.sessionTitle).toBe('Fix the flaky e2e suite');
+        expect(tracker.list()[0]?.userPrompt).toBeUndefined();
+
+        // And: the record is bound to the agent's job like a prompt-created one, so a later switch
+        // to another job clears it.
+        now = 1004;
+        await tracker.poll();
+        rows = agentRows('pnpm test', 789);
+        now = 1005;
+        await tracker.poll();
+        expect(tracker.list()[0]?.sessionTitle).toBeUndefined();
+      });
+
+      it('collapses line breaks in the title and truncates it at the display limit', async () => {
+        // Given: a running claude agent.
+        await registerAndSettle();
+        rows = agentRows('claude');
+        now = 1002;
+        await tracker.poll();
+
+        // When: a title with line breaks arrives, then one past the display limit.
+        now = 1003;
+        submitInSession('session-a', 'First request', 'Fix the\nflaky\r\ne2e suite');
+
+        // Then: the title is shown on one line.
+        expect(tracker.list()[0]?.sessionTitle).toBe('Fix the flaky e2e suite');
+
+        // When: a title past the display limit arrives.
+        now = 1004;
+        sendEvent({
+          event: 'post_tool_use',
+          sessionId: 'session-a',
+          sessionTitle: 'a'.repeat(AGENT_SESSION_TITLE_MAX_CHARS + 10),
+        });
+
+        // Then: it is cut with a visible marker.
+        expect(tracker.list()[0]?.sessionTitle).toBe(
+          `${'a'.repeat(AGENT_SESSION_TITLE_MAX_CHARS)}…`,
+        );
+      });
+
+      it('emits when the title is the only thing that changed', async () => {
+        // Given: a titled session that has finished its turn.
+        await startTitledSession();
+        now = 1004;
+        sendEvent({ status: 'complete', event: 'stop', sessionId: 'session-a' });
+        onChanged.mockClear();
+
+        // When: a later event reports a new title with every other field identical.
+        sendEvent({
+          status: 'complete',
+          event: 'stop',
+          sessionId: 'session-a',
+          sessionTitle: 'Stabilize e2e',
+        });
+
+        // Then: the snapshot is not mistaken for an unchanged one.
+        expect(onChanged).toHaveBeenCalledTimes(1);
+        expect(onChanged.mock.calls.at(-1)?.[0].info.sessionTitle).toBe('Stabilize e2e');
+      });
+
+      it('drops the title when the shell takes the foreground back', async () => {
+        // Given: a titled session.
+        await startTitledSession();
+
+        // When: shell integration reports a new prompt.
+        now = 1004;
+        tracker.applySignal('pty-1', { type: 'shell-prompt-start', source: 'osc133' });
+
+        // Then: the title goes with the session.
+        expect(tracker.list()[0]?.sessionTitle).toBeUndefined();
+      });
+
+      it('drops the title when the pane moves into ssh', async () => {
+        // Given: a titled session.
+        await startTitledSession();
+
+        // When: ps observes ssh in the foreground.
+        rows = agentRows('/usr/bin/ssh host', 789);
+        now = 1004;
+        await tracker.poll();
+
+        // Then: the title is gone.
+        expect(tracker.list()[0]?.sessionTitle).toBeUndefined();
+      });
+
+      it('drops the title when ps observes a different foreground job', async () => {
+        // Given: a titled session bound to its process group.
+        await startTitledSession();
+        now = 1004;
+        await tracker.poll();
+
+        // When: another job takes over the foreground.
+        rows = agentRows('pnpm run typecheck', 789);
+        now = 1005;
+        await tracker.poll();
+
+        // Then: the title is gone.
+        expect(tracker.list()[0]?.sessionTitle).toBeUndefined();
+      });
+
+      it('does not show the title once the pane shows a different agent', async () => {
+        // Given: a titled claude session.
+        await startTitledSession();
+
+        // When: codex emits a protocol event before ps has observed the switch.
+        now = 1004;
+        sendEvent({ agent: 'codex' });
+
+        // Then: claude's title does not appear on the codex agent.
+        expect(tracker.list()[0]?.agent).toMatchObject({ kind: 'codex' });
+        expect(tracker.list()[0]?.sessionTitle).toBeUndefined();
+      });
+
+      it('settles a title-only session on the latest title until a prompt identifies it', async () => {
+        // Given: a claude session that started before Evermore, confirmed by ps.
+        await registerAndSettle();
+        rows = agentRows('claude');
+        now = 1002;
+        await tracker.poll();
+
+        // When: a subagent's tool event is the first to report a title, and the parent's Stop
+        // follows with its own.
+        now = 1003;
+        sendEvent({
+          event: 'post_tool_use',
+          sessionId: 'subagent-session',
+          sessionTitle: 'Explore the repository',
+        });
+        now = 1004;
+        sendEvent({
+          status: 'complete',
+          event: 'stop',
+          sessionId: 'session-a',
+          sessionTitle: 'Fix the flaky e2e suite',
+        });
+
+        // Then: the parent's title replaces the subagent's instead of being rejected as another
+        // session.
+        expect(tracker.list()[0]?.sessionTitle).toBe('Fix the flaky e2e suite');
+
+        // When: the parent submits a prompt, and the subagent reports its title again.
+        now = 1005;
+        submitInSession('session-a', 'Next request');
+        now = 1006;
+        sendEvent({
+          event: 'post_tool_use',
+          sessionId: 'subagent-session',
+          sessionTitle: 'Explore the repository',
+        });
+
+        // Then: the prompt has identified the session, so the subagent's title is ignored.
+        expect(tracker.list()[0]).toMatchObject({
+          userPrompt: 'Next request',
+          sessionTitle: 'Fix the flaky e2e suite',
+        });
+      });
+
+      it('records the session id first reported by a repeated pre_invocation', async () => {
+        // Given: a running Antigravity session whose first prompt carried a title but no id.
+        await registerAndSettle();
+        rows = agentRows('agy');
+        now = 1002;
+        await tracker.poll();
+        now = 1003;
+        sendEvent({
+          agent: 'antigravity',
+          event: 'pre_invocation',
+          userPrompt: 'First request',
+          sessionTitle: 'Fix the flaky e2e suite',
+        });
+
+        // When: the mid-turn repeat of the same prompt reports the id, and a prompt for another
+        // session follows.
+        now = 1004;
+        sendEvent({
+          agent: 'antigravity',
+          event: 'pre_invocation',
+          userPrompt: 'First request',
+          sessionId: 'conversation-a',
+        });
+        now = 1005;
+        sendEvent({
+          agent: 'antigravity',
+          event: 'pre_invocation',
+          userPrompt: 'Start over',
+          sessionId: 'conversation-b',
+        });
+
+        // Then: the id learned from the repeat identifies the new prompt as another session.
+        expect(tracker.list()[0]?.userPrompt).toBe('Start over');
+        expect(tracker.list()[0]?.sessionTitle).toBeUndefined();
+      });
+
+      it('drops the previous tool summary when the same prompt starts another session', async () => {
+        // Given: a running Antigravity session showing a tool summary.
+        await registerAndSettle();
+        rows = agentRows('agy');
+        now = 1002;
+        await tracker.poll();
+        now = 1003;
+        sendEvent({
+          agent: 'antigravity',
+          event: 'pre_invocation',
+          userPrompt: 'continue',
+          sessionId: 'conversation-a',
+        });
+        now = 1004;
+        sendEvent({
+          agent: 'antigravity',
+          event: 'post_tool_use',
+          sessionId: 'conversation-a',
+          activityLabel: 'Edit: src/App.tsx',
+        });
+
+        // When: the same prompt text arrives for a different session while still running.
+        now = 1005;
+        sendEvent({
+          agent: 'antigravity',
+          event: 'pre_invocation',
+          userPrompt: 'continue',
+          sessionId: 'conversation-b',
+        });
+
+        // Then: the previous session's tool summary is not carried over.
+        expect(tracker.list()[0]?.agent?.detail).toEqual({ event: 'pre_invocation' });
+      });
     });
 
     describe('with a poll in flight', () => {

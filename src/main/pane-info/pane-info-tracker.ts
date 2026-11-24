@@ -16,6 +16,7 @@ import {
   AGENT_DETAIL_ACTIVITY_LABEL_MAX_CHARS,
   AGENT_DETAIL_MESSAGE_MAX_CHARS,
   AGENT_DETAIL_TOOL_NAME_MAX_CHARS,
+  AGENT_SESSION_TITLE_MAX_CHARS,
   AGENT_USER_PROMPT_MAX_CHARS,
 } from '../../shared/pane-integration-constants';
 import { sanitizeAgentText, sanitizeUserPromptText } from '../../shared/text/sanitize-agent-text';
@@ -488,43 +489,72 @@ export class PaneInfoTracker {
           }
         : undefined;
 
-    this.captureUserPrompt(process, event, previousAgent);
+    this.applyAgentSessionEvent(process, event, previousAgent);
   }
 
   /**
-   * Records the prompt carried by a prompt-submitting agent event.
+   * Updates the pane's agent session record from the prompt and session title an event carries.
    *
-   * Restricted to `user_prompt_submit` and `pre_invocation` so that only text the user actually
-   * typed can reach the UI; the hook helper enforces the same restriction on its side. Events
-   * without a usable prompt leave the previous one alone rather than clearing it — a `PostToolUse`
-   * in the middle of a turn must not erase the instruction that started that turn.
+   * Prompts are only taken from `user_prompt_submit` and `pre_invocation` so that only text the
+   * user actually typed can reach the UI; the hook helper enforces the same restriction on its side.
+   * A prompt-submitting event whose prompt is missing or empty (for example because the helper
+   * dropped it to fit the payload budget) is handled like any other event and may still update the
+   * title.
+   *
+   * Events without a usable prompt or title leave the record alone rather than clearing it — a
+   * `PostToolUse` in the middle of a turn must not erase the instruction that started that turn, and
+   * an event sent before the agent generated its title must not erase a title it had before.
    *
    * `previousAgent` is the agent slot as it was before this event was applied, used to recognize
    * Antigravity's repeated mid-turn `PreInvocation` events.
    */
-  private captureUserPrompt(
+  private applyAgentSessionEvent(
     process: RegisteredPaneProcess,
     event: EvermoreAgentEvent,
     previousAgent: PaneAgentInfo | undefined,
   ): void {
-    if (
-      event.event !== AGENT_USER_PROMPT_SUBMIT_EVENT &&
-      event.event !== AGENT_PRE_INVOCATION_EVENT
-    ) {
-      return;
-    }
-
-    const text = sanitizeUserPromptText(event.userPrompt, AGENT_USER_PROMPT_MAX_CHARS);
-    if (!text) {
-      return;
-    }
-
     // Run the protocol's agent name through the same mapping the agent slot uses, so the stored
     // identity is directly comparable with what command-line detection produces later.
     const agentIdentity = toAgentIdentity(agentInfoFromKind(event.agent));
     if (!agentIdentity) {
       return;
     }
+
+    // The title is displayed on a single line, so unlike the prompt it is collapsed to one line
+    // even if the sender left line breaks in it.
+    const title = sanitizeAgentText(event.sessionTitle, AGENT_SESSION_TITLE_MAX_CHARS) || undefined;
+    const prompt = isPromptSubmittingEvent(event)
+      ? sanitizeUserPromptText(event.userPrompt, AGENT_USER_PROMPT_MAX_CHARS)
+      : '';
+
+    if (prompt) {
+      this.applySubmittedPrompt(process, event, previousAgent, agentIdentity, prompt, title);
+    } else if (title) {
+      this.applySessionTitle(process, event, agentIdentity, title);
+    }
+  }
+
+  /**
+   * Records a submitted prompt, switching to a new session record when the prompt belongs to a
+   * different session than the one held.
+   *
+   * Only this path may switch sessions. The user only types into the parent session, so a prompt
+   * reliably identifies the session the pane shows, including after `/clear` or `/resume`; any other
+   * event may come from a subagent that reports its own session id.
+   */
+  private applySubmittedPrompt(
+    process: RegisteredPaneProcess,
+    event: EvermoreAgentEvent,
+    previousAgent: PaneAgentInfo | undefined,
+    agentIdentity: string,
+    prompt: string,
+    title: string | undefined,
+  ): void {
+    const current = process.agentSession;
+    const continuing =
+      current !== undefined && isSameAgentSession(current, agentIdentity, event.sessionId)
+        ? current
+        : undefined;
 
     // Antigravity repeats `PreInvocation` (with the same `lastUserInput`) before every model call
     // in a turn. Rebuilding the session on those mid-turn events would drop a `foregroundPgid`
@@ -541,13 +571,75 @@ export class PaneInfoTracker {
       previousAgent?.source === 'agent-protocol' &&
       previousAgent.status === 'running' &&
       toAgentIdentity(previousAgent) === agentIdentity &&
-      process.agentSession?.agentIdentity === agentIdentity &&
-      process.agentSession.prompt === text
+      continuing?.prompt === prompt
     ) {
+      // The record is kept for its process-group binding, but what the repeat newly carries still
+      // applies. An id is only filled in, never replaced: `continuing` already matched this one.
+      const sessionId = continuing.sessionId ?? event.sessionId;
+      process.agentSession = {
+        ...continuing,
+        ...(title === undefined ? {} : { title }),
+        ...(sessionId === undefined ? {} : { sessionId }),
+      };
       return;
     }
 
-    process.agentSession = this.createAgentSession(process, agentIdentity, text);
+    // A record for the same session hands its title and id over to the rebuilt one; a different
+    // session starts from what this event carries, so the previous session's title is dropped.
+    const nextTitle = title ?? continuing?.title;
+    const nextSessionId = event.sessionId ?? continuing?.sessionId;
+    process.agentSession = {
+      ...this.createAgentSession(process, agentIdentity),
+      prompt,
+      ...(nextTitle === undefined ? {} : { title: nextTitle }),
+      ...(nextSessionId === undefined ? {} : { sessionId: nextSessionId }),
+    };
+  }
+
+  /**
+   * Records a session title carried by an event that did not submit a prompt.
+   *
+   * Once a prompt has identified the session, a record held for a different session is left
+   * untouched: the event may come from a subagent reporting its own session's title, and the pane
+   * should keep showing the parent's.
+   */
+  private applySessionTitle(
+    process: RegisteredPaneProcess,
+    event: EvermoreAgentEvent,
+    agentIdentity: string,
+    title: string,
+  ): void {
+    const current = process.agentSession;
+    if (!current) {
+      // No prompt has been seen for this session yet: it started before Evermore did, or its
+      // prompt was dropped to fit the payload budget. The title alone is still worth showing.
+      process.agentSession = {
+        ...this.createAgentSession(process, agentIdentity),
+        title,
+        ...(event.sessionId === undefined ? {} : { sessionId: event.sessionId }),
+      };
+      return;
+    }
+
+    if (current.prompt === undefined && current.agentIdentity === agentIdentity) {
+      // Without a prompt nothing has established which session is the parent, so the id this record
+      // was created with may be a subagent's. Rejecting other ids here would pin that subagent's
+      // title until the next prompt. The latest title wins instead: the parent's `Stop` closes every
+      // turn, so the pane settles on the parent's title by the time the agent is `ready`.
+      const sessionId = event.sessionId ?? current.sessionId;
+      process.agentSession = {
+        ...current,
+        title,
+        ...(sessionId === undefined ? {} : { sessionId }),
+      };
+      return;
+    }
+
+    if (isSameAgentSession(current, agentIdentity, event.sessionId)) {
+      // The session id is deliberately not adopted here even when the record lacks one; see
+      // `AgentSessionRecord.sessionId`.
+      process.agentSession = { ...current, title };
+    }
   }
 
   /**
@@ -559,11 +651,9 @@ export class PaneInfoTracker {
   private createAgentSession(
     process: RegisteredPaneProcess,
     agentIdentity: string,
-    prompt: string,
   ): AgentSessionRecord {
     const foregroundPgid = resolveInitialForegroundPgid(process, agentIdentity);
     return {
-      prompt,
       agentIdentity,
       ...(foregroundPgid === undefined ? {} : { foregroundPgid }),
       // A poll that started before this moment may be looking at a process table without the agent
@@ -686,7 +776,8 @@ export class PaneInfoTracker {
       ...(process.cwd ? { cwd: process.cwd } : {}),
       ...(process.attention ? { attention: process.attention } : {}),
       ...(process.agent ? { agent: process.agent } : {}),
-      ...(agentSession ? { userPrompt: agentSession.prompt } : {}),
+      ...(agentSession?.prompt ? { userPrompt: agentSession.prompt } : {}),
+      ...(agentSession?.title ? { sessionTitle: agentSession.title } : {}),
     };
 
     this.upsertInfo(nextInfo, options.emit);
@@ -821,10 +912,11 @@ function agentInfoFromKind(kind: string): Pick<PaneAgentInfo, 'known' | 'kind'> 
  * `running` in the same turn (and not switching to a new `userPrompt`), the prior `detail` is
  * retained so the sidebar continues showing the most recent tool activity while the model thinks.
  *
- * A new turn is recognized by its prompt text differing from the recorded one. A turn that repeats
- * the previous prompt verbatim therefore relies on `Stop` having moved the agent to `ready` first;
- * if `Stop` was never delivered (for example an interrupted turn), the previous tool summary stays
- * visible until the next `PostToolUse` replaces it.
+ * A new turn is recognized by its prompt text differing from the recorded one, or by the prompt
+ * belonging to a different session (the same rule `applySubmittedPrompt` uses to switch records).
+ * Within one session, a turn that repeats the previous prompt verbatim therefore relies on `Stop`
+ * having moved the agent to `ready` first; if `Stop` was never delivered (for example an interrupted
+ * turn), the previous tool summary stays visible until the next `PostToolUse` replaces it.
  */
 function resolveAgentDetailForEvent(
   process: RegisteredPaneProcess,
@@ -845,8 +937,14 @@ function resolveAgentDetailForEvent(
     toAgentIdentity(previous) === toAgentIdentity(agentInfoFromKind(event.agent))
   ) {
     const incomingPrompt = sanitizeUserPromptText(event.userPrompt, AGENT_USER_PROMPT_MAX_CHARS);
-    const isNewPromptTurn =
-      Boolean(incomingPrompt) && incomingPrompt !== process.agentSession?.prompt;
+    const session = process.agentSession;
+    const eventIdentity = toAgentIdentity(agentInfoFromKind(event.agent));
+    const continuesSession =
+      session !== undefined &&
+      eventIdentity !== undefined &&
+      isSameAgentSession(session, eventIdentity, event.sessionId) &&
+      incomingPrompt === session.prompt;
+    const isNewPromptTurn = Boolean(incomingPrompt) && !continuesSession;
     if (!isNewPromptTurn) {
       return { detail: previous.detail };
     }
@@ -898,6 +996,31 @@ function resolveEmittableAgentSession(
   }
 
   return session;
+}
+
+/**
+ * Returns whether the event's agent session is the one `record` holds.
+ *
+ * An event without a session id never counts as a different session. The helper drops `sessionId`
+ * when it shrinks a payload to its minimal form, so comparing `undefined` as just another id would
+ * discard the prompt and title every time a shrunk event arrived. A record without an id likewise
+ * matches any id, because it simply has not learned which session it belongs to.
+ */
+function isSameAgentSession(
+  record: AgentSessionRecord,
+  agentIdentity: string,
+  sessionId: string | undefined,
+): boolean {
+  return (
+    record.agentIdentity === agentIdentity &&
+    (sessionId === undefined || record.sessionId === undefined || record.sessionId === sessionId)
+  );
+}
+
+function isPromptSubmittingEvent(event: EvermoreAgentEvent): boolean {
+  return (
+    event.event === AGENT_USER_PROMPT_SUBMIT_EVENT || event.event === AGENT_PRE_INVOCATION_EVENT
+  );
 }
 
 /**
@@ -1011,6 +1134,8 @@ function areRuntimeInfosEquivalent(left: PaneRuntimeInfo, right: PaneRuntimeInfo
     // Without this comparison a turn whose only change is a new prompt would be treated as an
     // unchanged snapshot, and the emit that carries the prompt to the renderer would be suppressed.
     left.userPrompt === right.userPrompt &&
+    // Same for a snapshot whose only change is the title, such as one generated after the first turn.
+    left.sessionTitle === right.sessionTitle &&
     areCommandsEquivalent(left.command, right.command) &&
     areIntegrationsEquivalent(left.integration, right.integration) &&
     JSON.stringify(left.attention) === JSON.stringify(right.attention) &&

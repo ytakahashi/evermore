@@ -154,6 +154,14 @@ export interface PaneRuntimeInfo {
    * retention rules.
    */
   userPrompt?: string;
+  /**
+   * Title the agent stored for the session currently occupying this pane, as reported by its hook.
+   *
+   * A sibling of `agent` for the same reason as `userPrompt`: the title is most useful once the turn
+   * has finished and the agent is `ready`. It shares the prompt's retention and emit rules, and is
+   * kept across turns of the same session while the prompt is replaced on each one.
+   */
+  sessionTitle?: string;
   /** Unix timestamp in milliseconds for the latest observation. */
   observedAt: number;
 }

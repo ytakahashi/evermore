@@ -43,8 +43,28 @@ export const AGENT_USER_PROMPT_MAX_CHARS = 200;
  * dropped.
  *
  * The value also bounds the payload budget. With control characters already removed by the helper,
- * the worst case is 4 UTF-8 bytes per code point, so 500 code points cost at most 2000 bytes and
- * leave ample room under {@link OSC_777_PAYLOAD_MAX_BYTES} for `cwd` / `sessionId` /
- * `activityLabel`.
+ * the worst case is 4 UTF-8 bytes per code point. A payload carrying both the prompt and the session
+ * title therefore costs at most 500 × 4 + {@link AGENT_SESSION_TITLE_HOOK_MAX_CHARS} × 4 = 2480
+ * bytes for those two fields, leaving ample room under {@link OSC_777_PAYLOAD_MAX_BYTES} for `cwd`
+ * / `sessionId` / `activityLabel`.
  */
 export const AGENT_USER_PROMPT_HOOK_MAX_CHARS = 500;
+
+/**
+ * Display limit applied to `PaneRuntimeInfo.sessionTitle` by `PaneInfoTracker`.
+ *
+ * Agent-generated titles are short (Claude Code `ai-title` values observed so far stay under 60
+ * characters), so this mostly bounds titles that come from elsewhere: Codex CLI uses the first
+ * message as a provisional title until its own one is generated, and `/rename` accepts free text.
+ */
+export const AGENT_SESSION_TITLE_MAX_CHARS = 80;
+
+/**
+ * Character limit the hook helper script applies to the session title before it is placed in the
+ * OSC 777 payload.
+ *
+ * Larger than {@link AGENT_SESSION_TITLE_MAX_CHARS} for the same reason as
+ * {@link AGENT_USER_PROMPT_HOOK_MAX_CHARS}: the visible `…` marker must come from the Evermore side.
+ * It also counts toward the payload budget described there.
+ */
+export const AGENT_SESSION_TITLE_HOOK_MAX_CHARS = 120;
