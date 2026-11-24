@@ -280,6 +280,28 @@ describe('TerminalSignalParser', () => {
     ]);
   });
 
+  it('carries a string sessionTitle through and ignores any other type', () => {
+    // Given: one payload whose sessionTitle is a string and one where it is not.
+    const base = { v: 1, type: 'agent-status', agent: 'claude', status: 'complete' };
+    const data = [
+      `\x1b]777;evermore;${JSON.stringify({ ...base, sessionTitle: 'Fix the flaky e2e suite' })}\x07`,
+      `\x1b]777;evermore;${JSON.stringify({ ...base, sessionTitle: 42 })}\x07`,
+    ];
+
+    // When: the terminal output is parsed.
+    const signals = collectSignals(data);
+
+    // Then: only the string form reaches the event, and the other event still arrives without it.
+    expect(signals).toEqual([
+      {
+        type: 'agent-event',
+        source: 'evermore-osc777',
+        event: { ...base, sessionTitle: 'Fix the flaky e2e suite' },
+      },
+      { type: 'agent-event', source: 'evermore-osc777', event: base },
+    ]);
+  });
+
   it('drops invalid Evermore OSC 777 agent event payloads', () => {
     // Given: unsupported or malformed agent-event payloads plus an unrelated OSC 777 notify.
     const invalidPayloads = [

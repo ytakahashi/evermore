@@ -63,8 +63,23 @@ export interface RegisteredPaneProcess {
  * record is the single way to drop them all.
  */
 export interface AgentSessionRecord {
-  /** Latest prompt the user submitted to this session. */
-  prompt: string;
+  /**
+   * Latest prompt the user submitted to this session. Unset when the record was created from a
+   * title-only event, for example for a session that started before Evermore did.
+   */
+  prompt?: string;
+  /** Latest session title the agent's hook reported for this session. */
+  title?: string;
+  /**
+   * Hook-reported session id. Undefined when the event that created the record carried none (an
+   * agent whose hook never sends one, or a payload degraded to its minimal form).
+   *
+   * Once the record holds a prompt, only prompt-carrying events may fill it in: other events can
+   * come from a subagent with its own id, and adopting that id would make the parent's next prompt
+   * look like a different session. A record created from a title alone has not identified its
+   * session yet, so any title event of the same agent replaces both the title and this id.
+   */
+  sessionId?: string;
   /**
    * Identity of the agent the session belongs to.
    *
