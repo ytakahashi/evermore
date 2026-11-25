@@ -25,6 +25,7 @@ import { formatWorkspaceLabels } from '../../workspace/workspace-labels';
 import { ContextMenu } from '../common/ContextMenu';
 import { hasActionableItem, type ContextMenuItem } from '../common/contextMenuItems';
 import { getPaneRunningIndicator } from '../common/pane-running-indicator';
+import { getPaneSessionTexts } from '../common/pane-session-texts';
 import { SparklesIcon } from '../common/SparklesIcon';
 import {
   resolveDropEdge,
@@ -134,6 +135,7 @@ function PaneSummary({
   const indicator = getPaneRunningIndicator(info);
   const label = getPaneDisplayLabel(info, pane.cwd);
   const cwdLabel = getTruncatedPathLabel(pane.cwd);
+  const { sessionTitle, userPrompt } = getPaneSessionTexts(info);
 
   return (
     <div className="pl-6">
@@ -171,15 +173,26 @@ function PaneSummary({
             >
               {label}
             </div>
-            {/* Sits above cwd because it says more about what the pane is doing; cwd is the least
-                informative of the three rows. Present only while an agent is detected, since the
-                tracker only emits userPrompt for a matching agent. The narrow sidebar truncates
-                most prompts, so the full text is available on hover. */}
-            {info?.userPrompt && (
+            {/* Title and prompt sit above cwd because they say more about what the pane is doing;
+                cwd is the least informative row. Both are present only while an agent is detected,
+                since the tracker only emits them for a matching agent, and their rows are not
+                rendered otherwise so a pane without them keeps its height. The title names the
+                whole session, so it comes before the prompt of the latest turn. The narrow sidebar
+                truncates most of either, so the full text is available on hover. */}
+            {sessionTitle && (
+              <div
+                className={`mt-1 truncate text-[11px] ${isActivePane ? 'text-foreground' : 'text-muted'}`}
+                data-testid="pane-session-title"
+                title={sessionTitle}
+              >
+                {sessionTitle}
+              </div>
+            )}
+            {userPrompt && (
               <div
                 className="mt-1 truncate text-[11px] text-muted italic"
-                title={info.userPrompt}
-              >{`❝ ${info.userPrompt}`}</div>
+                title={userPrompt}
+              >{`❝ ${userPrompt}`}</div>
             )}
             {pane.cwd && (
               <div className="mt-1 truncate text-[11px] text-muted" title={pane.cwd}>

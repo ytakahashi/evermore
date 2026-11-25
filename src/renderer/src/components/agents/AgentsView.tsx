@@ -9,6 +9,7 @@ import { useSettingsStore } from '../../stores/settingsStore';
 import { useUiStore } from '../../stores/uiStore';
 import { useWorkspaceStore } from '../../stores/workspaceStore';
 import { getPaneRunningIndicator } from '../common/pane-running-indicator';
+import { getPaneSessionTexts } from '../common/pane-session-texts';
 import { SparklesIcon } from '../common/SparklesIcon';
 import { AgentTerminalPanel } from './AgentTerminalPanel';
 import { FOCUS_LIST_HINT, FOCUS_TERMINAL_HINT } from './agent-focus-shortcuts';
@@ -46,6 +47,7 @@ function AgentCard({
   // Reused from the sidebar so one pane can never read as two different states depending on which
   // surface the user is looking at.
   const indicator = info?.agent ? getPaneRunningIndicator(info) : null;
+  const { sessionTitle, userPrompt } = getPaneSessionTexts(info);
 
   return (
     <button
@@ -88,16 +90,31 @@ function AgentCard({
       {/* Content column takes the rest of the width — this pairing is what the sidebar cannot show,
           so it gets the space. */}
       <div className="flex min-w-0 flex-1 flex-col gap-2">
-        {info?.userPrompt ? (
+        {/* The title names the whole session and the prompt only its latest turn, so the title
+            comes first. It stays on one line so prompts keep the vertical space. */}
+        {sessionTitle && (
+          <p
+            className="truncate text-sm font-medium text-foreground"
+            data-testid="agent-session-title"
+            title={sessionTitle}
+          >
+            {sessionTitle}
+          </p>
+        )}
+        {userPrompt ? (
           // `whitespace-pre-line` keeps the line breaks the prompt was written with, so lists and
           // step-by-step instructions stay legible. The sidebar deliberately does not opt in: its
           // rows are single-line, where a break renders as a space.
           <p
             className={`${compact ? 'line-clamp-2' : 'line-clamp-3'} text-sm leading-relaxed whitespace-pre-line text-foreground`}
-            title={info.userPrompt}
-          >{`❝ ${info.userPrompt}`}</p>
+            title={userPrompt}
+          >{`❝ ${userPrompt}`}</p>
         ) : (
-          <p className="text-sm text-subtle italic">No prompt captured for this session</p>
+          // A title already identifies the session, including when the prompt is hidden for
+          // repeating it, so the placeholder is only for cards that would otherwise be blank.
+          !sessionTitle && (
+            <p className="text-sm text-subtle italic">No prompt captured for this session</p>
+          )
         )}
         {!compact && summary && (
           <p
