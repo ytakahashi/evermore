@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
-import type { Workspace } from '../../../../shared/types';
+import type { PaneRuntimeInfo, Workspace } from '../../../../shared/types';
 import { MAX_WORKSPACE_TABS } from '../../../../shared/workspace-constants';
 import { usePaneInfoStore } from '../../stores/paneInfoStore';
 import { useTabDragStore } from '../../stores/tabDragStore';
@@ -692,6 +692,80 @@ describe('WorkspacesView', () => {
 
     // Then: no quote marker is rendered, so the row collapses instead of showing an empty quote.
     expect(screen.queryByText(/❝/)).not.toBeInTheDocument();
+  });
+
+  describe('session title', () => {
+    function setClaudePaneInfo(overrides: Partial<PaneRuntimeInfo>): void {
+      usePaneInfoStore.setState({
+        infosByPtyId: {
+          'pty-server': {
+            ptyId: 'pty-server',
+            processActivity: 'running',
+            foregroundCommand: 'claude',
+            foregroundSession: { kind: 'other' },
+            integration: {
+              shell: false,
+              protocols: [],
+              lastSequenceAt: 0,
+              stale: false,
+            },
+            agent: {
+              known: 'claude',
+              kind: 'claude',
+              status: 'ready',
+              source: 'agent-protocol',
+              observedAt: 1000,
+            },
+            observedAt: 1000,
+            ...overrides,
+          },
+        },
+        isLoading: false,
+        error: null,
+      });
+    }
+
+    it('shows the title between the label and the prompt', () => {
+      // Given: a pane whose session has a stored title and a different latest prompt.
+      setClaudePaneInfo({ sessionTitle: 'Reorganize lint rules', userPrompt: 'Now run the tests' });
+
+      // When: the workspace sidebar renders.
+      render(<WorkspacesView />);
+
+      // Then: the title row is single-line with the full text on hover, and the prompt follows it.
+      const label = screen.getByText('Claude Code');
+      const titleRow = screen.getByTestId('pane-session-title');
+      const promptRow = screen.getByTitle('Now run the tests');
+      expect(titleRow).toHaveTextContent('Reorganize lint rules');
+      expect(titleRow).toHaveAttribute('title', 'Reorganize lint rules');
+      expect(titleRow).toHaveClass('truncate');
+      expect(label.compareDocumentPosition(titleRow)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+      expect(titleRow.compareDocumentPosition(promptRow)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    });
+
+    it('renders no title row element when the pane has no title', () => {
+      // Given: a pane with a prompt but no stored title.
+      setClaudePaneInfo({ userPrompt: 'Fix the tests' });
+
+      // When: the workspace sidebar renders.
+      render(<WorkspacesView />);
+
+      // Then: the row keeps its previous height because no title element is rendered.
+      expect(screen.queryByTestId('pane-session-title')).not.toBeInTheDocument();
+      expect(screen.getByTitle('Fix the tests')).toHaveTextContent('❝ Fix the tests');
+    });
+
+    it('shows only the title when the prompt repeats it', () => {
+      // Given: a provisional title copied from the first message of the session.
+      setClaudePaneInfo({ sessionTitle: 'Fix the tests', userPrompt: 'Fix the tests' });
+
+      // When: the workspace sidebar renders.
+      render(<WorkspacesView />);
+
+      // Then: the text appears once, on the title row.
+      expect(screen.getByTestId('pane-session-title')).toHaveTextContent('Fix the tests');
+      expect(screen.queryByText(/❝/)).not.toBeInTheDocument();
+    });
   });
 
   it('shows the working dot when the agent reports it is processing a turn', () => {

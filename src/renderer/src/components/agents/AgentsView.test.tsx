@@ -739,6 +739,85 @@ describe('AgentsView', () => {
     expect(screen.getByText('No prompt captured for this session')).toBeInTheDocument();
   });
 
+  it('shows the session title above the prompt', () => {
+    // Given: a session whose stored title differs from its latest prompt.
+    usePaneInfoStore.setState({
+      infosByPtyId: {
+        'pty-1': agentInfo('pty-1', {
+          sessionTitle: 'Reorganize lint rules',
+          userPrompt: 'Now run the tests',
+        }),
+      },
+      isLoading: false,
+      error: null,
+    });
+
+    // When: the agents view renders.
+    render(<AgentsView />);
+
+    // Then: the title row comes first and the prompt row follows it.
+    const titleRow = screen.getByTestId('agent-session-title');
+    expect(titleRow).toHaveTextContent('Reorganize lint rules');
+    expect(titleRow).toHaveAttribute('title', 'Reorganize lint rules');
+    const promptRow = screen.getByTitle('Now run the tests');
+    expect(promptRow).toHaveTextContent('❝ Now run the tests');
+    expect(titleRow.compareDocumentPosition(promptRow)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+  });
+
+  it('renders no title row when the session has no title', () => {
+    // Given: a session with a prompt but no stored title yet.
+    usePaneInfoStore.setState({
+      infosByPtyId: { 'pty-1': agentInfo('pty-1', { userPrompt: 'Fix the tests' }) },
+      isLoading: false,
+      error: null,
+    });
+
+    // When: the agents view renders.
+    render(<AgentsView />);
+
+    // Then: the card looks as it did before titles existed.
+    expect(screen.queryByTestId('agent-session-title')).not.toBeInTheDocument();
+    expect(screen.getByTitle('Fix the tests')).toHaveTextContent('❝ Fix the tests');
+  });
+
+  it('shows only the title when the prompt repeats it', () => {
+    // Given: a provisional title copied from the first message of the session.
+    usePaneInfoStore.setState({
+      infosByPtyId: {
+        'pty-1': agentInfo('pty-1', {
+          sessionTitle: 'Fix the tests',
+          userPrompt: 'Fix the tests',
+        }),
+      },
+      isLoading: false,
+      error: null,
+    });
+
+    // When: the agents view renders.
+    render(<AgentsView />);
+
+    // Then: the text appears once, and the hidden prompt is not reported as missing.
+    expect(screen.getByTestId('agent-session-title')).toHaveTextContent('Fix the tests');
+    expect(screen.queryByText(/❝/)).not.toBeInTheDocument();
+    expect(screen.queryByText('No prompt captured for this session')).not.toBeInTheDocument();
+  });
+
+  it('omits the missing-prompt placeholder when a title identifies the session', () => {
+    // Given: a session that reported its title before any prompt was captured.
+    usePaneInfoStore.setState({
+      infosByPtyId: { 'pty-1': agentInfo('pty-1', { sessionTitle: 'Fix the tests' }) },
+      isLoading: false,
+      error: null,
+    });
+
+    // When: the agents view renders.
+    render(<AgentsView />);
+
+    // Then: the card shows the title without the placeholder.
+    expect(screen.getByTestId('agent-session-title')).toHaveTextContent('Fix the tests');
+    expect(screen.queryByText('No prompt captured for this session')).not.toBeInTheDocument();
+  });
+
   it('labels the status badge exactly as the Workspaces sidebar does', () => {
     // Given: one agent awaiting input and one processing a turn.
     usePaneInfoStore.setState({

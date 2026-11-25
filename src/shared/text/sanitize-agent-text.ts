@@ -1,5 +1,6 @@
 const DEFAULT_MAX_CHARS = 200;
-const TRUNCATION_MARKER = '…';
+/** Appended to text the sanitizers cut at their length limit. */
+export const TRUNCATION_MARKER = '…';
 
 // Matches CSI/OSC/SS2/SS3 and bare ESC sequences. Covers the common ANSI color / cursor-move
 // sequences as well as terminal-specific escape sequences agents may leak into their messages.
