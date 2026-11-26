@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vite-plus/test';
 import {
+  AGENT_SESSION_TITLE_HOOK_MAX_CHARS,
   AGENT_USER_PROMPT_HOOK_MAX_CHARS,
   OSC_777_PAYLOAD_MAX_BYTES,
 } from '../pane-integration-constants';
@@ -43,13 +44,32 @@ describe('AI integration snippets', () => {
     expect(EVERMORE_AGENT_STATUS_HELPER_SCRIPT).toContain('$event == "pre_invocation"');
   });
 
+  it('reads the Claude Code session title from the transcript without exposing it in argv', () => {
+    // Given / When: the helper script text is inspected.
+    // Then: the transcript is opened through a redirect, the title is wired into the payload, and it
+    // reaches jq on stdin together with the hook JSON. Behavioral coverage lives in
+    // tests/e2e/ai-integration.e2e.test.ts.
+    expect(EVERMORE_AGENT_STATUS_HELPER_SCRIPT).toContain('claude) read_claude_session_title ;;');
+    expect(EVERMORE_AGENT_STATUS_HELPER_SCRIPT).toContain(
+      'LC_ALL=C grep -aF \'"type":"ai-title"\' < "$TRANSCRIPT_PATH"',
+    );
+    expect(EVERMORE_AGENT_STATUS_HELPER_SCRIPT).toContain(
+      `TITLE_MAX_CHARS=${AGENT_SESSION_TITLE_HOOK_MAX_CHARS}`,
+    );
+    expect(EVERMORE_AGENT_STATUS_HELPER_SCRIPT).toContain('string_field("sessionTitle"');
+    expect(EVERMORE_AGENT_STATUS_HELPER_SCRIPT).toContain(
+      'printf \'%s\\n%s\' "$SESSION_TITLE" "$HOOK_INPUT" | jq -Rsc',
+    );
+  });
+
   it('keeps every hook-derived value out of the jq argument vector', () => {
     // Given / When: the helper script text is inspected.
     // Then: hook JSON and the assembled payload are piped into jq rather than passed with --arg.
     // Process arguments are readable by other users, and hook stdin can contain the user's prompt.
     expect(EVERMORE_AGENT_STATUS_HELPER_SCRIPT).not.toContain('--arg hook');
     expect(EVERMORE_AGENT_STATUS_HELPER_SCRIPT).not.toContain('--arg seq');
-    expect(EVERMORE_AGENT_STATUS_HELPER_SCRIPT).toContain('printf \'%s\' "$HOOK_INPUT" | jq -Rsc');
+    expect(EVERMORE_AGENT_STATUS_HELPER_SCRIPT).not.toContain('--arg title');
+    expect(EVERMORE_AGENT_STATUS_HELPER_SCRIPT).toContain('printf \'%s\' "$HOOK_INPUT" | jq -Rsr');
     expect(EVERMORE_AGENT_STATUS_HELPER_SCRIPT).toContain('printf \'%s\' "$PAYLOAD" | jq -Rsc');
   });
 
@@ -67,11 +87,14 @@ describe('AI integration snippets', () => {
     expect(EVERMORE_AGENT_STATUS_HELPER_SCRIPT).toContain('build_minimal_payload');
   });
 
-  it('redacts the prompt from debug logs and restricts the log file permissions', () => {
+  it('redacts the prompt and title from debug logs and restricts the log file permissions', () => {
     // Given / When: the helper script text is inspected.
-    // Then: debug logging never writes prompt text, and the log is created owner-only rather than
-    // inheriting the ambient umask under /tmp.
-    expect(EVERMORE_AGENT_STATUS_HELPER_SCRIPT).toContain('.userPrompt = "[redacted]"');
+    // Then: debug logging never writes prompt or title text, and the log is created owner-only
+    // rather than inheriting the ambient umask under /tmp.
+    expect(EVERMORE_AGENT_STATUS_HELPER_SCRIPT).toContain(
+      'if .key == "userPrompt" or .key == "sessionTitle"',
+    );
+    expect(EVERMORE_AGENT_STATUS_HELPER_SCRIPT).toContain('then .value = "[redacted]"');
     expect(EVERMORE_AGENT_STATUS_HELPER_SCRIPT).toContain('chmod 600 "$LOG"');
   });
 

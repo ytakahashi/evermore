@@ -8,6 +8,7 @@ import * as nodePty from 'node-pty';
 import { afterAll, beforeAll, describe, expect, it } from 'vite-plus/test';
 import { EVERMORE_AGENT_STATUS_HELPER_SCRIPT } from '../../src/shared/ai-integration/snippets';
 import {
+  AGENT_SESSION_TITLE_HOOK_MAX_CHARS,
   AGENT_USER_PROMPT_HOOK_MAX_CHARS,
   OSC_777_PAYLOAD_MAX_BYTES,
 } from '../../src/shared/pane-integration-constants';
@@ -77,9 +78,11 @@ describe('Evermore AI integration helper script', () => {
   );
 
   it.skipIf(!hasJq)('returns a terminalSequence response for Claude Code transport', () => {
-    // Given: Claude Code hook stdin includes useful session metadata.
+    // Given: Claude Code hook stdin includes useful session metadata and its transcript path.
+    const transcriptPath = writeTranscript('claude-transport', [aiTitleLine('Transport title')]);
     const hookInput = JSON.stringify({
       session_id: 'session-1',
+      transcript_path: transcriptPath,
       cwd: '/tmp/project',
       tool_name: 'Edit',
     });
@@ -112,6 +115,7 @@ describe('Evermore AI integration helper script', () => {
       sessionId: 'session-1',
       cwd: '/tmp/project',
       toolName: 'Edit',
+      sessionTitle: 'Transport title',
     });
     // UserPromptSubmit never has a machine-generated activity summary yet.
     expect(payload.activityLabel).toBeUndefined();
@@ -121,7 +125,7 @@ describe('Evermore AI integration helper script', () => {
     agentArg: string,
     status: string,
     event: string,
-    hookInput: Record<string, unknown>,
+    hookInput: Record<string, unknown> | string,
   ): Record<string, unknown> {
     return runHelperWithByteLength(agentArg, status, event, hookInput).payload;
   }
@@ -134,11 +138,11 @@ describe('Evermore AI integration helper script', () => {
     agentArg: string,
     status: string,
     event: string,
-    hookInput: Record<string, unknown>,
+    hookInput: Record<string, unknown> | string,
   ): { payload: Record<string, unknown>; byteLength: number } {
     const result = spawnSync(scriptPath, [agentArg, status, event, 'terminalSequence'], {
       encoding: 'utf8',
-      input: JSON.stringify(hookInput),
+      input: typeof hookInput === 'string' ? hookInput : JSON.stringify(hookInput),
     });
     expect(result.status).toBe(0);
     const response = JSON.parse(result.stdout) as { terminalSequence: string };
@@ -497,6 +501,32 @@ describe('Evermore AI integration helper script', () => {
     },
   );
 
+  it.skipIf(!hasJq)('replaces C1 control characters so the OSC sequence is not cut short', () => {
+    // Given: a prompt containing C1 controls, including U+009C (ST), which xterm treats as an OSC
+    // terminator. jq does not escape this range, so it would reach the terminal as-is.
+    const pad = String.fromCharCode(0x80);
+    const csi = String.fromCharCode(0x9b);
+    const st = String.fromCharCode(0x9c);
+    const apc = String.fromCharCode(0x9f);
+
+    // When: the helper builds the terminalSequence response.
+    const result = spawnSync(
+      scriptPath,
+      ['claude', 'running', 'user_prompt_submit', 'terminalSequence'],
+      {
+        encoding: 'utf8',
+        input: JSON.stringify({ prompt: `a${pad}b${csi}c${st}d${apc}e` }),
+      },
+    );
+
+    // Then: each C1 control became a space, and the emitted sequence carries none of them, so ST
+    // never appears before the closing BEL.
+    expect(result.status).toBe(0);
+    const response = JSON.parse(result.stdout) as { terminalSequence: string };
+    expect(parseEvermoreAgentPayload(response.terminalSequence).userPrompt).toBe('a b c d e');
+    expect(response.terminalSequence).not.toMatch(/[\u0080-\u009f]/);
+  });
+
   it.skipIf(!hasJq)(
     'preserves line breaks in the prompt while scrubbing other control bytes',
     () => {
@@ -601,33 +631,268 @@ describe('Evermore AI integration helper script', () => {
     });
   });
 
-  it.skipIf(!hasJq)('redacts the prompt from the debug log and creates it owner-only', () => {
-    // Given: debug logging enabled with a log path that does not exist yet.
-    const logPath = join(testDir, 'debug-redaction.log');
-    rmSync(logPath, { force: true });
-    const secret = 'do not leak this prompt body';
+  /**
+   * Writes a Claude Code transcript fixture made of the given JSONL lines and returns its path.
+   * Lines are passed through verbatim so tests can include deliberately malformed entries.
+   */
+  function writeTranscript(name: string, lines: readonly string[]): string {
+    const transcriptPath = join(testDir, `${name}.jsonl`);
+    writeFileSync(transcriptPath, lines.map((line) => `${line}\n`).join(''));
+    return transcriptPath;
+  }
 
-    // When: a prompt-submitting hook runs with debug logging on.
-    const result = spawnSync(
-      scriptPath,
-      ['claude', 'running', 'user_prompt_submit', 'terminalSequence'],
+  function aiTitleLine(title: string): string {
+    return JSON.stringify({ type: 'ai-title', aiTitle: title, sessionId: 'session-1' });
+  }
+
+  it.skipIf(!hasJq)('sends the last ai-title from the Claude Code transcript', () => {
+    // Given: a transcript where the title was regenerated, with ordinary entries in between.
+    const transcriptPath = writeTranscript('claude-multiple-titles', [
+      aiTitleLine('Initial title'),
+      JSON.stringify({ type: 'user', message: { content: 'hello' } }),
+      aiTitleLine('Refined title'),
+      JSON.stringify({ type: 'assistant', message: { content: 'done' } }),
+    ]);
+
+    // When: any Claude Code hook runs with that transcript_path.
+    const payload = runHelper('claude', 'complete', 'stop', {
+      session_id: 'session-1',
+      transcript_path: transcriptPath,
+    });
+
+    // Then: the most recent title is the one that is sent.
+    expect(payload).toMatchObject({
+      agent: 'claude',
+      status: 'complete',
+      sessionId: 'session-1',
+      sessionTitle: 'Refined title',
+    });
+  });
+
+  it.skipIf(!hasJq)(
+    'falls back to the previous title when the last ai-title line is broken',
+    () => {
+      // Given: a transcript whose later ai-title candidates are truncated, have a non-string
+      // title, or contain a NUL byte that would make grep treat the file as binary.
+      const nul = String.fromCharCode(0);
+      const transcriptPath = writeTranscript('claude-broken-last-title', [
+        aiTitleLine('Valid title'),
+        JSON.stringify({ type: 'ai-title', aiTitle: 42 }),
+        JSON.stringify({ type: 'ai-title', aiTitle: '' }),
+        `{"type":"ai-title","aiTitle":"Corrupt${nul}`,
+        '{"type":"ai-title","aiTitle":"Trunc',
+      ]);
+
+      // When: the helper builds the payload.
+      const payload = runHelper('claude', 'running', 'post_tool_use', {
+        transcript_path: transcriptPath,
+        tool_name: 'Edit',
+      });
+
+      // Then: the last valid title is used rather than dropping the field.
+      expect(payload.sessionTitle).toBe('Valid title');
+      expect(payload.toolName).toBe('Edit');
+    },
+  );
+
+  it.skipIf(!hasJq)('ignores escaped ai-title text inside other transcript entries', () => {
+    // Given: a prompt that mentions the ai-title marker. JSON-escaping keeps it from matching the
+    // literal marker, so this entry must not be mistaken for a title.
+    const transcriptPath = writeTranscript('claude-escaped-marker', [
+      aiTitleLine('Real title'),
+      JSON.stringify({
+        type: 'user',
+        message: { content: '{"type":"ai-title","aiTitle":"Fake"}' },
+      }),
+    ]);
+
+    // When: the helper builds the payload.
+    const payload = runHelper('claude', 'complete', 'stop', { transcript_path: transcriptPath });
+
+    // Then: only the real ai-title line contributes.
+    expect(payload.sessionTitle).toBe('Real title');
+  });
+
+  it.skipIf(!hasJq)(
+    'omits sessionTitle but still reports status when no title is available',
+    () => {
+      // Given: a missing transcript, a transcript without ai-title, one whose candidates are all
+      // broken, a directory in place of a file, and a non-string transcript_path.
+      const noTitlePath = writeTranscript('claude-no-title', [
+        JSON.stringify({ type: 'user', message: { content: 'hello' } }),
+      ]);
+      const allBrokenPath = writeTranscript('claude-all-broken', [
+        '{"type":"ai-title","aiTitle":',
+        JSON.stringify({ type: 'ai-title' }),
+      ]);
+      const inputs: Record<string, unknown>[] = [
+        { transcript_path: join(testDir, 'does-not-exist.jsonl') },
+        { transcript_path: noTitlePath },
+        { transcript_path: allBrokenPath },
+        { transcript_path: testDir },
+        { transcript_path: 42 },
+        {},
+      ];
+
+      for (const input of inputs) {
+        // When: the helper builds the payload.
+        const payload = runHelper('claude', 'complete', 'stop', {
+          session_id: 'session-1',
+          ...input,
+        });
+
+        // Then: the title is omitted and the status fields still arrive.
+        expect(payload.sessionTitle).toBeUndefined();
+        expect(payload).toMatchObject({
+          agent: 'claude',
+          status: 'complete',
+          event: 'stop',
+          sessionId: 'session-1',
+        });
+      }
+    },
+  );
+
+  it.skipIf(!hasJq)('collapses the title onto one line and bounds its length', () => {
+    // Given: titles containing LF, CRLF, a tab, DEL and the C1 control U+009C (ST, which xterm
+    // treats as an OSC terminator), and one far beyond the hook limit.
+    const tab = String.fromCharCode(9);
+    const del = String.fromCharCode(127);
+    const st = String.fromCharCode(0x9c);
+    const multilinePath = writeTranscript('claude-multiline-title', [
+      aiTitleLine(`Fix lint\nand${tab}tests\r\nnow${del}!${st}done`),
+    ]);
+    const longPath = writeTranscript('claude-long-title', [
+      aiTitleLine('\u{1F600}'.repeat(AGENT_SESSION_TITLE_HOOK_MAX_CHARS + 100)),
+    ]);
+
+    // When: the helper builds each payload.
+    const multiline = runHelper('claude', 'complete', 'stop', { transcript_path: multilinePath });
+    const long = runHelper('claude', 'complete', 'stop', { transcript_path: longPath });
+
+    // Then: LF and other C0/C1 control characters become spaces and CR is dropped, and the long
+    // title is cut per code point at the hook limit so Evermore can add the visible ellipsis
+    // itself.
+    expect(multiline.sessionTitle).toBe('Fix lint and tests now ! done');
+    expect(Array.from(long.sessionTitle as string)).toHaveLength(
+      AGENT_SESSION_TITLE_HOOK_MAX_CHARS,
+    );
+    expect(long.sessionTitle).not.toContain('�');
+  });
+
+  it.skipIf(!hasJq)('reads the transcript from pretty-printed hook JSON', () => {
+    // Given: hook stdin spread over several lines, which must not be confused with the title line
+    // that shares stdin with it inside the helper.
+    const transcriptPath = writeTranscript('claude-pretty-input', [aiTitleLine('Pretty title')]);
+    const hookInput = JSON.stringify(
+      { session_id: 'session-1', transcript_path: transcriptPath, prompt: 'line one\nline two' },
+      null,
+      2,
+    );
+
+    // When: the helper builds the payload.
+    const payload = runHelper('claude', 'running', 'user_prompt_submit', hookInput);
+
+    // Then: both the hook fields and the title are intact.
+    expect(payload).toMatchObject({
+      sessionId: 'session-1',
+      sessionTitle: 'Pretty title',
+      userPrompt: 'line one\nline two',
+    });
+  });
+
+  it.skipIf(!hasJq)('reads the Claude Code transcript only for the claude agent', () => {
+    // Given: a transcript with a title, referenced from hooks of the other agents.
+    const transcriptPath = writeTranscript('claude-other-agents', [aiTitleLine('Claude only')]);
+
+    // When / Then: no other agent picks up a title from a Claude Code transcript.
+    for (const agent of ['codex', 'antigravity', 'cursor']) {
+      const payload = runHelper(agent, 'complete', 'stop', {
+        transcript_path: transcriptPath,
+        transcriptPath,
+      });
+      expect(payload.sessionTitle).toBeUndefined();
+      expect(payload.agent).toBe(agent);
+    }
+  });
+
+  it.skipIf(!hasJq)('keeps the title when the prompt is dropped for the byte budget', () => {
+    // Given: a long cwd and session id that leave room for the title but not the prompt.
+    const transcriptPath = writeTranscript('claude-budget-title', [aiTitleLine('Budget title')]);
+    const sessionId = 's'.repeat(1000);
+
+    // When: the helper builds the payload.
+    const { payload, byteLength } = runHelperWithByteLength(
+      'claude',
+      'running',
+      'user_prompt_submit',
       {
-        encoding: 'utf8',
-        env: { ...process.env, EVERMORE_HOOK_DEBUG: '1', EVERMORE_HOOK_LOG: logPath },
-        input: JSON.stringify({ prompt: secret }),
+        session_id: sessionId,
+        transcript_path: transcriptPath,
+        cwd: `/${'x'.repeat(6000)}`,
+        prompt: '\u{1F600}'.repeat(500),
       },
     );
 
-    // Then: the payload still carries the prompt, but the log holds only a placeholder, and the log
-    // file is readable by its owner alone rather than inheriting the /tmp default.
-    expect(result.status).toBe(0);
-    const response = JSON.parse(result.stdout) as { terminalSequence: string };
-    expect(parseEvermoreAgentPayload(response.terminalSequence).userPrompt).toBe(secret);
-    const log = readFileSync(logPath, 'utf8');
-    expect(log).not.toContain(secret);
-    expect(log).toContain('"userPrompt":"[redacted]"');
-    expect(statSync(logPath).mode & 0o777).toBe(0o600);
+    // Then: the prompt is the first field sacrificed while the title survives.
+    expect(byteLength).toBeLessThanOrEqual(OSC_777_PAYLOAD_MAX_BYTES);
+    expect(payload.userPrompt).toBeUndefined();
+    expect(payload).toMatchObject({ sessionId, sessionTitle: 'Budget title' });
   });
+
+  it.skipIf(!hasJq)('drops the title together with everything else in the minimal payload', () => {
+    // Given: a cwd that alone exceeds the byte budget, alongside a readable title.
+    const transcriptPath = writeTranscript('claude-minimal-title', [aiTitleLine('Lost title')]);
+
+    // When: the helper builds the payload.
+    const payload = runHelper('claude', 'running', 'user_prompt_submit', {
+      transcript_path: transcriptPath,
+      cwd: `/${'x'.repeat(9000)}`,
+      prompt: 'short',
+    });
+
+    // Then: the payload collapses to the bare status fields.
+    expect(payload).toEqual({ v: 1, type: 'agent-status', agent: 'claude', status: 'running' });
+  });
+
+  it.skipIf(!hasJq)(
+    'redacts the prompt and title from the debug log and creates it owner-only',
+    () => {
+      // Given: debug logging enabled with a log path that does not exist yet, and a transcript whose
+      // title could reveal what the session is about.
+      const logPath = join(testDir, 'debug-redaction.log');
+      rmSync(logPath, { force: true });
+      const secret = 'do not leak this prompt body';
+      const secretTitle = 'do not leak this session title';
+      const transcriptPath = writeTranscript('claude-debug-title', [aiTitleLine(secretTitle)]);
+
+      // When: a prompt-submitting hook runs with debug logging on.
+      const result = spawnSync(
+        scriptPath,
+        ['claude', 'running', 'user_prompt_submit', 'terminalSequence'],
+        {
+          encoding: 'utf8',
+          env: { ...process.env, EVERMORE_HOOK_DEBUG: '1', EVERMORE_HOOK_LOG: logPath },
+          input: JSON.stringify({ prompt: secret, transcript_path: transcriptPath }),
+        },
+      );
+
+      // Then: the payload still carries the prompt and title, but the log holds only placeholders,
+      // and the log file is readable by its owner alone rather than inheriting the /tmp default.
+      expect(result.status).toBe(0);
+      const response = JSON.parse(result.stdout) as { terminalSequence: string };
+      expect(parseEvermoreAgentPayload(response.terminalSequence)).toMatchObject({
+        userPrompt: secret,
+        sessionTitle: secretTitle,
+      });
+      const log = readFileSync(logPath, 'utf8');
+      expect(log).not.toContain(secret);
+      expect(log).not.toContain(secretTitle);
+      expect(log).toContain('"userPrompt":"[redacted]"');
+      expect(log).toContain('"sessionTitle":"[redacted]"');
+      expect(statSync(logPath).mode & 0o777).toBe(0o600);
+    },
+  );
 
   it.skipIf(!hasJq)('writes a Codex OSC 777 payload through the tty transport', () => {
     // Given: Codex captures hook stdio, while the helper's out-of-band tty destination is injected
