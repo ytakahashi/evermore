@@ -1,6 +1,14 @@
 // @vitest-environment node
 
-import { chmodSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -126,8 +134,9 @@ describe('Evermore AI integration helper script', () => {
     status: string,
     event: string,
     hookInput: Record<string, unknown> | string,
+    env?: NodeJS.ProcessEnv,
   ): Record<string, unknown> {
-    return runHelperWithByteLength(agentArg, status, event, hookInput).payload;
+    return runHelperWithByteLength(agentArg, status, event, hookInput, env).payload;
   }
 
   /**
@@ -139,9 +148,11 @@ describe('Evermore AI integration helper script', () => {
     status: string,
     event: string,
     hookInput: Record<string, unknown> | string,
+    env?: NodeJS.ProcessEnv,
   ): { payload: Record<string, unknown>; byteLength: number } {
     const result = spawnSync(scriptPath, [agentArg, status, event, 'terminalSequence'], {
       encoding: 'utf8',
+      env: { ...process.env, CODEX_HOME: join(testDir, 'missing-codex-home'), ...env },
       input: typeof hookInput === 'string' ? hookInput : JSON.stringify(hookInput),
     });
     expect(result.status).toBe(0);
@@ -801,21 +812,6 @@ describe('Evermore AI integration helper script', () => {
     });
   });
 
-  it.skipIf(!hasJq)('reads the Claude Code transcript only for the claude agent', () => {
-    // Given: a transcript with a title, referenced from hooks of the other agents.
-    const transcriptPath = writeTranscript('claude-other-agents', [aiTitleLine('Claude only')]);
-
-    // When / Then: no other agent picks up a title from a Claude Code transcript.
-    for (const agent of ['codex', 'antigravity', 'cursor']) {
-      const payload = runHelper(agent, 'complete', 'stop', {
-        transcript_path: transcriptPath,
-        transcriptPath,
-      });
-      expect(payload.sessionTitle).toBeUndefined();
-      expect(payload.agent).toBe(agent);
-    }
-  });
-
   it.skipIf(!hasJq)('keeps the title when the prompt is dropped for the byte budget', () => {
     // Given: a long cwd and session id that leave room for the title but not the prompt.
     const transcriptPath = writeTranscript('claude-budget-title', [aiTitleLine('Budget title')]);
@@ -894,23 +890,48 @@ describe('Evermore AI integration helper script', () => {
     },
   );
 
-  it.skipIf(!hasJq)('writes a Codex OSC 777 payload through the tty transport', () => {
+  function writeCodexIndex(codexHome: string, lines: readonly string[]): void {
+    mkdirSync(codexHome, { recursive: true });
+    writeFileSync(join(codexHome, 'session_index.jsonl'), `${lines.join('\n')}\n`);
+  }
+
+  function codexTitleLine(id: string, title: string): string {
+    return JSON.stringify({ id, thread_name: title });
+  }
+
+  it.skipIf(!hasJq)('writes the latest matching Codex title through the tty transport', () => {
     // Given: Codex captures hook stdio, while the helper's out-of-band tty destination is injected
     // as a temporary file because test sandboxes commonly deny writes to the real /dev/tty.
     const ttyCapturePath = join(testDir, 'codex-tty-output');
     writeFileSync(ttyCapturePath, '');
+    const codexHome = join(testDir, 'custom codex home');
+    const home = join(testDir, 'codex-tty-home');
+    const sessionId = 'codex-session';
+    writeCodexIndex(join(home, '.codex'), [codexTitleLine(sessionId, 'Default title')]);
+    writeCodexIndex(codexHome, [
+      codexTitleLine(sessionId, 'Provisional title'),
+      codexTitleLine(sessionId, 'Updated title'),
+      codexTitleLine(`${sessionId}-other`, 'Different session'),
+      JSON.stringify({ id: sessionId, thread_name: 42 }),
+      codexTitleLine(sessionId, ''),
+      'null',
+      '{"id":"codex-session","thread_name":"Trunc',
+    ]);
 
     // When: the Codex hook payload is piped to the helper using tty transport.
     const result = spawnSync(scriptPath, ['codex', 'running', 'post_tool_use', 'tty'], {
       encoding: 'utf8',
       env: {
         ...process.env,
+        HOME: home,
+        CODEX_HOME: codexHome,
         EVERMORE_AGENT_TTY_PATH: ttyCapturePath,
       },
-      input: JSON.stringify({
-        tool_name: 'Bash',
-        tool_input: { command: 'pnpm test' },
-      }),
+      input: JSON.stringify(
+        { session_id: sessionId, tool_name: 'Bash', tool_input: { command: 'pnpm test' } },
+        null,
+        2,
+      ),
     });
 
     // Then: captured stdout stays valid hook JSON and the separate tty destination receives OSC.
@@ -922,7 +943,89 @@ describe('Evermore AI integration helper script', () => {
       event: 'post_tool_use',
       toolName: 'Bash',
       activityLabel: 'Bash: pnpm test',
+      sessionId,
+      sessionTitle: 'Updated title',
     });
+  });
+
+  it.skipIf(!hasJq)('uses the default Codex home when CODEX_HOME is unset or empty', () => {
+    // Given: a default index with a title containing line breaks and an OSC terminator.
+    const home = join(testDir, 'codex-default-home');
+    const st = String.fromCharCode(0x9c);
+    writeCodexIndex(join(home, '.codex'), [
+      codexTitleLine('session-1', `Title\r\nwith${st}breaks`),
+    ]);
+
+    // When / Then: either form of an absent override uses the default index and normalizes its title.
+    for (const codexHome of [undefined, '']) {
+      const payload = runHelper(
+        'codex',
+        'complete',
+        'stop',
+        { session_id: 'session-1' },
+        {
+          HOME: home,
+          CODEX_HOME: codexHome,
+        },
+      );
+      expect(payload.sessionTitle).toBe('Title with breaks');
+    }
+  });
+
+  it.skipIf(!hasJq)('reports Codex status when no title can be looked up', () => {
+    // Given: an index with one named session, entries without valid names, and an unusable index.
+    const codexHome = join(testDir, 'codex-no-title');
+    writeCodexIndex(codexHome, [
+      codexTitleLine('session-1', 'Known title'),
+      codexTitleLine('empty-title', ''),
+      JSON.stringify({ id: 'invalid-title', thread_name: 42 }),
+    ]);
+    const directoryIndex = join(testDir, 'codex-directory-index');
+    mkdirSync(join(directoryIndex, 'session_index.jsonl'), { recursive: true });
+
+    // When / Then: missing or invalid IDs and missing or unusable indexes only omit the title.
+    for (const [home, input] of [
+      [codexHome, {}],
+      [codexHome, { session_id: '' }],
+      [codexHome, { session_id: 42 }],
+      [codexHome, { sessionId: 'session-1' }],
+      [codexHome, { session_id: 'session' }],
+      [codexHome, { session_id: 'empty-title' }],
+      [codexHome, { session_id: 'invalid-title' }],
+      [codexHome, '{"session_id":"session-1"'],
+      [directoryIndex, { session_id: 'session-1' }],
+      [join(testDir, 'missing-codex-home'), { session_id: 'session-1' }],
+    ] as const) {
+      const payload = runHelper('codex', 'complete', 'stop', input, { CODEX_HOME: home });
+      expect(payload).toMatchObject({ agent: 'codex', status: 'complete', event: 'stop' });
+      expect(payload.sessionTitle).toBeUndefined();
+    }
+  });
+
+  it.skipIf(!hasJq)('uses only the title source for the active agent', () => {
+    // Given: the hook references a Claude transcript and an ID with a different Codex title.
+    const sessionId = 'session-1';
+    const transcriptPath = writeTranscript('claude-other-agents', [aiTitleLine('Claude only')]);
+    const codexHome = join(testDir, 'codex-other-agents');
+    writeCodexIndex(codexHome, [codexTitleLine(sessionId, 'Codex only')]);
+
+    // When / Then: each agent reads only its own source, if it supports titles.
+    for (const [agent, title] of [
+      ['claude', 'Claude only'],
+      ['codex', 'Codex only'],
+      ['antigravity', undefined],
+      ['cursor', undefined],
+    ] as const) {
+      const payload = runHelper(
+        agent,
+        'complete',
+        'stop',
+        { session_id: sessionId, transcript_path: transcriptPath, transcriptPath },
+        { CODEX_HOME: codexHome },
+      );
+      expect(payload.agent).toBe(agent);
+      expect(payload.sessionTitle).toBe(title);
+    }
   });
 });
 

@@ -5,6 +5,13 @@ import {
 } from '../pane-integration-constants';
 import { AGENT_PRE_INVOCATION_EVENT, AGENT_USER_PROMPT_SUBMIT_EVENT } from '../pane-runtime-signal';
 
+// Titles must occupy one line before entering the payload builder. Strip CR, replace LF and other
+// C0/C1 controls with spaces, then truncate by code point. xterm treats U+009C as an OSC terminator.
+const SESSION_TITLE_JQ_FILTER = `explode
+        | map(if . == 13 then empty elif . < 32 or (. >= 127 and . <= 159) then 32 else . end)
+        | implode
+        | .[0:$titleMaxChars]`;
+
 /**
  * Shared shell helper for AI agent hook integrations.
  *
@@ -31,9 +38,9 @@ import { AGENT_PRE_INVOCATION_EVENT, AGENT_USER_PROMPT_SUBMIT_EVENT } from '../p
  *    emitting something that will be dropped. The session title survives the first step because
  *    it is short and stays useful across turns.
  *
- * The session title comes from agent-internal storage that has no published format (Claude Code's
- * transcript `ai-title` lines). Any failure to locate or parse it only omits `sessionTitle`; it
- * never stops the status update.
+ * Session titles come from agent-internal storage (Claude Code transcripts or the Codex CLI session
+ * index). Neither format has a published specification, so the helper treats lookup and parse
+ * failures as a missing title and still sends the status update.
  *
  * When this snippet changes, update the AI integration tests so Settings copy blocks and the shell
  * contract stay in sync.
@@ -96,11 +103,7 @@ fi
 # grep compare bytes instead of decoding UTF-8; the marker is ASCII and jq decodes the matched lines
 # itself. This is the dominant cost on large transcripts (about 110 ms instead of 180 ms for 17 MB
 # with macOS grep).
-#
-# The scrub maps every control character, line feeds included, to a space: the title is shown on a
-# single line, and tail -n 1 relies on each title occupying exactly one output line. The C1 range
-# (U+0080-U+009F) is included for the same reason as in scrub_control_chars below: xterm treats
-# U+009C (ST) as an OSC terminator.
+# Normalize before tail so each title occupies exactly one output line.
 read_claude_session_title() {
   TRANSCRIPT_PATH="$(
     printf '%s' "$HOOK_INPUT" | jq -Rsr 'try (fromjson | .transcript_path | strings) catch empty' \\
@@ -117,12 +120,44 @@ read_claude_session_title() {
             and (.aiTitle | length) > 0
           )
         | .aiTitle
-        | explode
-        | map(if . == 13 then empty elif . < 32 or (. >= 127 and . <= 159) then 32 else . end)
-        | implode
-        | .[0:$titleMaxChars]
+        | ${SESSION_TITLE_JQ_FILTER}
       ' 2>/dev/null \\
     | tail -n 1 \\
+    || true
+}
+
+# Codex appends title updates to its shared index. Keep only the last valid title for this hook's
+# exact session ID. The compact lookup object is the first line on stdin, so the hook ID stays out
+# of argv and pretty-printed hook input cannot shift the boundary with the index lines.
+# In 30 runs per configuration on macOS with synthetic indexes, enabling title lookup increased
+# median helper runtime from 11.2 to 16.9 ms for 402 rows (54.6 KB) and from 11.5 to 83.0 ms for
+# 40,200 rows (5.54 MB).
+read_codex_session_title() {
+  CODEX_ROOT="\${CODEX_HOME:-\${HOME:+$HOME/.codex}}"
+  [ -n "$CODEX_ROOT" ] || return 0
+  SESSION_INDEX="$CODEX_ROOT/session_index.jsonl"
+  [ -f "$SESSION_INDEX" ] && [ -r "$SESSION_INDEX" ] || return 0
+
+  LOOKUP="$(
+    printf '%s' "$HOOK_INPUT" | jq -Rsc '
+      try (fromjson | .session_id | select(type == "string" and length > 0) | {session_id: .})
+    ' 2>/dev/null
+  )" || return 0
+  [ -n "$LOOKUP" ] || return 0
+
+  { printf '%s\\n' "$LOOKUP"; cat 2>/dev/null < "$SESSION_INDEX"; } \\
+    | jq -nRr --argjson titleMaxChars "$TITLE_MAX_CHARS" '
+        (input | fromjson | .session_id) as $id
+        | reduce (
+            inputs
+            | (try fromjson catch null)
+            | select(type == "object" and .id == $id)
+            | .thread_name
+            | select(type == "string" and length > 0)
+          ) as $title (null; $title)
+        | strings
+        | ${SESSION_TITLE_JQ_FILTER}
+      ' 2>/dev/null \\
     || true
 }
 
@@ -130,6 +165,7 @@ read_claude_session_title() {
 read_session_title() {
   case "$AGENT" in
     claude) read_claude_session_title ;;
+    codex) read_codex_session_title ;;
     *) ;;
   esac
 }
