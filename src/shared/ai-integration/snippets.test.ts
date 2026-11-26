@@ -73,6 +73,19 @@ describe('AI integration snippets', () => {
     expect(EVERMORE_AGENT_STATUS_HELPER_SCRIPT).toContain('printf \'%s\' "$PAYLOAD" | jq -Rsc');
   });
 
+  it('passes the Codex session lookup and index to jq over stdin', () => {
+    // Given / When: the helper script text is inspected.
+    // Then: the compact lookup and redirected index share stdin, leaving the session ID out of
+    // argv. Behavioral coverage lives in tests/e2e/ai-integration.e2e.test.ts.
+    expect(EVERMORE_AGENT_STATUS_HELPER_SCRIPT).toContain('codex) read_codex_session_title ;;');
+    expect(EVERMORE_AGENT_STATUS_HELPER_SCRIPT).toContain(
+      'printf \'%s\\n\' "$LOOKUP"; cat 2>/dev/null < "$SESSION_INDEX"',
+    );
+    expect(EVERMORE_AGENT_STATUS_HELPER_SCRIPT).toContain(
+      '(input | fromjson | .session_id) as $id',
+    );
+  });
+
   it('degrades an oversized payload instead of letting the parser drop the whole event', () => {
     // Given / When: the helper script text is inspected.
     // Then: it measures the assembled payload and has both degradation steps available, so a status

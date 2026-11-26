@@ -69,6 +69,7 @@ const AGENT_SNIPPETS: readonly [AgentSnippet, ...AgentSnippet[]] = [
       'When Codex asks to trust the configured hooks, approve them so Evermore can receive status updates.',
       'After setup, the sidebar shows Codex as running while a turn is active, awaiting input when approval is needed, and ready when the turn completes.',
       'PostToolUse and PermissionRequest show Codex Bash commands and apply_patch target files in the sidebar label. Other tools fall back to a recognized target field or just the tool name.',
+      'The sidebar and the Agents view show the session title once Codex saves it. If you already installed the helper, save the updated script above to enable titles.',
     ],
     snippet: {
       id: 'codex-cli-hooks',
