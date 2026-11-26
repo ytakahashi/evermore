@@ -1,4 +1,5 @@
 import {
+  AGENT_SESSION_TITLE_HOOK_MAX_CHARS,
   AGENT_USER_PROMPT_HOOK_MAX_CHARS,
   OSC_777_PAYLOAD_MAX_BYTES,
 } from '../pane-integration-constants';
@@ -19,13 +20,20 @@ import { AGENT_PRE_INVOCATION_EVENT, AGENT_USER_PROMPT_SUBMIT_EVENT } from '../p
  *  - **Hook JSON and the assembled payload reach `jq` through stdin, never through `argv`.** Hook
  *    stdin can contain the user's prompt, and therefore credentials, customer data, or unreleased
  *    source. Process arguments are world-readable on a shared host, so nothing derived from hook
- *    input may be passed with `--arg`. The number of `jq` invocations is free to vary; only the
- *    transport into them is fixed.
+ *    input may be passed with `--arg`. The same applies to values read from agent-owned files:
+ *    those files are opened with a `<` redirect and the session title read from them travels to
+ *    `jq` on stdin. The number of `jq` invocations is free to vary; only the transport into them
+ *    is fixed.
  *  - **A status update always reaches Evermore.** `parseEvermoreAgentEvent()` discards an entire
  *    OSC 777 event once its payload exceeds `OSC_777_PAYLOAD_MAX_BYTES`, so an oversized optional
  *    field would take the status indicator down with it. The script measures the assembled payload
  *    and degrades it — first without the prompt, then to the bare status fields — rather than
- *    emitting something that will be dropped.
+ *    emitting something that will be dropped. The session title survives the first step because
+ *    it is short and stays useful across turns.
+ *
+ * The session title comes from agent-internal storage that has no published format (Claude Code's
+ * transcript `ai-title` lines). Any failure to locate or parse it only omits `sessionTitle`; it
+ * never stops the status update.
  *
  * When this snippet changes, update the AI integration tests so Settings copy blocks and the shell
  * contract stay in sync.
@@ -42,6 +50,7 @@ TRANSPORT="\${4:-tty}"
 TTY_DEVICE="\${EVERMORE_AGENT_TTY_PATH:-/dev/tty}"
 PAYLOAD_MAX_BYTES=${OSC_777_PAYLOAD_MAX_BYTES}
 PROMPT_MAX_CHARS=${AGENT_USER_PROMPT_HOOK_MAX_CHARS}
+TITLE_MAX_CHARS=${AGENT_SESSION_TITLE_HOOK_MAX_CHARS}
 
 case "$AGENT" in
   claude|codex|antigravity|cursor) ;;
@@ -77,10 +86,62 @@ if ! command -v jq >/dev/null 2>&1; then
   exit 0
 fi
 
+# Prints the latest Claude Code session title, or nothing. Claude Code appends an ai-title line to
+# the transcript each time it regenerates the title, so the last valid one wins. Every candidate is
+# validated before tail picks one, so a malformed last line falls back to the previous valid title.
+# grep -F only narrows the candidates: string values inside the transcript are JSON-escaped, so a
+# prompt or tool output that mentions "type":"ai-title" never matches literally. -a keeps grep in
+# text mode even when a corrupted line contains a NUL byte; otherwise macOS grep prints only
+# "Binary file ... matches" and every valid title is lost along with the broken one. The C locale lets
+# grep compare bytes instead of decoding UTF-8; the marker is ASCII and jq decodes the matched lines
+# itself. This is the dominant cost on large transcripts (about 110 ms instead of 180 ms for 17 MB
+# with macOS grep).
+#
+# The scrub maps every control character, line feeds included, to a space: the title is shown on a
+# single line, and tail -n 1 relies on each title occupying exactly one output line. The C1 range
+# (U+0080-U+009F) is included for the same reason as in scrub_control_chars below: xterm treats
+# U+009C (ST) as an OSC terminator.
+read_claude_session_title() {
+  TRANSCRIPT_PATH="$(
+    printf '%s' "$HOOK_INPUT" | jq -Rsr 'try (fromjson | .transcript_path | strings) catch empty' \\
+      2>/dev/null || true
+  )"
+  [ -n "$TRANSCRIPT_PATH" ] && [ -f "$TRANSCRIPT_PATH" ] && [ -r "$TRANSCRIPT_PATH" ] || return 0
+  LC_ALL=C grep -aF '"type":"ai-title"' < "$TRANSCRIPT_PATH" 2>/dev/null \\
+    | jq -Rr --argjson titleMaxChars "$TITLE_MAX_CHARS" '
+        (try fromjson catch null)
+        | select(
+            type == "object"
+            and .type == "ai-title"
+            and (.aiTitle | type) == "string"
+            and (.aiTitle | length) > 0
+          )
+        | .aiTitle
+        | explode
+        | map(if . == 13 then empty elif . < 32 or (. >= 127 and . <= 159) then 32 else . end)
+        | implode
+        | .[0:$titleMaxChars]
+      ' 2>/dev/null \\
+    | tail -n 1 \\
+    || true
+}
+
+# Each agent keeps its title in its own storage; agents without a supported source print nothing.
+read_session_title() {
+  case "$AGENT" in
+    claude) read_claude_session_title ;;
+    *) ;;
+  esac
+}
+
+SESSION_TITLE="$(read_session_title || true)"
+
 # $1 is "true" to include the submitted prompt, "false" to leave it out for the first degradation
-# step. Hook JSON arrives on stdin (-Rs reads it as one raw string) so it never appears in argv.
+# step. The session title and hook JSON share stdin (-Rs reads it as one raw string) so neither
+# appears in argv: the first line is the title, which cannot contain a line feed after
+# read_session_title, and everything after it is the hook JSON verbatim.
 build_payload() {
-  printf '%s' "$HOOK_INPUT" | jq -Rsc \\
+  printf '%s\\n%s' "$SESSION_TITLE" "$HOOK_INPUT" | jq -Rsc \\
     --arg agent "$AGENT" \\
     --arg status "$STATUS" \\
     --arg event "$EVENT" \\
@@ -144,6 +205,10 @@ build_payload() {
       # explode/implode is used rather than a regex because it operates on code points directly and
       # does not depend on how the regex engine spells a control-character range.
       #
+      # The C1 range (U+0080-U+009F) is scrubbed for a different reason: jq emits it unescaped, and
+      # xterm treats U+009C (ST) as an OSC terminator, which would end the OSC 777 sequence early and
+      # spill the rest of the JSON into the terminal.
+      #
       # Line feeds are the exception, kept because prompts are routinely written as lists or
       # paragraphs and that structure is worth showing. They cost nothing here: JSON has a short
       # escape for them, so a newline is two bytes rather than six, and the character limit still
@@ -152,7 +217,13 @@ build_payload() {
       # individually and cannot see the pair.
       def scrub_control_chars:
         explode
-        | map(if . == 10 then . elif . == 13 then empty elif . < 32 or . == 127 then 32 else . end)
+        | map(
+            if . == 10 then .
+            elif . == 13 then empty
+            elif . < 32 or (. >= 127 and . <= 159) then 32
+            else .
+            end
+          )
         | implode;
 
       # Restricted to prompt-submitting events on purpose. Reading any "prompt"-shaped key wherever
@@ -182,7 +253,10 @@ build_payload() {
         else null
         end;
 
-      ((try fromjson catch {}) | if type == "object" then . else {} end) as $in
+      split("\\n") as $lines
+      | ($lines[0]) as $session_title
+      | ($lines[1:] | join("\\n"))
+      | ((try fromjson catch {}) | if type == "object" then . else {} end) as $in
       | {
           v: 1,
           type: "agent-status",
@@ -197,6 +271,7 @@ build_payload() {
           ))
         + string_field("toolName"; hook_tool_name($in))
         + string_field("activityLabel"; built_activity_label($in))
+        + string_field("sessionTitle"; $session_title)
         + string_field("userPrompt"; submitted_prompt($in))
     '
 }
@@ -229,7 +304,12 @@ fi
 if [ -n "\${EVERMORE_HOOK_DEBUG:-}" ]; then
   LOG_PAYLOAD="$(
     printf '%s' "$PAYLOAD" \\
-      | jq -c 'if has("userPrompt") then .userPrompt = "[redacted]" else . end' \\
+      | jq -c 'with_entries(
+          if .key == "userPrompt" or .key == "sessionTitle"
+          then .value = "[redacted]"
+          else .
+          end
+        )' \\
       || printf ''
   )"
   log_debug "$AGENT emit $STATUS $LOG_PAYLOAD"

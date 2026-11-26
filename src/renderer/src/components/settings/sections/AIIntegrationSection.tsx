@@ -48,6 +48,7 @@ const AGENT_SNIPPETS: readonly [AgentSnippet, ...AgentSnippet[]] = [
       'Claude Code uses terminalSequence so the hook result asks Claude to emit the OSC sequence.',
       'After setup, the sidebar shows Claude as running while a turn is active, awaiting input when approval is needed, and ready when the turn completes.',
       'PostToolUse and PermissionRequest also show the target file or command in the sidebar label.',
+      'Each hook also reads the latest session title from the transcript Claude Code passes in, so the sidebar and the Agents view show it once Claude has generated one. If you saved the helper before this was added, save it again to pick this up.',
     ],
     snippet: {
       id: 'claude-code-hooks',
