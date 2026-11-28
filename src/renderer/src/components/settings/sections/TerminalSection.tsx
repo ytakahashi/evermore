@@ -1,5 +1,10 @@
+import { useState } from 'react';
 import type { AppSettings, FontWeight } from '../../../../../shared/types';
 import { DEFAULT_APP_SETTINGS } from '../../../../../shared/settings-defaults';
+import {
+  TERMINAL_SCROLLBACK_MAX,
+  TERMINAL_SCROLLBACK_MIN,
+} from '../../../../../shared/terminal-constants';
 import { useSettingsStore } from '../../../stores/settingsStore';
 
 type CursorStyle = AppSettings['terminal']['cursorStyle'];
@@ -53,6 +58,65 @@ function Toggle({ ariaLabel, checked, label, onChange }: ToggleProps): React.JSX
   );
 }
 
+interface ScrollbackInputProps {
+  onCommit: (scrollback: number) => void;
+  value: number;
+}
+
+function isValidScrollback(value: number): boolean {
+  return (
+    Number.isInteger(value) && value >= TERMINAL_SCROLLBACK_MIN && value <= TERMINAL_SCROLLBACK_MAX
+  );
+}
+
+/**
+ * Number input that saves only on blur or Enter. Typing "20000" passes through out-of-range
+ * prefixes such as "2"; a fully controlled input would snap those back to the saved value, and
+ * saving in-range prefixes such as "2000" would persist a value the user never meant to choose.
+ * Invalid drafts revert to the saved value.
+ */
+function ScrollbackInput({ onCommit, value }: ScrollbackInputProps): React.JSX.Element {
+  const [draft, setDraft] = useState<string | null>(null);
+
+  const commitDraft = (input: HTMLInputElement): void => {
+    const next = input.valueAsNumber;
+    if (draft !== null && isValidScrollback(next) && next !== value) {
+      onCommit(next);
+    }
+    setDraft(null);
+  };
+
+  return (
+    <input
+      className="w-28 rounded border border-border bg-raised px-2 py-1 text-sm text-foreground focus:border-brand focus:outline-none"
+      id="terminal-scrollback"
+      max={TERMINAL_SCROLLBACK_MAX}
+      min={TERMINAL_SCROLLBACK_MIN}
+      onBlur={(event) => {
+        commitDraft(event.currentTarget);
+      }}
+      onChange={(event) => {
+        setDraft(event.currentTarget.value);
+      }}
+      onKeyDown={(event) => {
+        if (event.nativeEvent.isComposing) return;
+        if (event.key === 'Enter') {
+          commitDraft(event.currentTarget);
+        } else if (event.key === 'Escape') {
+          // Without a draft, let Esc reach AppShell so it can still dismiss the settings view.
+          if (draft === null) return;
+          event.preventDefault();
+          event.stopPropagation();
+          setDraft(null);
+        }
+      }}
+      step={1}
+      type="number"
+      value={draft ?? String(value)}
+    />
+  );
+}
+
 const CURSOR_STYLE_OPTIONS: ReadonlyArray<{ label: string; preview: string; value: CursorStyle }> =
   [
     { label: 'Block', preview: '█', value: 'block' },
@@ -89,7 +153,7 @@ export function TerminalSection(): React.JSX.Element {
       <header className="mb-2">
         <h2 className="text-base font-semibold">Terminal</h2>
         <p className="mt-1 text-sm text-muted">
-          These preferences apply to existing terminal panes immediately.
+          These preferences apply to existing terminal panes immediately unless noted otherwise.
         </p>
       </header>
 
@@ -170,6 +234,19 @@ export function TerminalSection(): React.JSX.Element {
             </option>
           ))}
         </select>
+      </SettingRow>
+
+      <SettingRow
+        description={`Lines of output each pane keeps for scrolling back (${TERMINAL_SCROLLBACK_MIN.toLocaleString('en-US')}–${TERMINAL_SCROLLBACK_MAX.toLocaleString('en-US')}). Applies to panes opened after the change.`}
+        label="Scrollback lines"
+        labelFor="terminal-scrollback"
+      >
+        <ScrollbackInput
+          onCommit={(scrollback) => {
+            updateTerminalSettings({ scrollback });
+          }}
+          value={terminalSettings.scrollback}
+        />
       </SettingRow>
 
       <SettingRow

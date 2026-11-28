@@ -160,4 +160,98 @@ describe('TerminalSection', () => {
     // Then: the invalid value is rejected.
     expect(useSettingsStore.getState().settings?.terminal.fontSize).toBe(initialFontSize);
   });
+  it('saves a typed scrollback value only when the input is committed', async () => {
+    // Given: the terminal settings section is visible.
+    render(<TerminalSection />);
+    const input = screen.getByLabelText(/scrollback lines/i);
+
+    // When: the user types a new value that passes through shorter in-range prefixes.
+    fireEvent.change(input, { target: { value: '2000' } });
+    fireEvent.change(input, { target: { value: '20000' } });
+
+    // Then: the draft is shown but nothing is saved yet.
+    expect(input).toHaveValue(20_000);
+    expect(useSettingsStore.getState().settings?.terminal.scrollback).toBe(
+      DEFAULT_APP_SETTINGS.terminal.scrollback,
+    );
+
+    // When: the user leaves the input.
+    fireEvent.blur(input);
+
+    // Then: only the final value is saved and persisted.
+    expect(useSettingsStore.getState().settings?.terminal.scrollback).toBe(20_000);
+    await vi.advanceTimersByTimeAsync(350);
+    expect(fixture.api.update).toHaveBeenCalledOnce();
+    expect(fixture.api.update).toHaveBeenCalledWith(
+      expect.objectContaining({ terminal: { scrollback: 20_000 } }),
+    );
+  });
+
+  it('saves a scrollback value when Enter is pressed', () => {
+    // Given: the terminal settings section is visible.
+    render(<TerminalSection />);
+    const input = screen.getByLabelText(/scrollback lines/i);
+
+    // When: the user types a value and presses Enter.
+    fireEvent.change(input, { target: { value: '10000' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+
+    // Then: the value is saved.
+    expect(useSettingsStore.getState().settings?.terminal.scrollback).toBe(10_000);
+  });
+
+  it('discards a scrollback draft on Escape without letting Escape bubble', () => {
+    // Given: the user has typed an unsaved scrollback value.
+    render(<TerminalSection />);
+    const input = screen.getByLabelText(/scrollback lines/i);
+    const onWindowKeyDown = vi.fn();
+    window.addEventListener('keydown', onWindowKeyDown);
+    fireEvent.change(input, { target: { value: '10000' } });
+
+    // When: the user presses Escape and then leaves the input.
+    fireEvent.keyDown(input, { key: 'Escape' });
+    fireEvent.blur(input);
+
+    // Then: the saved value is shown again, nothing is saved, and the view-level Esc handler is
+    // not reached.
+    expect(input).toHaveValue(DEFAULT_APP_SETTINGS.terminal.scrollback);
+    expect(useSettingsStore.getState().settings?.terminal.scrollback).toBe(
+      DEFAULT_APP_SETTINGS.terminal.scrollback,
+    );
+    expect(onWindowKeyDown).not.toHaveBeenCalled();
+    window.removeEventListener('keydown', onWindowKeyDown);
+  });
+
+  it('lets Escape bubble when there is no scrollback draft', () => {
+    // Given: the scrollback input has no unsaved draft.
+    render(<TerminalSection />);
+    const input = screen.getByLabelText(/scrollback lines/i);
+    const onWindowKeyDown = vi.fn();
+    window.addEventListener('keydown', onWindowKeyDown);
+
+    // When: the user presses Escape.
+    fireEvent.keyDown(input, { key: 'Escape' });
+
+    // Then: Escape reaches the view-level handler so it can dismiss the settings view.
+    expect(onWindowKeyDown).toHaveBeenCalledOnce();
+    window.removeEventListener('keydown', onWindowKeyDown);
+  });
+
+  it.each([['500'], ['60000'], ['1500.5'], ['']])(
+    'reverts an invalid scrollback draft (%s) on blur without saving it',
+    (value) => {
+      // Given: the terminal settings section is visible.
+      render(<TerminalSection />);
+      const input = screen.getByLabelText(/scrollback lines/i);
+      const initialScrollback = DEFAULT_APP_SETTINGS.terminal.scrollback;
+
+      // When: the user enters an invalid value and leaves the input.
+      fireEvent.change(input, { target: { value } });
+      fireEvent.blur(input);
+
+      // Then: the saved value is kept and shown again.
+      expect(useSettingsStore.getState().settings?.terminal.scrollback).toBe(initialScrollback);
+      expect(input).toHaveValue(initialScrollback);
+    },
+  );
 });

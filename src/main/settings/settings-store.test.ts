@@ -356,6 +356,62 @@ describe('SettingsStore', () => {
     expect(next.terminal.fontSize).toBe(100);
   });
 
+  it('defaults scrollback to 5000 lines when the persisted file omits it', () => {
+    // Given: a persisted terminal section without a scrollback value.
+    storage.payload = { terminal: { fontSize: 14 } };
+
+    // When: the store reloads from disk.
+    const next = store.reload();
+
+    // Then: the default line count is used.
+    expect(next.terminal.scrollback).toBe(5000);
+  });
+
+  it('clamps persisted scrollback values into the 1000-50000 line range', () => {
+    // Given: a persisted scrollback below the floor.
+    storage.payload = { terminal: { scrollback: 10 } };
+
+    // When: the store reloads from disk.
+    const belowFloor = store.reload();
+
+    // Then: the floor is applied.
+    expect(belowFloor.terminal.scrollback).toBe(1000);
+
+    // Given: a persisted scrollback above the ceiling.
+    storage.payload = { terminal: { scrollback: 1_000_000 } };
+
+    // When: the store reloads from disk.
+    const aboveCeiling = store.reload();
+
+    // Then: the ceiling is applied.
+    expect(aboveCeiling.terminal.scrollback).toBe(50_000);
+  });
+
+  it('rounds fractional scrollback values to whole lines', () => {
+    // Given: a persisted scrollback with a fractional part.
+    storage.payload = { terminal: { scrollback: 7500.6 } };
+
+    // When: the store reloads from disk.
+    const next = store.reload();
+
+    // Then: the value is rounded to an integer line count.
+    expect(next.terminal.scrollback).toBe(7501);
+  });
+
+  it.each([['10000'], [Number.NaN], [Number.POSITIVE_INFINITY], [null]])(
+    'falls back to the default scrollback for a non-finite or non-number value (%s)',
+    (scrollback) => {
+      // Given: a persisted scrollback with an invalid type or value.
+      storage.payload = { terminal: { scrollback } };
+
+      // When: the store reloads from disk.
+      const next = store.reload();
+
+      // Then: the default line count is used.
+      expect(next.terminal.scrollback).toBe(5000);
+    },
+  );
+
   it('normalizes invalid font weight strings to defaults when read from storage', () => {
     // Given: a persisted font weight with an invalid string format.
     storage.payload = { terminal: { fontWeight: '100abc' } };

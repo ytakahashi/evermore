@@ -172,6 +172,12 @@ export function useTerminal(options: UseTerminalOptions): UseTerminalResult {
       fontWeight: initialTerminalSettings.fontWeight,
       fontWeightBold: initialTerminalSettings.fontWeightBold,
       macOptionIsMeta: initialTerminalSettings.macOptionIsMeta,
+      // Read once at creation and never updated on a live xterm: changing `scrollback` makes xterm
+      // resize both buffers in place, which resets any DECSTBM scroll region the running app set
+      // without a SIGWINCH to make the app restore it. New values apply to panes created later.
+      scrollback:
+        useSettingsStore.getState().settings?.terminal.scrollback ??
+        DEFAULT_APP_SETTINGS.terminal.scrollback,
       theme: terminalTheme,
     });
     const fitAddon = new FitAddon();

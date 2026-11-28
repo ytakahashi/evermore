@@ -29,6 +29,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
     fontFamily: "'SF Mono', 'JetBrains Mono', Menlo, Consolas, monospace",
     fontWeight: '400',
     fontWeightBold: '700',
+    scrollback: 5000,
     closePaneOnExit: true,
   },
   paneInfo: {

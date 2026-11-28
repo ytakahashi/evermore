@@ -229,6 +229,11 @@ export interface AppSettings {
     fontWeight: FontWeight;
     fontWeightBold: FontWeight;
     /**
+     * Number of lines each pane keeps in its xterm normal buffer beyond the visible rows. Applied
+     * when a pane's terminal is created; existing panes keep the value they started with.
+     */
+    scrollback: number;
+    /**
      * When true, a pane is automatically removed once its PTY exits (e.g., the shell exits via
      * `exit` or Ctrl-D). If the exiting pane is the last pane in its tab, the tab is closed too,
      * unless it is the only tab in the workspace — in that case the pane stays mounted with the
