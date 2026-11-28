@@ -278,6 +278,7 @@ describe('useTerminal', () => {
       cursorBlink: false,
       cursorStyle: 'underline',
       macOptionIsMeta: false,
+      scrollback: 20_000,
     });
 
     // When: the terminal pane mounts.
@@ -291,6 +292,7 @@ describe('useTerminal', () => {
       cursorBlink: false,
       cursorStyle: 'underline',
       macOptionIsMeta: false,
+      scrollback: 20_000,
     });
   });
 
@@ -361,6 +363,28 @@ describe('useTerminal', () => {
         initialFitCount,
       );
     });
+  });
+
+  it('keeps the creation-time scrollback on an existing xterm instance', async () => {
+    // Given: a terminal pane was created with the default scrollback.
+    render(<TestTerminal />);
+    await waitFor(() => {
+      expect(ptyApi.create).toHaveBeenCalled();
+    });
+    const terminal = xtermMock.terminalInstances[0];
+    expect(terminal?.options.scrollback).toBe(5000);
+
+    // When: the scrollback setting changes while the pane is mounted.
+    setTerminalSettings({ scrollback: 1_000 });
+    // A later live setting change forces a re-render that would apply a scrollback update too.
+    setTerminalSettings({ cursorBlink: false });
+    await waitFor(() => {
+      expect(terminal?.options.cursorBlink).toBe(false);
+    });
+
+    // Then: the live xterm keeps its original scrollback, so running apps keep their scroll
+    // regions.
+    expect(terminal?.options.scrollback).toBe(5000);
   });
 
   it('copies terminal selection to the clipboard only while copy-on-select is enabled', async () => {

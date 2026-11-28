@@ -10,6 +10,7 @@ import { normalizeAbsolutePath } from '../../shared/absolute-path';
 import type { SettingsUpdate } from '../../shared/api-types';
 import { isKeyboardShortcutActionId } from '../../shared/keyboard-shortcuts';
 import { cloneDefaultSettings, DEFAULT_APP_SETTINGS } from '../../shared/settings-defaults';
+import { TERMINAL_SCROLLBACK_MAX, TERMINAL_SCROLLBACK_MIN } from '../../shared/terminal-constants';
 import type { AgentPreset, AppSettings, ConfirmMode, FontWeight } from '../../shared/types';
 import { createSilentLogger, type Logger } from '../logging/logger';
 import type { PersistedSettings, SettingsStorageAdapter, SettingsStoreOptions } from './types';
@@ -304,6 +305,15 @@ function readCurrentSettings(raw: unknown, homeDirectory: string): AppSettings {
     }),
     fontWeight: pickFontWeight(terminalRaw.fontWeight, defaults.terminal.fontWeight),
     fontWeightBold: pickFontWeight(terminalRaw.fontWeightBold, defaults.terminal.fontWeightBold),
+    // Rounded before clamping because xterm treats scrollback as a line count; the range caps
+    // per-pane renderer memory (see TERMINAL_SCROLLBACK_MAX).
+    scrollback: Math.min(
+      TERMINAL_SCROLLBACK_MAX,
+      Math.max(
+        TERMINAL_SCROLLBACK_MIN,
+        Math.round(pickFiniteNumber(terminalRaw.scrollback, defaults.terminal.scrollback)),
+      ),
+    ),
     closePaneOnExit: pickBoolean(terminalRaw.closePaneOnExit, defaults.terminal.closePaneOnExit),
   };
 
